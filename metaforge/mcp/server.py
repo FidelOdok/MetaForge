@@ -785,6 +785,18 @@ class UnifiedMcpServer:
         logger.info("approval_notice_added", session=session, pending=total, new=len(new))
         return sentence, total
 
+    def _prompt_outlives_call(self) -> bool:
+        """Whether a prompt to this connection can stay open after the call.
+
+        An elicitor that knows (the HTTP one) answers per session: only an
+        open ``GET /mcp`` qualifies. One that does not say (stdio) has a
+        single long-lived channel, so it does.
+        """
+        persistent = getattr(self._elicitor, "persistent", None)
+        if callable(persistent):
+            return bool(persistent())
+        return self._elicitor is not None
+
     async def _prompt_unasked(self, session: str, ctx: Any, items: list[dict[str, Any]]) -> None:
         """Put pending approvals this session was never asked about to its person.
 
@@ -803,6 +815,9 @@ class UnifiedMcpServer:
         # A returned question (2026-07-28) cannot outlive its request, and a
         # client that cannot be asked gets the notice alone.
         if current_modern_request() is not None or not self.can_elicit:
+            return
+        # Nowhere for it to wait after this call returns: the notice alone.
+        if not self._prompt_outlives_call():
             return
         from tool_registry.tools.design_flow.approvals import (
             approval_question,
@@ -3241,7 +3256,10 @@ class UnifiedMcpServer:
                     ask,
                     approval_id,
                     wait_seconds=ELICITATION_WAIT_SECONDS,
-                    keep_open=keep_open,
+                    # Only where the prompt can outlive this call; otherwise
+                    # it is withdrawn at the end of the wait, as before, and
+                    # the approval waits on the dashboard.
+                    keep_open=keep_open if self._prompt_outlives_call() else None,
                     # The transport's own bound sits a little past the
                     # prompt's, so the expiry is the server's withdrawal.
                     lifetime_seconds=min(ttl, MAX_PROMPT_SECONDS) + _PROMPT_TRANSPORT_GRACE,

@@ -395,13 +395,22 @@ go with it. The sidecar keeps the `elicitation/create` open and:
 - **drops it without deciding anything** when the client disconnects. The
   approval stays pending for every other surface.
 
-Which channel carries it depends on the client. A client with `GET /mcp` open
-gets the question there, and it simply stays pending. A client with no such
-stream (OpenCode, Claude Code) was asked on the held call's own response
-stream; that stream now stays open after the tool result, with keep-alives,
-until the prompt is answered or withdrawn. A client that stops reading the
-stream once it has its result drops the prompt, which leaves the approval
-exactly where it was before this change: on the dashboard, with the notice.
+Which channel carries it depends on the client. Only a client with `GET /mcp`
+open keeps the prompt after the call: the question goes down that stream and
+simply stays pending there. A client with no such stream is asked on the held
+call's own response stream, and that stream ends with the tool result, as
+Streamable HTTP requires, so the prompt is withdrawn at the end of the 20
+second wait, as before, and the approval waits on the dashboard with the
+notice. (Holding that stream open for the prompt was tried and reverted:
+OpenCode waits for the stream to close before it treats a call as done, so
+every held call hung for the prompt's lifetime.) A client on the 2026-07-28
+revision (Claude Code) is asked inside the result instead and keeps the
+question on screen itself, but it still counts the wait against its own
+tool-call timeout (Claude Code: 120 s).
+
+Automatic prompts for approvals the session has not heard of follow the same
+rule: they are put only to a session with `GET /mcp` open (or a stdio
+client).
 
 The agent can never answer the prompt. Only the person's response to
 `elicitation/create`, or a decision on another human surface, decides it.
