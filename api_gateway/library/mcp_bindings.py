@@ -97,6 +97,22 @@ class LocalMachineLibrary:
 
     # FORGE-451 / FORGE-446: processes and materials.
 
+    async def search(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from api_gateway.library.catalog_routes import get_catalog
+        from api_gateway.library.routes import get_machine_library
+        from twin_core.library.search import search_library
+
+        return search_library(
+            get_catalog(),
+            get_machine_library(),
+            str(arguments.get("q") or ""),
+            kinds=arguments.get("kinds") or None,
+            role=arguments.get("role") or None,
+            region=arguments.get("region") or None,
+            status=arguments.get("status") or None,
+            limit=int(arguments.get("limit") or 50),
+        )
+
     async def list_entries(self, kind: str, family: str | None) -> dict[str, Any]:
         from api_gateway.library.catalog_routes import get_catalog
 

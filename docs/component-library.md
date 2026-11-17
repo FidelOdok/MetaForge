@@ -179,6 +179,27 @@ spelling, which is why qualifiers are never stripped). With `apply=true` it crea
 links components, offers and bureaus. Running it again proposes only what is new. Code:
 `twin_core/library/organisations.py`, `twin_core/library/organisation_migration.py`.
 
+## Searching the library
+
+`GET /v1/library/search?q=...` (and the `library.search` tool) searches every kind at once:
+components (name, MPN, title, maker and every spelling of its organisation, suppliers and
+their SKUs, notes), organisations (title, aliases, roles, country, regions,
+certifications), materials, processes, machines (make, model, name, kind, processes,
+location, and the operator's organisation), appearances and ergonomic limits. Every word of
+`q` must match some field; a word matching a whole field word counts fully, one starting a
+field word 0.7, one inside a field word 0.4, weighted by the field (an identifier such as a
+name, MPN, SKU or alias above a title, a title above a linked name, a linked name above a
+description). Results come best first, each naming the fields that matched, so a person can
+see why it is there; nothing is fuzzy or learned.
+
+`kind` (repeatable) narrows the kinds. `role`, `region` and `status` filter organisations and
+what is linked to one: a component passes when its maker or a seller passes, a machine when
+its operator does (your own in-house machines pass a region or role filter, not a status
+filter), and kinds with no organisation (materials, processes, appearances, limits) drop out
+under any of them. An organisation serving `Global` passes every region. A component whose
+maker is blocked, or whose every seller is blocked, carries `blocked` with the reason. `limit`
+is 50 by default and 200 at most. Code: `twin_core/library/search.py`.
+
 ## Saving and loading the whole library
 
 The catalog and the machine library live in one SQLite file on the

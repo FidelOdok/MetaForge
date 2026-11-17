@@ -246,6 +246,7 @@ TOOL_RULES: dict[str, ToolRule] = {
         "library.list_processes",
         "library.machine_limits",
         "library.process_limits",
+        "library.search",
         "library.standard_part",
         "library.resolve_component_model",
     ),

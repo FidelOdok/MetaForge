@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from api_gateway.library.routes import history_with_authority
@@ -283,6 +283,48 @@ async def update_ergonomic_limit(
 
 
 # -- the whole library as one file (2026-11-12) ------------------------------------------
+
+
+@router.get("/search")
+async def search_library(
+    request: Request,
+    q: str = "",
+    kind: list[str] | None = Query(default=None),  # noqa: B008
+    role: str | None = None,
+    region: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Every library entry matching every word of ``q``, best first (FORGE-895).
+
+    Searches components (name, MPN, title, maker and its aliases, suppliers, SKUs),
+    organisations, materials, processes, machines (and their operators), appearances and
+    ergonomic limits. ``kind`` (repeatable) narrows the kinds; ``role``, ``region`` and
+    ``status`` filter organisations and the components and machines linked to one. Each
+    result names the fields that matched; a component made or sold only by a blocked
+    organisation carries ``blocked``.
+    """
+    from api_gateway.library.routes import get_machine_library
+    from twin_core.library.search import SEARCH_KINDS
+    from twin_core.library.search import search_library as search
+
+    unknown = [k for k in kind or [] if k not in SEARCH_KINDS]
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=f"kind must be among {', '.join(SEARCH_KINDS)}; got {', '.join(unknown)}",
+        )
+    return search(
+        get_catalog(),
+        get_machine_library(),
+        q,
+        kinds=kind or None,
+        role=role or None,
+        region=region or None,
+        status=status or None,
+        limit=limit,
+        viewer=library_tenant(request),
+    )
 
 
 @router.get("/organisations")
