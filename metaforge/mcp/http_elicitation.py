@@ -63,6 +63,7 @@ from mcp_core.elicitation import (
     LateAnswerSink,
     cancelled_notification,
     current_late_answer_sink,
+    current_prompt_lifetime,
     declares_form_elicitation,
     result_from_payload,
 )
@@ -110,6 +111,11 @@ class SessionChannel:
     #: into a queue nobody reads, which is worse than the dashboard fallback
     #: it displaced. A test caught it.
     stream_open: bool = False
+    #: Questions sent down this stream still waiting for their answer. When
+    #: the stream closes they can no longer be answered, so each is answered
+    #: ``cancel`` there and then: a disconnect drops a prompt, it never
+    #: decides one.
+    pending: set[str] = field(default_factory=set)
 
     @property
     def declared(self) -> bool:
@@ -243,7 +249,31 @@ class ElicitationHub:
             # one that never declared elicitation at all. Eviction bounds the
             # registry instead.
             channel.stream_open = False
+            self._drop_unanswerable(session_id, channel.pending, "session stream closed")
             logger.info("mcp_elicitation_stream_closed", session_id=session_id)
+
+    def _drop_unanswerable(self, session_id: str, pending: set[str], reason: str) -> None:
+        """Answer ``cancel`` to every question in ``pending``: nobody can read it now.
+
+        Cancel is nobody's decision. A durable hold asked this way stays
+        pending for every other surface, and so does any other approval.
+        """
+        for message_id in list(pending):
+            future = self._pending.pop(message_id, None)
+            if future is not None and not future.done():
+                error = {"code": -32000, "message": reason}
+                future.set_result({"jsonrpc": "2.0", "id": message_id, "error": error})
+                logger.warning(
+                    "mcp_elicitation_dropped_unanswered",
+                    session_id=session_id,
+                    message_id=message_id,
+                    reason=reason,
+                )
+            self._late_sinks.pop(message_id, None)
+            self._ended[message_id] = reason
+        pending.clear()
+        while len(self._ended) > _MAX_ENDED:
+            self._ended.popitem(last=False)
 
     # -- the call's own stream (FORGE-464) -----------------------------
 
@@ -386,6 +416,8 @@ class ElicitationHub:
         self._pending[message_id] = future
         if call is not None:
             call.pending.add(message_id)
+        elif channel is not None:
+            channel.pending.add(message_id)
         sink = current_late_answer_sink()
         if sink is not None:
             self._late_sinks[message_id] = sink
@@ -402,24 +434,31 @@ class ElicitationHub:
                 }
             )
         )
+        # A prompt kept open past its call waits as long as its approval
+        # lives; any other question keeps this hub's own bound.
+        timeout = current_prompt_lifetime() or self._timeout
         try:
-            payload = await asyncio.wait_for(future, timeout=self._timeout)
+            payload = await asyncio.wait_for(future, timeout=timeout)
         except TimeoutError:
             self._pending.pop(message_id, None)
             logger.warning("mcp_elicitation_timeout", message_id=message_id)
             self._withdraw(session_id, message_id, call, "approval request timed out")
             return ElicitResult(ElicitAction.CANCEL)
-        except asyncio.CancelledError:
-            # The gate's window ended (FORGE-472), or the call itself was
-            # cancelled. Either way the server is no longer waiting, so the
-            # form the client is showing has to come down.
+        except asyncio.CancelledError as exc:
+            # The gate's window ended (FORGE-472), the approval was decided
+            # elsewhere or expired, or the call itself was cancelled. Either
+            # way the server is no longer waiting, so the form the client is
+            # showing has to come down. A canceller may say why.
             self._pending.pop(message_id, None)
-            self._withdraw(session_id, message_id, call, "approval window ended")
+            reason = str(exc.args[0]) if exc.args and exc.args[0] else "approval window ended"
+            self._withdraw(session_id, message_id, call, reason)
             raise
         finally:
             self._pending.pop(message_id, None)
             if call is not None:
                 call.pending.discard(message_id)
+            elif channel is not None:
+                channel.pending.discard(message_id)
         return result_from_payload(payload)
 
     def _withdraw(

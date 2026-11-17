@@ -394,8 +394,9 @@ inline) is not silent until it ends:
   stdout like any other message.
 * **Durable hold.** With an approval ledger (both the sidecar and the
   in-gateway server have one) a held call is not waited on. The approval is
-  recorded with a lifetime of `METAFORGE_TOOL_APPROVAL_TTL_S` (default 1800),
-  asked in the client's prompt or waited on for 20 seconds, and then the call
+  recorded with a lifetime of `METAFORGE_TOOL_APPROVAL_TTL_S` (default 3600,
+  the maximum), asked in the client's prompt or waited on for 20 seconds, and
+  then the call
   returns a result with `isError: true` and `_meta.approval.held = true`,
   `approval_id`, `expires_at` and
   `next_step: "retry this exact call once it is approved"`. The same session
@@ -419,8 +420,14 @@ inline) is not silent until it ends:
 
 #### Expired inline questions are withdrawn
 
-A durable inline hold asks for up to 20 seconds and states the approval's
-lifetime in the `elicitation/create` message. Without an approval ledger an
+A durable inline hold waits up to 20 seconds for the answer inside the call
+and states the approval's lifetime in the `elicitation/create` message. The
+question is then **not** withdrawn: it stays open until the approval is
+decided on any surface (withdrawn with the reason `approval decided
+elsewhere`) or expires (`approval expired`), at most an hour. Over HTTP a
+call stream carrying such a question stays open after the call's result
+until the question is answered or withdrawn. See
+[The prompt outlives the call](approvals.md#the-prompt-outlives-the-call). Without an approval ledger an
 inline hold uses the same window rule as a dashboard hold:
 `METAFORGE_APPROVAL_HOLD_SECONDS` (default 100) without a progress channel,
 `METAFORGE_APPROVAL_HOLD_PROGRESS_SECONDS` (default 180) with one, in which
@@ -432,7 +439,8 @@ and `accept` approves, `decline` refuses, `cancel` decides nothing. An
 `accept` is an approval whatever its content.
 
 * **Withdrawal.** When the server stops waiting on an `elicitation/create`
-  for any reason (window ended, call cancelled, call stream closed), it
+  for any reason (window ended, approval decided elsewhere or expired, call
+  cancelled, call stream closed), it
   sends `notifications/cancelled` with `params.requestId` set to that
   request's id and a `reason`. Over HTTP it goes on the call's own stream
   while that is open, before the result, else on an open `GET /mcp`; over

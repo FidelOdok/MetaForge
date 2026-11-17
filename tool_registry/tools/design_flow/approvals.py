@@ -27,7 +27,8 @@ from typing import Any
 import structlog
 
 from mcp_core.context import current_context
-from mcp_core.elicitation import ElicitAction, current_elicitor, inline_approver
+from mcp_core.elicitation import ElicitAction, ElicitResult, current_elicitor, inline_approver
+from mcp_core.guardrails import Approver
 from observability.tracing import get_tracer
 from tool_registry.tools.design_flow.gates import (
     DEFAULT_ANSWER_SECONDS,
@@ -39,7 +40,14 @@ from tool_registry.tools.design_flow.gates import (
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("tool_registry.tools.design_flow.approvals")
 
-__all__ = ["ApprovalsLister", "approval_question", "decide_approval", "list_pending"]
+__all__ = [
+    "ApprovalsLister",
+    "approval_question",
+    "decide_approval",
+    "is_promptable",
+    "list_pending",
+    "record_answer",
+]
 
 #: ``(project_id | None) -> [<approval item dict>, ...]``: the pending items,
 #: newest first, scoped to the project when one is given.
@@ -111,8 +119,26 @@ async def list_pending(*, lister: ApprovalsLister, project_id: str | None = None
     }
 
 
-def approval_question(item: dict[str, Any], answer_seconds: float) -> tuple[str, dict[str, Any]]:
-    """The prompt and form for one pending item, offering only what it allows."""
+def is_promptable(item: dict[str, Any]) -> bool:
+    """Whether an item can be put to the person in a prompt at all.
+
+    Pending, decidable now, and allowing at least one decision the prompt
+    knows how to offer.
+    """
+    if item.get("status", "pending") != "pending" or not item.get("decidable"):
+        return False
+    return any(d in _DECISION_WORDS for d in item.get("allowed_decisions") or [])
+
+
+def approval_question(
+    item: dict[str, Any], answer_seconds: float | None
+) -> tuple[str, dict[str, Any]]:
+    """The prompt and form for one pending item, offering only what it allows.
+
+    ``answer_seconds`` is how long the prompt is waited on. ``None`` is a
+    prompt that stays open until the item is decided here or elsewhere, or
+    expires (put to the person by the server itself, unasked).
+    """
     allowed = [d for d in item.get("allowed_decisions") or [] if d in _DECISION_WORDS]
     kind = str(item.get("kind") or "approval").replace("_", " ")
     lines = [f"MetaForge {kind} waiting for you: {item.get('title') or item.get('id')}"]
@@ -130,11 +156,18 @@ def approval_question(item: dict[str, Any], answer_seconds: float) -> tuple[str,
     required = [d for d in item.get("reason_required_for") or [] if d in allowed]
     if required:
         lines += ["", f"{', '.join(required)} need a reason."]
-    lines += [
-        "",
-        f"Answer within {answer_seconds:.0f} seconds; after that it stays pending in "
-        "the MetaForge dashboard.",
-    ]
+    if answer_seconds is None:
+        lines += [
+            "",
+            "This stays open until it is decided, here or in the MetaForge dashboard, "
+            "or expires. Dismissing it leaves it pending.",
+        ]
+    else:
+        lines += [
+            "",
+            f"Answer within {answer_seconds:.0f} seconds; after that it stays pending in "
+            "the MetaForge dashboard.",
+        ]
     properties: dict[str, Any] = {
         "decision": {"type": "string", "title": "Decision", "enum": allowed},
         "reason": {
@@ -199,41 +232,55 @@ async def decide_approval(
             result = await asyncio.wait_for(elicitor(message, schema), timeout=answer)
         except TimeoutError:
             return _open(item, f"Nobody answered in time. {_ASK_ELSEWHERE}")
-        if result.action is not ElicitAction.ACCEPT:
-            return _open(
-                item, f"The person did not answer ({result.action.value}). {_ASK_ELSEWHERE}"
-            )
 
-        decision = str(result.content.get("decision") or "")
-        reason = str(result.content.get("reason") or "").strip()
-        to_phase = str(result.content.get("to_phase") or "")
-        if decision not in (item.get("allowed_decisions") or []):
-            return _open(item, f"'{decision}' is not a decision this item allows.")
-        if decision in (item.get("reason_required_for") or ()) and not reason:
-            return _open(
-                item, f"'{decision}' needs a reason and none was given; it is still pending."
-            )
-        approver = inline_approver()
-        try:
-            decided = await decider(
-                approval_id, decision, reason, to_phase, approver.actor_id, approver.verified
-            )
-        except Exception as exc:  # noqa: BLE001 - the gateway's refusal is the answer
-            logger.warning("approvals_decide_refused", approval_id=approval_id, error=str(exc))
-            return _open(item, f"The gateway refused the decision: {exc}")
-        record = decided.get("decision") or {}
-        logger.info(
-            "approvals_decided_in_chat",
-            approval_id=approval_id,
-            kind=item.get("kind"),
-            decision=decision,
-            decided_by=record.get("approver"),
+        return await record_answer(item, result, decider=decider, approver=inline_approver())
+
+
+async def record_answer(
+    item: dict[str, Any],
+    result: ElicitResult,
+    *,
+    decider: GateDecider,
+    approver: Approver,
+) -> dict[str, Any]:
+    """Record the person's answer to one item's prompt, under the dashboard's rules.
+
+    Shared by ``approvals.decide`` and the prompts the server puts to the
+    person by itself, so both decide exactly alike: only an Accept with a
+    decision the item allows counts, a reason where it is required, and the
+    gateway's ``service.decide`` has the last word (the first decision wins).
+    Anything else leaves the item pending.
+    """
+    approval_id = str(item.get("id"))
+    if result.action is not ElicitAction.ACCEPT:
+        return _open(item, f"The person did not answer ({result.action.value}). {_ASK_ELSEWHERE}")
+    decision = str(result.content.get("decision") or "")
+    reason = str(result.content.get("reason") or "").strip()
+    to_phase = str(result.content.get("to_phase") or "")
+    if decision not in (item.get("allowed_decisions") or []):
+        return _open(item, f"'{decision}' is not a decision this item allows.")
+    if decision in (item.get("reason_required_for") or ()) and not reason:
+        return _open(item, f"'{decision}' needs a reason and none was given; it is still pending.")
+    try:
+        decided = await decider(
+            approval_id, decision, reason, to_phase, approver.actor_id, approver.verified
         )
-        return {
-            "status": "decided",
-            "approval_id": approval_id,
-            "kind": item.get("kind"),
-            "decision": decision,
-            "decided_by": record.get("approver") or approver.actor_id,
-            "message": f"The person chose '{decision}'.",
-        }
+    except Exception as exc:  # noqa: BLE001 - the gateway's refusal is the answer
+        logger.warning("approvals_decide_refused", approval_id=approval_id, error=str(exc))
+        return _open(item, f"The gateway refused the decision: {exc}")
+    record = decided.get("decision") or {}
+    logger.info(
+        "approvals_decided_in_chat",
+        approval_id=approval_id,
+        kind=item.get("kind"),
+        decision=decision,
+        decided_by=record.get("approver"),
+    )
+    return {
+        "status": "decided",
+        "approval_id": approval_id,
+        "kind": item.get("kind"),
+        "decision": decision,
+        "decided_by": record.get("approver") or approver.actor_id,
+        "message": f"The person chose '{decision}'.",
+    }

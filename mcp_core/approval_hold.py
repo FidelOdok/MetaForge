@@ -164,12 +164,15 @@ def progress_notification(
 # that outlives the call: the call returns at once, and the identical retry
 # (same session, tool, arguments and project) runs once the record is approved.
 
-#: How long a durable approval stays usable, pending or approved and unused.
+#: How long a durable approval stays usable, pending or approved and unused:
+#: an hour by default, which is also the cap. A client prompt kept open for it
+#: lives exactly as long.
 ENV_TOOL_APPROVAL_TTL = "METAFORGE_TOOL_APPROVAL_TTL_S"
-DEFAULT_TOOL_APPROVAL_TTL_SECONDS = 1800.0
+DEFAULT_TOOL_APPROVAL_TTL_SECONDS = 3600.0
 #: How long a held call still waits on the client's own prompt before it
-#: returns. Well inside Claude Code's 120 s tool timeout; an answer after this
-#: still lands on the record.
+#: returns. Well inside Claude Code's 120 s tool timeout. The prompt itself
+#: stays open after this where the client can still be reached, and an answer
+#: to it lands on the record.
 DEFAULT_ELICITATION_WAIT_SECONDS = 20.0
 
 #: Argument names that are not part of what was approved: the transport's

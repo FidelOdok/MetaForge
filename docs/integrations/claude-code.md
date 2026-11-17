@@ -366,6 +366,14 @@ could not be recorded. Nothing runs without an entry on record.
 
 ### When an inline question expires
 
+A held call on the sidecar, which has an approval ledger, is a durable
+approval: the call returns after 20 seconds and **its prompt stays open**
+until the approval is decided anywhere or expires (an hour by default), and
+the sidecar also prompts you about approvals you have not been asked about
+yet. See [The prompt outlives the call](../approvals.md#the-prompt-outlives-the-call)
+and [Any approval in the client chat](../approvals.md#any-approval-in-the-client-chat).
+The rest of this section is the window of a server with no ledger.
+
 The inline prompt follows the same window rule as a dashboard hold (see the
 table below). Claude Code sends no `progressToken`, so the window
 is `METAFORGE_APPROVAL_HOLD_SECONDS` (default 100s), which ends before
