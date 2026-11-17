@@ -132,11 +132,17 @@ def _format_margin_summary(margins: dict[str, dict[str, Any]]) -> str:
     return "; ".join(parts)
 
 
-def make_component_selector(twin: Any, *, decision_recorder: Any, component_recorder: Any) -> Any:
+def make_component_selector(
+    twin: Any, *, decision_recorder: Any, component_recorder: Any, organisations: Any = None
+) -> Any:
     """Return an async ``select(...)`` bound to a twin + the existing
     ``decision_recorder``/``component_recorder`` (the SAME callables
     ``twin.record_decision``/``twin.record_component_selection`` use -- no
-    separate recording path for either)."""
+    separate recording path for either).
+
+    ``organisations`` (optional, see ``api_gateway.library.organisation_lookup``)
+    marks each candidate whose maker the library blocks (FORGE-450), so a
+    blocked vendor is flagged among the candidates, not only once chosen."""
 
     async def select(
         *,
@@ -172,6 +178,14 @@ def make_component_selector(twin: Any, *, decision_recorder: Any, component_reco
                 }
                 for c in candidates
             ]
+            if organisations is not None:
+                for c in scored:
+                    org = await organisations(str(c.get("manufacturer") or ""))
+                    if org:
+                        c["organisation"] = org
+                        if org.get("status") == "blocked":
+                            reason = org["status_reason"]
+                            c["blocked"] = f"maker {org['title']} is blocked: {reason}"
             by_mpn_scored = {c["mpn"]: c for c in scored}
             selected = by_mpn_scored[selected_mpn]
             selected_meets_requirements = all(m["pass"] for m in selected["margins"].values())
@@ -185,7 +199,8 @@ def make_component_selector(twin: Any, *, decision_recorder: Any, component_reco
             alternatives = [
                 {
                     "option": f"{c['mpn']} ({c.get('manufacturer', 'unknown manufacturer')})",
-                    "reason_rejected": _format_margin_summary(c["margins"]),
+                    "reason_rejected": _format_margin_summary(c["margins"])
+                    + (f"; {c['blocked']}" if c.get("blocked") else ""),
                 }
                 for c in scored
                 if c["mpn"] != selected_mpn

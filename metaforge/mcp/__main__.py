@@ -2039,10 +2039,15 @@ async def _bootstrap(
     # though the gateway-hosted API already persists it as a BOMItem.
     component_recorder = None
     try:
+        from api_gateway.library.organisation_lookup import make_organisation_resolver
         from api_gateway.twin.component_recorder import make_component_recorder
 
+        # FORGE-450: the sidecar asks the gateway's library when it has one.
         component_recorder = make_component_recorder(
-            twin, project_backend, catalog_store=component_catalog_store
+            twin,
+            project_backend,
+            catalog_store=component_catalog_store,
+            organisations=make_organisation_resolver(),
         )
     except Exception as exc:  # noqa: BLE001 — degrade; record_component_selection just absent
         logger.warning("mcp_component_recorder_init_failed", error=str(exc))

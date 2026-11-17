@@ -176,7 +176,14 @@ related names it left apart for a person to decide (`Adafruit` and `Adafruit (ma
 `ROHM` the semiconductor maker and `Rohm` the acrylic maker share a key only by accident of
 spelling, which is why qualifiers are never stripped). With `apply=true` it creates them as
 `unreviewed`, with no country guessed, the bureaus' recorded locations in their notes, and
-links components, offers and bureaus. Running it again proposes only what is new. Code:
+links components, offers and bureaus. Running it again proposes only what is new.
+
+Where organisations change what happens: a component selection records the maker's and
+distributor's organisations and flags a blocked one (see the capability matrix), the BOM
+identity uses the maker's canonical name, and the Imagine studio's cost never uses a blocked
+seller's offer and prefers a seller serving the home region (UK, with the home currency GBP)
+or everywhere; a part sold only by blocked sellers is left out of the estimate with a note
+saying why. Code:
 `twin_core/library/organisations.py`, `twin_core/library/organisation_migration.py`.
 
 ## Searching the library

@@ -617,6 +617,19 @@ computed for, with a reason: `no_matching_spec`, `spec_not_numeric`,
 `incompatible_units`, `requirement_not_bound`. Reported rather than
 skipped — "no margin shown" and "no requirement" otherwise look the same.
 
+**Who makes and sells it.** The maker and the distributor are resolved
+through the library's organisations, by any recorded spelling. Their ids are
+recorded with the selection (`manufacturer_org`, `supplier_org` in the BOM
+item's specifications) and returned under `organisations`. The BOM identity
+(`global_asset_id`, `urn:metaforge:bom:<maker>:<mpn>`) uses the maker's
+canonical title, so `TI` and `Texas Instruments` give one identity. A maker
+or distributor the library blocks is returned in `blocked` with the reason;
+like a violated requirement, the part is still recorded and the choice is
+flagged, not refused. `twin.select_component` marks each candidate whose
+maker is blocked, and adds the reason to that alternative's rejection. With
+no organisation for a name, nothing changes. Code:
+`api_gateway/library/organisation_lookup.py`.
+
 This works only because requirements are typed (see [A requirement
 something can check](#a-requirement-something-can-check)); an untyped one
 comes back as `requirement_not_bound`.

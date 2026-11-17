@@ -138,7 +138,7 @@ async def _requirement_margins(
 
 
 def make_component_recorder(
-    twin: Any, project_backend: Any = None, catalog_store: Any = None
+    twin: Any, project_backend: Any = None, catalog_store: Any = None, organisations: Any = None
 ) -> Any:
     """Return an async ``record(...)`` bound to a twin + project backend.
 
@@ -154,6 +154,14 @@ def make_component_recorder(
     search_parametric`` call even though the same data already lives in the
     catalog under the same (mpn, manufacturer). Only fills fields the caller
     left ``None``; an explicit caller-supplied value always wins.
+
+    ``organisations`` (optional, an async name -> organisation summary, see
+    ``api_gateway.library.organisation_lookup``) resolves the maker and the
+    distributor through the library (FORGE-450): their ids are recorded, the
+    BOM identity uses the maker's canonical name so two spellings of one maker
+    give one identity, and a blocked organisation is returned as ``blocked``.
+    The part is still recorded, like a requirement it violates: the choice is
+    flagged, not refused.
     """
 
     async def record(
@@ -264,7 +272,17 @@ def make_component_recorder(
                 specifications["session_id"] = session_id
             specifications["selection"] = selection
 
-            global_asset_id = f"urn:metaforge:bom:{_urn_segment(manufacturer)}:{_urn_segment(mpn)}"
+            maker = seller = None
+            if organisations is not None:
+                maker = await organisations(manufacturer)
+                seller = await organisations(distributor) if distributor else None
+            if maker:
+                specifications["manufacturer_org"] = maker["id"]
+            if seller:
+                specifications["supplier_org"] = seller["id"]
+            # FORGE-450: one maker, one identity, however its name was written.
+            identity = maker["title"] if maker else manufacturer
+            global_asset_id = f"urn:metaforge:bom:{_urn_segment(identity)}:{_urn_segment(mpn)}"
 
             # A price is a snapshot, not a fact -- capture *when* it was
             # taken here, at the moment of recording, rather than trusting
@@ -353,6 +371,24 @@ def make_component_recorder(
                 "project_linked": linked,
                 "bom_work_product_id": bom_wp_id,
             }
+            if maker or seller:
+                result["organisations"] = {
+                    k: v for k, v in (("manufacturer", maker), ("supplier", seller)) if v
+                }
+            blocked = [
+                f"{role} {org['title']} is blocked: {org['status_reason']}"
+                for role, org in (("maker", maker), ("supplier", seller))
+                if org and org.get("status") == "blocked"
+            ]
+            if blocked:
+                result["blocked"] = blocked
+                span.set_attribute("component.blocked", True)
+                logger.warning(
+                    "component_selection_blocked_organisation",
+                    node_id=node_id,
+                    mpn=mpn,
+                    blocked=blocked,
+                )
             await finish_definition_revision(
                 twin, plan, UUID(node_id), name=selection_name, result=result
             )
