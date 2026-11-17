@@ -835,6 +835,19 @@ def chat_max_steps() -> int:
     return _DEFAULT_CHAT_MAX_STEPS
 
 
+#: FORGE-896: an Imagine design turn writes a whole studio config in one call, after reading
+#: the studio playbook (two pages) and what it needs; 24 steps ran out before the write.
+_DEFAULT_IMAGINE_MAX_STEPS = 60
+
+
+def imagine_max_steps() -> int:
+    """Tool-call budget for an Imagine-stage design turn (``METAFORGE_CHAT_IMAGINE_MAX_STEPS``,
+    default 60), never below :func:`chat_max_steps`."""
+    raw = (os.environ.get("METAFORGE_CHAT_IMAGINE_MAX_STEPS") or "").strip()
+    own = int(raw) if raw.isdigit() and int(raw) > 0 else _DEFAULT_IMAGINE_MAX_STEPS
+    return max(own, chat_max_steps())
+
+
 def chat_wall_clock_seconds() -> float | None:
     """Hard wall-clock budget for a chat turn (``METAFORGE_CHAT_WALL_CLOCK_SECONDS``).
 
@@ -2238,6 +2251,8 @@ async def run_chat_turn_streaming(
     ``_build_context``.
     """
     steps = max_steps if max_steps is not None else chat_max_steps()
+    if max_steps is None and create_stage == "imagine":
+        steps = imagine_max_steps()
     store = credentials if credentials is not None else CredentialStore()
     turn_start = time.monotonic()
     wall_clock = wall_clock_seconds if wall_clock_seconds is not None else chat_wall_clock_seconds()
