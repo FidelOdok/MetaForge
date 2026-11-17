@@ -15,6 +15,7 @@ import {
   type MakeRoute,
   type RouteChoice,
 } from '../../api/endpoints/create';
+import { listOrganisations, type LibraryOrganisation } from '../../api/endpoints/library';
 import { useCreationWrite } from '../../hooks/use-creation';
 import { useManufactureRelease } from '../../hooks/use-manufacture';
 import type { TwinNode } from '../../types/twin';
@@ -60,6 +61,11 @@ export function MakePanel({ projectId, view, model, modelRevision }: MakePanelPr
   const { creation } = view;
   const route = creation.route;
   const machines = useQuery({ queryKey: ['library', 'machines', 'instance'], queryFn: listMachineInstances, retry: false });
+  // FORGE-450: the library's fabricators, offered as the manufacturer; a blocked one is never offered.
+  const organisations = useQuery({ queryKey: ['library', 'organisations'], queryFn: listOrganisations, retry: false });
+  const fabricators = (organisations.data ?? []).filter((o) => o.roles.includes('fabricator') && o.status !== 'blocked');
+  const [supplierText, setSupplierText] = useState(route.supplier ?? '');
+  const blockedSupplier = blockedOrganisation(organisations.data ?? [], supplierText);
   const exportFiles = useManufactureRelease();
   const recommendation = recommendProcess(view, model);
 
@@ -168,9 +174,23 @@ export function MakePanel({ projectId, view, model, modelRevision }: MakePanelPr
                 id="cv-supplier"
                 className="cv-input"
                 placeholder="Who will make it (optional)"
+                list="cv-fabricators"
                 defaultValue={route.supplier}
+                onChange={(e) => setSupplierText(e.target.value)}
                 onBlur={(e) => e.target.value !== route.supplier && choose({ supplier: e.target.value })}
               />
+              <datalist id="cv-fabricators" data-testid="cv-fabricators">
+                {fabricators.map((o) => (
+                  <option key={o.id} value={o.title}>
+                    {[o.country, o.regions.join(' ')].filter(Boolean).join(' · ')}
+                  </option>
+                ))}
+              </datalist>
+              {blockedSupplier && (
+                <p className="cv-fineprint cv-warning" role="alert">
+                  {blockedSupplier.title} is blocked in the library: {blockedSupplier.status_reason}.
+                </p>
+              )}
               <p className="cv-fineprint">
                 Quotes and orders go through a manufacturing connector, each with its own approval for sharing files and
                 for spending. Without one, download the files and send them yourself.
@@ -318,5 +338,16 @@ function BuildCard({ projectId, build, version }: { projectId: string; build: Bu
       </div>
       {error && <p className="cv-error">{refusalOf(error)}</p>}
     </article>
+  );
+}
+
+/** The organisation a typed name is, by title or any alias, when the library blocks it. */
+export function blockedOrganisation(orgs: LibraryOrganisation[], text: string): LibraryOrganisation | undefined {
+  const key = text.trim().toLowerCase();
+  if (!key) return undefined;
+  return orgs.find(
+    (o) =>
+      o.status === 'blocked' &&
+      [o.title, o.name, ...o.aliases].some((n) => n.trim().toLowerCase() === key),
   );
 }

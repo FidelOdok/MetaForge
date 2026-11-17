@@ -737,6 +737,9 @@ p.cv-muted {
   font-size: 11px;
   line-height: 1.5;
 }
+.cv-fineprint.cv-warning {
+  color: var(--color-warning, #f59e0b);
+}
 .cv-error {
   margin: 0;
   color: var(--cv-bad);
