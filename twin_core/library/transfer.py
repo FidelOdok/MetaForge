@@ -28,7 +28,8 @@ logger = structlog.get_logger(__name__)
 
 FORMAT = "metaforge-library"
 VERSION = 1
-KINDS = ("process", "material", "component", "appearance", "ergonomic_limit")
+#: Organisations come first so components and machines can point at them as they arrive.
+KINDS = ("organisation", "process", "material", "component", "appearance", "ergonomic_limit")
 #: Fields an entry's register call sets itself, dropped before an import registers it.
 _OWN = ("id", "version", "updated_at", "kind")
 
@@ -90,19 +91,28 @@ def import_library(
     raw_entries = document.get("entries") or {}
     if not isinstance(raw_entries, dict):
         raise ValueError("entries must be an object keyed by kind")
+    #: An exported organisation id -> the id it has in this library (FORGE-450).
+    org_ids: dict[str, str] = {}
     for kind in KINDS:
-        have = {e.name for e in catalog.list(kind)}
+        have = {e.name: e for e in catalog.list(kind)}
         for row in raw_entries.get(kind) or []:
             name = str((row or {}).get("name") or "")
             if name in have:
+                if kind == "organisation" and row.get("id"):
+                    org_ids[str(row["id"])] = have[name].id
                 tally("skipped", kind)
                 continue
+            body = _fresh(row)
+            if kind == "component":
+                body = _remap_orgs(body, org_ids)
             try:
-                catalog.register(kind, _fresh(row), by=by)
+                made = catalog.register(kind, body, by=by)
             except CatalogError as exc:
                 report["failed"].append({"kind": kind, "name": name, "reason": str(exc)})
                 continue
-            have.add(name)
+            if kind == "organisation" and row.get("id"):
+                org_ids[str(row["id"])] = made.id
+            have[name] = made
             tally("added", kind)
 
     rows = [r for r in document.get("machines") or [] if isinstance(r, dict)]
@@ -126,6 +136,8 @@ def import_library(
         body = _fresh(row, keep_kind=True)
         if layer == "instance" and body.get("model_id"):
             body["model_id"] = mapped.get(str(body["model_id"]), body["model_id"])
+        if body.get("operator_org"):
+            body["operator_org"] = org_ids.get(str(body["operator_org"]), "")
         try:
             made = machines.register(body, by=by)
         except MachineLibraryError as exc:
@@ -141,3 +153,27 @@ def import_library(
     logger.info("library_imported", added=report["added"], skipped=report["skipped"],
                 failed=len(report["failed"]), by=by)  # fmt: skip
     return report
+
+
+def _remap_orgs(body: dict[str, Any], org_ids: dict[str, str]) -> dict[str, Any]:
+    """A component's organisation links rewritten to this library's ids.
+
+    A link to an organisation the file did not carry is dropped; the component's text
+    (manufacturer, supplier) still resolves it on registration if this library has one.
+    """
+    body = dict(body)
+    if body.get("manufacturer_org"):
+        body["manufacturer_org"] = org_ids.get(str(body["manufacturer_org"]), "")
+    suppliers = []
+    for row in body.get("suppliers") or []:
+        row = dict(row)
+        if row.get("org"):
+            new = org_ids.get(str(row["org"]))
+            if new:
+                row["org"] = new
+            else:
+                row.pop("org")
+        suppliers.append(row)
+    if suppliers:
+        body["suppliers"] = suppliers
+    return body

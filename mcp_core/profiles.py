@@ -299,6 +299,9 @@ PROFILES: dict[str, frozenset[str]] = {
     # it — margins against a part you cannot buy are not margins.
     "electronics": _BASE
     | {
+        # FORGE-450: who makes and sells a part, by any spelling.
+        "library.list_organisations",
+        "library.get_organisation",
         "component.search_intent",
         "component.search_parametric",
         "constraint.validate",
@@ -414,6 +417,9 @@ PROFILES: dict[str, frozenset[str]] = {
     # write. No CAD authoring: these phases read the design, not change it.
     "manufacturing": _BASE
     | {
+        # FORGE-450: who makes and sells a part, by any spelling.
+        "library.list_organisations",
+        "library.get_organisation",
         "web.search",
         "web.fetch",
         "knowledge.extract",
@@ -903,6 +909,8 @@ CREATE_STAGE_TOOLS: dict[str, frozenset[str]] = {
     # manufacturing context a person states before engineering starts.
     "imagine": _CREATE_READS
     | {
+        # FORGE-450: who makes and sells a part, by any spelling.
+        "library.get_organisation",
         "twin.imagine_put_studio",
         # A change to the studio as a list of edits, not the whole config.
         "twin.imagine_patch_studio",

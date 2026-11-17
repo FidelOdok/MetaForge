@@ -297,6 +297,8 @@ class MachineInstance:
     location: str = ""
     status: str = "available"
     capabilities: dict[str, Capability] = field(default_factory=dict)
+    #: The organisation that runs it (FORGE-450): a service bureau's id, "" for your own.
+    operator_org: str = ""
     #: Steps 3 and 4: how to reach it (``{"type": "octoprint", "base_url": ...,
     #: "credential_env": "NAME"}``). A secret is never stored, only the name of
     #: the environment variable that holds it.
@@ -314,6 +316,7 @@ class MachineInstance:
             "processes": list(self.processes),
             "route": self.route,
             "location": self.location,
+            "operator_org": self.operator_org,
             "status": self.status,
             "capabilities": {k: c.as_dict() for k, c in self.capabilities.items()},
             "connection": dict(self.connection),
@@ -688,6 +691,7 @@ class SqliteMachineLibrary:
                 processes=processes,
                 route=route,
                 location=_text(data.get("location"), "location", required=False),
+                operator_org=_text(data.get("operator_org"), "operator_org", required=False),
                 status=status,
                 capabilities=caps,
                 connection=dict(connection),
@@ -717,7 +721,16 @@ class SqliteMachineLibrary:
             raise MachinePermissionError(
                 f"{machine_id} is shared library data; register your own machine instead"
             )
-        allowed = {"processes", "capabilities", "status", "location", "name", "connection", "route"}
+        allowed = {
+            "processes",
+            "capabilities",
+            "status",
+            "location",
+            "name",
+            "connection",
+            "route",
+            "operator_org",
+        }
         unknown = set(changes) - allowed
         if unknown:
             raise MachineLibraryError(f"cannot change {', '.join(sorted(unknown))}")
@@ -741,11 +754,15 @@ class SqliteMachineLibrary:
                 machine.route = changes["route"]
             if "location" in changes:
                 machine.location = _text(changes["location"], "location", required=False)
+            if "operator_org" in changes:
+                machine.operator_org = _text(
+                    changes["operator_org"], "operator_org", required=False
+                )
             if "name" in changes:
                 machine.name = _text(changes["name"], "name")
             if "connection" in changes:
                 machine.connection = parse_connection(changes["connection"])
-        elif set(changes) & {"status", "route", "location", "name", "connection"}:
+        elif set(changes) & {"status", "route", "location", "name", "connection", "operator_org"}:
             raise MachineLibraryError("a model has no status, route, location, name or connection")
         machine.version += 1
         machine.updated_at = self._clock()

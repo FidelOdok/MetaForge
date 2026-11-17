@@ -145,13 +145,47 @@ there, or the converter is down or refuses the file. Showing a model here does n
 does not accept is still refused by `library.resolve_component_model`, which is the route
 into engineering tools and deliverables.
 
+## Organisations: manufacturers, distributors, fabricators and test labs
+
+A company is recorded once, however it is written. An organisation entry has a title (the
+name it trades as), `roles` (one or more of `manufacturer`, `distributor`, `fabricator`,
+`test_lab`), `aliases` (every other spelling, such as `TI` for Texas Instruments), a
+`status` (`unreviewed`, `approved`, or `blocked` with a `status_reason`), `country` (ISO
+3166 two-letter), the `regions` it serves (UK, EU, Europe, Asia, Americas, Oceania, Africa,
+Global), `website`, `quote_url`, `certifications`, `contacts` (by role: a page or a shared
+address, never a person's own details), `lifecycle_policy` and `connector` (the vendor
+connector that quotes from it, when one exists). Every change is a new version.
+
+Names are matched in one form: lower case, punctuation and a trailing legal form (Inc, Ltd,
+GmbH and the like) removed, so `Texas Instruments Inc.` and `texas instruments` are the same
+key; a short form such as `TI` is an alias. Two organisations may not answer to the same key.
+`GET /v1/library/organisations/resolve?name=...` (and `library.get_organisation`, which
+takes any spelling) returns the organisation a written name refers to.
+
+Other entries point at organisations by id: a component's `manufacturer_org`, the `org` of
+each offer in its `suppliers`, and a service bureau's machine instance `operator_org`. A
+component is linked when it is written and its text resolves, and again when an organisation
+it names is added later; the text fields stay as written. Export and import carry the
+organisations first and rewrite the links to the receiving library's ids.
+
+`POST /v1/library/organisations/migrate` builds organisations from the names the library
+already holds: each component's maker, each offer's supplier, and the company in a bureau
+instance's name (the text before `:`). Without `apply=true` it only reports what it would
+create, merging spellings that match and a short list of well-known short forms, and lists
+related names it left apart for a person to decide (`Adafruit` and `Adafruit (made by ...)`;
+`ROHM` the semiconductor maker and `Rohm` the acrylic maker share a key only by accident of
+spelling, which is why qualifiers are never stripped). With `apply=true` it creates them as
+`unreviewed`, with no country guessed, the bureaus' recorded locations in their notes, and
+links components, offers and bureaus. Running it again proposes only what is new. Code:
+`twin_core/library/organisations.py`, `twin_core/library/organisation_migration.py`.
+
 ## Saving and loading the whole library
 
 The catalog and the machine library live in one SQLite file on the
 gateway's machine (`METAFORGE_MACHINE_LIBRARY_PATH`, default
 `~/.metaforge/machine_library.db`). `GET /v1/library/export` writes every
-current entry of every kind (processes, materials, components, appearances,
-ergonomic limits) and every machine as one JSON document
+current entry of every kind (organisations, processes, materials, components,
+appearances, ergonomic limits) and every machine as one JSON document
 (`format: metaforge-library`, `version: 1`); `?history=true` adds each
 entry's versions. A machine's connection carries only the name of the
 environment variable that holds its credential, so the file holds nothing
