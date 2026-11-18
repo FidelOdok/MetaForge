@@ -17,6 +17,14 @@ import pytest
 from metaforge.mcp import __main__ as entry
 
 
+@pytest.fixture(autouse=True)
+def _no_global_setup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """main() configures logging and installs the gateway's machine view for
+    the whole process; in a test run that would leak into every later test."""
+    monkeypatch.setattr(entry, "_configure_logging_for_transport", lambda transport: None)
+    monkeypatch.setattr(entry, "_install_gateway_machine_view", lambda: None)
+
+
 def test_the_flags_parse() -> None:
     args = entry._parse_args(["--transport", "http", "--reload", "--no-knowledge"])
     assert args.reload is True
