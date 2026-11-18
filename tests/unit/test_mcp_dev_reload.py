@@ -18,6 +18,14 @@ from metaforge.mcp import __main__ as entry
 
 
 @pytest.fixture(autouse=True)
+def _keep_logging_as_it_was(monkeypatch: pytest.MonkeyPatch) -> None:
+    """main() configures structlog for the whole process. Left in place, that broke
+    structlog.testing.capture_logs for every later test in the run
+    (test_native_tools saw no log rows)."""
+    monkeypatch.setattr(entry, "_configure_logging_for_transport", lambda transport: None)
+
+
+@pytest.fixture(autouse=True)
 def _no_global_setup(monkeypatch: pytest.MonkeyPatch) -> None:
     """main() configures logging and installs the gateway's machine view for
     the whole process; in a test run that would leak into every later test."""
