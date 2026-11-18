@@ -71,3 +71,13 @@ def test_every_in_process_adapter_is_listed_or_named_as_not_served() -> None:
     assert ids, "bootstrap.py has no adapter toggles"
     missing = sorted(ids - _sidecar_adapters(_mcp_http_block()) - _NOT_SERVED)
     assert not missing, f"bootstrap builds {missing} but mcp-http does not load them"
+
+
+def test_every_in_process_adapter_is_known_to_the_generic_loop() -> None:
+    """Listing component_finder still put it in bootstrap's ``failed``: the generic
+    loop did not know the id and logged "Unknown adapter ID", although its tools
+    registered."""
+    from tool_registry.bootstrap import _RUNTIME_INJECTED_ADAPTER_IDS
+
+    ids = set(re.findall(r'_is_adapter_enabled\("(\w+)"\)', BOOTSTRAP.read_text("utf-8")))
+    assert not sorted(ids - _RUNTIME_INJECTED_ADAPTER_IDS)
