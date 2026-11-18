@@ -53,3 +53,21 @@ def test_every_cloud_key_has_its_adapter_in_the_list() -> None:
     assert passed == set(_KEYED_ADAPTERS), "mcp-http no longer receives every cloud key"
     missing = sorted({_KEYED_ADAPTERS[k] for k in passed} - _sidecar_adapters(block))
     assert not missing, f"mcp-http receives keys for {missing} but does not load them"
+
+
+# In-process adapters the sidecar does not load today. Serving one is a choice:
+# add it to the --adapters list and remove it here. "session" is gated by
+# --capture-sessions, not by the list.
+_NOT_SERVED = {"session", "optimize", "robot", "packaging", "aircraft"}
+
+BOOTSTRAP = COMPOSE.parent / "tool_registry" / "bootstrap.py"
+
+
+def test_every_in_process_adapter_is_listed_or_named_as_not_served() -> None:
+    """component_finder (component.find) shipped without a compose entry, so the
+    sidecar skipped it and no MCP client could call it while the gateway's tests
+    passed. Every adapter bootstrap can build must be listed or excluded here."""
+    ids = set(re.findall(r'_is_adapter_enabled\("(\w+)"\)', BOOTSTRAP.read_text("utf-8")))
+    assert ids, "bootstrap.py has no adapter toggles"
+    missing = sorted(ids - _sidecar_adapters(_mcp_http_block()) - _NOT_SERVED)
+    assert not missing, f"bootstrap builds {missing} but mcp-http does not load them"
