@@ -73,6 +73,14 @@ services:
   mcp-http:
     environment:
       - WATCHFILES_FORCE_POLLING=true
+      # Restart the sidecar when the mounted source changes, so an edit is
+      # live without recreating the container (python -m metaforge.mcp
+      # --reload). Set to 0 for a production-like sidecar.
+      - METAFORGE_MCP_RELOAD=${METAFORGE_MCP_RELOAD:-1}
+      # The knowledge store (LightRAG) is most of the start-up time, minutes
+      # on a slow disk. Set to 1 when you are not working on knowledge.* tools
+      # and want a reload in seconds.
+      - METAFORGE_MCP_SKIP_KNOWLEDGE=${METAFORGE_MCP_SKIP_KNOWLEDGE:-0}
     volumes:
       - ./api_gateway:/app/api_gateway
       - ./orchestrator:/app/orchestrator
