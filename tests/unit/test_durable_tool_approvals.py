@@ -386,6 +386,81 @@ class TestTheHoldOutlivesTheCall:
 
 
 @pytest.mark.asyncio
+class _NoStreamElicitor:
+    """A client that can be prompted but keeps no stream between calls
+    (opencode): the prompt cannot outlive the call that raised it."""
+
+    def __init__(self, answers: list[ElicitResult | None]) -> None:
+        self.answers = list(answers)
+        self.asked = 0
+
+    def persistent(self) -> bool:
+        return False
+
+    async def __call__(self, message: str, schema: dict[str, Any]) -> ElicitResult:
+        self.asked += 1
+        answer = self.answers.pop(0) if self.answers else None
+        if answer is None:
+            await asyncio.Event().wait()
+        assert answer is not None
+        return answer
+
+
+class TestTheRetryAsksAgain:
+    """opencode's prompt went with the call that raised it, so the identical
+    retry of a still-pending write puts the same approval to the person again."""
+
+    async def test_an_answer_to_the_second_prompt_runs_the_retry(
+        self, gateway: httpx.AsyncClient
+    ) -> None:
+        ran: list[tuple[str, dict[str, Any]]] = []
+        prompts = _NoStreamElicitor([None, ElicitResult(ElicitAction.ACCEPT, {"approve": True})])
+        async with gateway as http:
+            server = await _server(http, ran, elicitor=prompts)
+            approval_id = _held(await _call(server))["approval_id"]
+            again = await _call(server)
+            entries = await _entries(http)
+
+        assert prompts.asked == 2
+        assert _ran_ok(again), again
+        assert [(t, a["obj_id"]) for t, a in ran] == [("twin.commit_geometry", "bracket")]
+        assert [e["id"] for e in entries] == [approval_id]  # never a second approval
+
+    async def test_unanswered_again_it_is_still_the_same_hold(
+        self, gateway: httpx.AsyncClient
+    ) -> None:
+        ran: list[tuple[str, dict[str, Any]]] = []
+        prompts = _NoStreamElicitor([None, None])
+        async with gateway as http:
+            server = await _server(http, ran, elicitor=prompts)
+            first = _held(await _call(server))["approval_id"]
+            second = _held(await _call(server))["approval_id"]
+            entries = await _entries(http)
+
+        assert prompts.asked == 2
+        assert first == second and [e["id"] for e in entries] == [first]
+        assert ran == []
+
+    async def test_a_client_whose_prompt_stays_open_is_not_asked_twice(
+        self, gateway: httpx.AsyncClient
+    ) -> None:
+        ran: list[tuple[str, dict[str, Any]]] = []
+        asked: list[str] = []
+
+        async def kept_open(message: str, schema: dict[str, Any]) -> ElicitResult:
+            asked.append(message)
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+        async with gateway as http:
+            server = await _server(http, ran, elicitor=kept_open)
+            _held(await _call(server))
+            response = await _call(server)
+
+        assert len(asked) == 1
+        assert response["result"]["_meta"]["approval"]["repeated"] is True
+
+
 class TestDecideFromAnywhere:
     async def test_the_approvals_page_decides_an_inline_hold_and_first_wins(
         self, gateway: httpx.AsyncClient

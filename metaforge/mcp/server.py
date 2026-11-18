@@ -3144,6 +3144,7 @@ class UnifiedMcpServer:
                     tool_id, caller, "retry", used, 0.0, found.approval_id, call_id, None, where
                 )
             found = None
+        reask: Any = None
         if found is not None:
             # Still pending: the same approval, never a second one.
             logger.info(
@@ -3153,20 +3154,28 @@ class UnifiedMcpServer:
                 approval_id=found.approval_id,
             )
             self._watch_hold(found.approval_id, tool_id)
-            raise self._held_error(
-                tool_id,
-                found.approval_id,
-                where,
-                approvals_url,
-                found.expires_at,
-                repeated=True,
-                route=route,
-            )
+            if not (route == "elicitation" and not self._prompt_outlives_call()):
+                raise self._held_error(
+                    tool_id,
+                    found.approval_id,
+                    where,
+                    approvals_url,
+                    found.expires_at,
+                    repeated=True,
+                    route=route,
+                )
+            # A client that can be prompted but keeps no stream between calls
+            # (opencode) lost the prompt when the first call returned. The
+            # identical retry puts the same approval to the person again for
+            # the same short wait; it never opens a second one.
+            reask = found
 
         note: str | None = None
         policy_approval = getattr(ledger, "policy_approval", None)
-        if policy_approval is not None and (
-            tool_id in POLICY_APPROVABLE_TOOLS or not never_auto_approved(tool_id)
+        if (
+            reask is None
+            and policy_approval is not None
+            and (tool_id in POLICY_APPROVABLE_TOOLS or not never_auto_approved(tool_id))
         ):
             by_policy = await policy_approval(
                 ApprovalAsk(
@@ -3209,8 +3218,13 @@ class UnifiedMcpServer:
             approval_key=key,
             arguments_hash=args_hash,
         )
-        approval_id = await ledger.open_hold(ask, route=route)
-        expires_at = time.time() + ttl
+        if reask is not None:
+            approval_id = reask.approval_id
+            expires_at = reask.expires_at
+            logger.info("mcp_tool_call_asked_again", tool_id=tool_id, approval_id=approval_id)
+        else:
+            approval_id = await ledger.open_hold(ask, route=route)
+            expires_at = time.time() + ttl
         logger.info(
             "mcp_tool_call_held_for_approval",
             tool_id=tool_id,

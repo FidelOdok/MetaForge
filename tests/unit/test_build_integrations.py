@@ -1371,6 +1371,7 @@ const metaForm = (id, message) => ({
   fields: [{ key: "approve", type: "boolean" }, { key: "note", type: "string" }],
 })
 const ctx = {
+  location: { directory: "/proj" },
   mcp: { transform: async (f) => f(editor) },
   command: { transform: async (f) => f(editor) },
   skill: { transform: async (f) => f(editor) },
@@ -1381,7 +1382,12 @@ const ctx = {
     prompt: async (p) => { prompts.push(p.text) },
     form: {
       // As opencode's plugin client: listed per session, MCP forms are "global".
-      list: async ({ sessionID }) => (sessionID === "global" ? forms : []),
+      // Like opencode: "global" forms are found only when the request names
+      // the project in x-opencode-directory.
+      list: async ({ sessionID }, opts) =>
+        sessionID === "global" && opts?.headers?.["x-opencode-directory"] === "%2Fproj"
+          ? forms
+          : [],
       reply: async (r) => { replies.push(r) },
     },
   },
@@ -1390,8 +1396,6 @@ await mod.default.setup(ctx)
 const tick = () => new Promise((r) => setTimeout(r, 10))
 const run = (name, text) =>
   commands[name].execute({ sessionID: "ses_1", prompt: { text }, delivery: "queue" })
-const created_ = (id, message) =>
-  push({ value: { type: "form.created", data: { form: metaForm(id, message) } }, done: false })
 if (scenario === "waiting") {
   const other = { kind: "mcp-elicitation", server: "else" }
   const elsewhere = { ...metaForm("frm_x", "x"), metadata: other }
@@ -1401,19 +1405,13 @@ if (scenario === "waiting") {
 } else if (scenario === "decline") {
   forms = [metaForm("frm_2", "MetaForge wants to run project.create.")]
   await run("metaforge/decline", "wrong part")
-} else if (scenario === "armed") {
+} else if (scenario === "nothing") {
+  // No form waiting (the call returned): the agent is asked to retry.
+  forms = [metaForm("frm_old", "approval run_old, another call")]
   await run("metaforge/approve", "run_xyz")
-  await tick()
-  // A form about another approval is left alone; the matching one is answered once.
-  created_("frm_a", "approval run_other")
-  await tick()
-  created_("frm_b", "approval run_xyz")
-  await tick()
-  created_("frm_c", "approval run_xyz again")
-  await tick()
 } else if (scenario === "unarmed") {
-  push && created_("frm_u", "approval run_xyz")
-  await tick()
+  forms = [metaForm("frm_u", "approval run_xyz")]
+  await new Promise((r) => setTimeout(r, 1300))
 }
 console.log(JSON.stringify({ replies, prompts }))
 process.exit(0)
@@ -1465,14 +1463,15 @@ class TestOpenCodeApprovalCommands:
         ]
         assert "Do not retry" in result["prompts"][0]
 
-    def test_with_nothing_waiting_it_is_armed_and_answers_the_matching_form_once(
+    def test_with_nothing_waiting_it_asks_for_the_retry_and_answers_nothing(
         self, root: Path, tmp_path: Path
     ) -> None:
-        result = self._run(root, tmp_path, "armed")
-        assert [r["formID"] for r in result["replies"]] == ["frm_b"]
-        assert result["replies"][0]["answer"] == {"approve": True}
-        assert "approvals.decide" in result["prompts"][0]
-        assert "Do not decide it yourself" in result["prompts"][0]
+        result = self._run(root, tmp_path, "nothing")
+        assert result["replies"] == []
+        [prompt] = result["prompts"]
+        assert "identical call again" in prompt
+        assert "/metaforge/approve" in prompt
+        assert "Do not decide it yourself" in prompt
 
     def test_no_form_is_answered_without_a_command(self, root: Path, tmp_path: Path) -> None:
         assert self._run(root, tmp_path, "unarmed")["replies"] == []

@@ -102,11 +102,16 @@ session you are in (reported to opencode). So the plugin adds two commands:
 
 They are answered by the plugin's code, not by the model, and only when you
 type them. A held call's form exists only while the call waits (about 20 s),
-because opencode keeps no stream open between calls. After that the command
-holds your decision for 60 seconds and asks the agent to put the approval to
-you again with `approvals.decide`; the form that call raises is answered
-with your decision, once, and only if it names the approval you gave. You
-can always decide it on the dashboard's Approvals page instead.
+because opencode keeps no stream open between calls:
+
+1. Within those 20 s, `/metaforge/approve` answers the form and the call
+   runs straight away.
+2. Later, `/metaforge/approve` finds no form, so it asks the agent to make
+   the identical call again. The server puts the same approval to you again
+   while that call waits (never a second approval), and you type
+   `/metaforge/approve` once more to answer it.
+
+You can always decide it on the dashboard's Approvals page instead.
 
 ## Tool names
 
