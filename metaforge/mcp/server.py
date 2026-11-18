@@ -779,8 +779,9 @@ class UnifiedMcpServer:
         sentence = (
             f"MetaForge: {total} approval{'s' if total != 1 else ''} waiting for a person "
             f"({len(new)} new: {titles}{more}). Tell the person. They can decide them here with "
-            "/metaforge:approvals (approvals.list, then approvals.decide puts one to them), or "
-            "in the dashboard. You cannot decide them yourself."
+            "/metaforge:approvals in Claude Code (approvals.list, then approvals.decide puts one "
+            "to them), by typing /metaforge/approve or /metaforge/decline in opencode, or in the "
+            "dashboard. You cannot decide them yourself, and never type those commands."
         )
         logger.info("approval_notice_added", session=session, pending=total, new=len(new))
         return sentence, total
@@ -3318,9 +3319,13 @@ class UnifiedMcpServer:
             if approvals_url
             else "the MetaForge dashboard Approvals page"
         )
-        where = f"{page}, or in this client with /metaforge:approvals (approvals.decide)"
+        where = (
+            f"{page}, or in the client: /metaforge:approvals in Claude Code, or "
+            "/metaforge/approve (or /metaforge/decline) typed by the person in opencode, "
+            "which does not show MetaForge's prompt"
+        )
         if route == "elicitation":
-            return f"this client's approval prompt, {where}"
+            return f"this client's approval prompt where it shows one, {where}"
         return where
 
     @staticmethod
