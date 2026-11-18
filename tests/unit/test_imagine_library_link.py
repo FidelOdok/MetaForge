@@ -108,6 +108,9 @@ def test_the_imagine_stage_can_look_up_and_register_a_part() -> None:
     from mcp_core.profiles import CREATE_STAGE_TOOLS, MAX_TOOLS
 
     imagine = CREATE_STAGE_TOOLS["imagine"]
-    for tool in ("library.list_components", "library.get_component", "library.register_component"):
+    # FORGE-899: component.find is the look-up (the library first, then distributors);
+    # listing the whole library paged hundreds of entries through a turn's budget.
+    for tool in ("component.find", "library.get_component", "library.register_component"):
         assert tool in imagine
+    assert "library.list_components" not in imagine
     assert len(imagine) <= MAX_TOOLS

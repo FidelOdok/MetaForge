@@ -917,8 +917,10 @@ CREATE_STAGE_TOOLS: dict[str, frozenset[str]] = {
         # A real part's 3D body and its fidelity, from KiCad's own model or an approximation.
         "twin.imagine_resolve_part",
         # The component library: find a real part chosen before, and register a new one
-        # once so later projects reuse it (2026-11-11).
-        "library.list_components",
+        # once so later projects reuse it (2026-11-11). FORGE-899: component.find searches
+        # the library first, then the distributors, in one call; listing the whole library
+        # (library.list_components) paged hundreds of entries through the turn's budget.
+        "component.find",
         "library.get_component",
         "library.register_component",
         # FORGE-824: a person's steps, refused unless the owner delegates

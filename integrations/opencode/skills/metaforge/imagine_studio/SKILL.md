@@ -178,8 +178,10 @@ write:
   from the entry. Do not read an entry you only link; read one when you need
   something it holds to decide.
 - **Real parts live in the component library.** Before researching a part,
-  look for it with `library.list_components` (family `module`, `battery` or
-  `electronic`) and use what it holds: the entry's specs carry their sources.
+  find it with `component.find` (the library first, then the distributors; see
+  the find-component playbook) and use what the library holds: the entry's specs
+  carry their sources. A part only a distributor has is added once with
+  `component.adopt`, its size and pins read from the datasheet.
   The first time you choose a part the library does not have, register it once
   with `library.register_component`: `family` (`module` for a bought board or
   module, `battery`, `electronic` for a single chip, button or connector),
@@ -841,7 +843,7 @@ When the studio reads `handed_over` and the person asks to proceed:
         download a board, edit the file and send it back with
         `files.request_upload`.
       - **Standard parts in the library.** Look a fastener or other standard
-        part up with `library.standard_part` or `library.list_components`
+        part up with `library.standard_part` or `component.find`
         first; register a missing one with `library.register_component`
         (`origin: standard`, its `standard` and `size`, for example ISO 4762
         M4x35). In a delegated run (rule 2) the registration runs at once

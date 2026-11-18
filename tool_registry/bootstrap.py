@@ -1110,6 +1110,8 @@ async def bootstrap_tool_registry(
                     search_store=component_catalog_store,
                     knowledge_service=knowledge_service,
                     llm=component_intent_llm,
+                    # FORGE-899: intent search reads the library first.
+                    library=machine_library,
                 )
                 await registry.register_adapter(server)
                 registered.append("component")
@@ -1198,6 +1200,8 @@ async def bootstrap_tool_registry(
         # 0-3 distributors ended up available — it borrows these instances
         # (does not own their HTTP/token lifecycle; see OfferResolverServer).
         _available_distributor_adapters: list[DistributorAdapter] = []
+        #: The web search provider, when a key is configured (set by the web block below).
+        _web_search_provider: Any = None
 
         for distributor_id, factory, creds_hint in _DISTRIBUTOR_FACTORIES:
             if not _is_adapter_enabled(distributor_id):
@@ -1292,6 +1296,8 @@ async def bootstrap_tool_registry(
                     from tool_registry.tools.web.brave import BraveSearchProvider
 
                     provider = BraveSearchProvider()
+                # FORGE-899: component.find borrows the same provider.
+                _web_search_provider = provider
                 server = WebMcpServer(provider=provider)
                 await registry.register_adapter(server)
                 registered.append("web")
@@ -1487,6 +1493,37 @@ async def bootstrap_tool_registry(
                 failed.append("library")
         else:
             skipped.append("library")
+
+        # ----- Component finder MCP adapter (FORGE-899) -----
+        # component.find / component.adopt: the library first, then the distributors
+        # configured above (borrowed, like distributors.resolve_offers borrows them).
+        if (
+            machine_library is not None
+            and _is_adapter_enabled("component_finder")
+            and (not adapter_ids or "component_finder" in adapter_ids)
+        ):
+            try:
+                from tool_registry.tools.components.finder import ComponentFinderServer
+
+                await registry.register_adapter(
+                    ComponentFinderServer(
+                        machine_library,
+                        _available_distributor_adapters,
+                        web=_web_search_provider,
+                    )
+                )
+                registered.append("component_finder")
+                logger.info(
+                    "component_finder_mcp_adapter_registered",
+                    distributors=len(_available_distributor_adapters),
+                    web=_web_search_provider is not None,
+                )
+            except Exception as exc:
+                logger.error("component_finder_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("component_finder")
+        else:
+            skipped.append("component_finder")
 
         # ----- Manufacturing cost estimate MCP adapter (FORGE-615) -----
         # Pure arithmetic like power: registers wherever it is asked for.

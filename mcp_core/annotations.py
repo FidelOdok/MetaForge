@@ -206,6 +206,8 @@ READ_ONLY: frozenset[str] = frozenset(
         "library.get_ergonomic_limit",
         # FORGE-895: one search across every library kind.
         "library.search",
+        # FORGE-899: the library first, then the distributors; reads only.
+        "component.find",
         # FORGE-450: organisation reads (any recorded spelling finds one).
         "library.list_organisations",
         "library.get_organisation",
@@ -527,6 +529,8 @@ ADDITIVE: frozenset[str] = frozenset(
         "library.update_ergonomic_limit",
         "library.register_organisation",
         "library.update_organisation",
+        # FORGE-899: a distributor part registered in the library. Held.
+        "component.adopt",
         # Records one evidence entity from the machine's own report.
         "library.record_job_result",
         # FORGE-427: a quote is recorded in the twin; nothing is bought.
@@ -775,6 +779,9 @@ OPEN_WORLD: frozenset[str] = frozenset(
         "component.search_intent",
         "component.search_parametric",
         "distributors.resolve_offers",
+        # FORGE-899: the need, or the order code, goes to each distributor's API.
+        "component.find",
+        "component.adopt",
         # Same tools, also open-world: they reach a third-party API whose
         # answer changes without us.
         "digikey.search",

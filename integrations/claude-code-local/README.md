@@ -47,11 +47,12 @@ Persistent stores (Neo4j, Postgres) are optional — without them the twin is in
 - `/metaforge:approvals`
 - `/metaforge:imagine`
 - `/metaforge:drive`
+- `/metaforge:find-part`
 - `/metaforge:doctor`
 
 ## Skills
 
-52 engineering skills are bundled.
+53 engineering skills are bundled.
 
 ## Writes wait for a human
 
