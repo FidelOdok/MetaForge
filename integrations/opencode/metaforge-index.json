@@ -192,6 +192,12 @@
       "file": "skills/metaforge/design_pcb/SKILL.md"
     },
     {
+      "id": "find-component",
+      "name": "find-component",
+      "description": "Find a real, buyable part for a need (a board, module, chip, sensor, connector, battery or LED), reuse it from the MetaForge library when it is there, and otherwise pick one from the live distributors and add it to the library once, with its datasheet sizes and pins and a dated offer. Use when a design needs a part (\"an ESP32-S3 module\", \"a 12-pixel LED ring\", \"a 24 V BLDC driver for 5 A\"), when a studio part has no real part chosen yet, or when the user asks what part to use.",
+      "file": "skills/metaforge/find-component/SKILL.md"
+    },
+    {
       "id": "find_alternates",
       "name": "find_alternates",
       "description": "Find and rank up to three alternate parts for a BOM part that is risky to source, scoring each candidate on spec compatibility, availability, price and supply-risk reduction, using MetaForge's component search and live distributor data. Use when the user asks for an alternate, substitute, second source, drop-in replacement or cross-reference for a part, or when a part is out of stock, end of life, NRND, single-source or has a long lead time.",

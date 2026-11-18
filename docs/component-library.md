@@ -186,6 +186,38 @@ or everywhere; a part sold only by blocked sellers is left out of the estimate w
 saying why. Code:
 `twin_core/library/organisations.py`, `twin_core/library/organisation_migration.py`.
 
+## Finding a component: the library first, then the distributors
+
+`component.find` takes a need in a few words (a part's job and key limits, or a part
+number) and searches, in one call, the library (with `library.search`) and every configured
+distributor (DigiKey, Mouser, Nexar, Farnell, Arrow). It returns two ranked lists:
+
+- `library`: matching library parts, each with the name to link it by, its maker and order
+  code, and `blocked` when its maker or every seller is blocked;
+- `distributors`: live results, in production first, then in stock, then with a datasheet,
+  each with its order code, maker, description, stock, lead time, datasheet and product page,
+  marked `in_library` when the library already holds that order code, and listing what is
+  still `unknown` (size, pins, price).
+
+`searched` says what was searched and how each distributor answered (how many it found, or
+why it could not: no credentials, a timeout, an error). Nothing found is a normal answer.
+`region` limits library parts to those with a seller serving that region; `distributors:
+false` searches only the library.
+
+`component.adopt` registers a chosen distributor part in the library: its maker, order code,
+title, datasheet and `family`, and the distributor's live price breaks and stock as a dated
+offer (`read_on` today, `via` the distributor's API). Sizes and interfaces go in only when
+the caller passes them with their source, read from the datasheet; nothing is guessed. A part
+the library already holds is refused, with a pointer to the entry. It is a write, held for
+the person's approval like any library registration.
+
+`component.search_intent` also returns `library`: the library's own parts matching the
+need, tried with the whole text and then its longest words alone. The find-component
+playbook (`mcp_core/plugin_skills/find-component`) gives agents the steps: find, prefer the
+library, read the datasheet, adopt once, record the choice. The Imagine stage carries
+`component.find` in place of `library.list_components`, which listed the whole library.
+Code: `tool_registry/tools/components/finder.py`.
+
 ## Searching the library
 
 `GET /v1/library/search?q=...` (and the `library.search` tool) searches every kind at once:

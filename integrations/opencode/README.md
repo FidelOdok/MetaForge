@@ -88,7 +88,7 @@ Subagents (`mode: subagent`), launched by the main agent or by asking for one by
 
 ## Skills
 
-52 skills, in `skills/metaforge/<id>/SKILL.md`. opencode reads `SKILL.md` skills natively, takes the id from the folder name, and lists each to the model by its description; the agent loads one with the `skill` tool, or you can with `@<id>`.
+53 skills, in `skills/metaforge/<id>/SKILL.md`. opencode reads `SKILL.md` skills natively, takes the id from the folder name, and lists each to the model by its description; the agent loads one with the `skill` tool, or you can with `@<id>`.
 
 ## Rules
 
@@ -102,14 +102,14 @@ With opencode **2.2.5** in a scratch home directory, installed with `opencode pl
 
 - `opencode plugin list` shows `metaforge`, and the server's plugin list has it `active`.
 - `mcp list` shows `metaforge  needs authentication`. With a `metaforge` server already in a project's config, that one is used instead.
-- `GET /api/command` lists the 14 `metaforge/<name>` commands, `GET /api/skill` the 52 skills (paths inside the installed package), and `GET /api/agent` the three subagents.
+- `GET /api/command` lists the 14 `metaforge/<name>` commands, `GET /api/skill` the 53 skills (paths inside the installed package), and `GET /api/agent` the three subagents.
 - A new session (`POST /api/session`) carries the `metaforge-rules` instruction entry, and running `metaforge/drive` with an argument admits the command text with the argument after it.
 
 Installed with `install.sh`, once with `--project` and once with `--global`:
 
 - `opencode mcp list` prints `metaforge  needs authentication`: the server is configured, reached the hosted address and got its 401. On a freshly started opencode the first call can print `No MCP servers configured` before the connection starts; run it again.
 - `opencode debug agents` lists the three agents with `mode: subagent`.
-- The server's `GET /api/command` lists all 14 `/metaforge/<name>` commands and `GET /api/skill` all 52 skills (through `opencode api get`).
+- The server's `GET /api/command` lists all 14 `/metaforge/<name>` commands and `GET /api/skill` all 53 skills (through `opencode api get`).
 - The log shows `metaforge-rules.md` loaded from `instructions`, and no warning about any file in this package.
 
 Not verified here: signing in and calling a tool, which needs a MetaForge account. The hosted gateway publishes OAuth metadata with dynamic client registration, which is the path opencode uses for a server that does not offer a client metadata document.

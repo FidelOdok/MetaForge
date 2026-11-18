@@ -66,9 +66,12 @@ class ComponentServer(McpToolServer):
         llm: IntentLLM | None = None,
         subsystem_templates: Mapping[str, SubsystemTemplate] | None = None,
         known_categories: KnownCategories | None = None,
+        library: Any = None,
     ) -> None:
         super().__init__(adapter_id="component", version="0.1.0")
         self._store = search_store
+        #: FORGE-899: the MetaForge library, read before the catalog by search_intent.
+        self._library = library
         self._knowledge_service = knowledge_service
         self._llm = llm
         # MET-436 follow-up: both of these were never actually populated at
@@ -194,7 +197,10 @@ class ComponentServer(McpToolServer):
                     "parametric catalog with a fuzzy-knowledge-search "
                     "fallback, and return results split into buy_complete "
                     "(COTS assemblies) vs. build_from_parts (discrete "
-                    "components) — never merged (MET-436)."
+                    "components) — never merged (MET-436). It also returns "
+                    "`library`: the MetaForge library's own parts matching the "
+                    "need; prefer those, and use component.find for one call "
+                    "over the library and the distributors."
                 ),
                 capability="component_search_intent",
                 input_schema={
@@ -318,7 +324,46 @@ class ComponentServer(McpToolServer):
                 warning_count=len(result.warnings),
                 query_time_ms=result.query_time_ms,
             )
-            return intent_to_dict(result)
+            out = intent_to_dict(result)
+            # FORGE-899: the library's own parts come first; the catalog's are new to it.
+            out["library"] = await self._library_matches(intent_text.strip())
+            span.set_attribute("component.library_count", len(out["library"]))
+            return out
+
+    async def _library_matches(self, text: str) -> list[dict[str, Any]]:
+        if self._library is None:
+            return []
+        try:
+            found = await self._library.search({"q": text, "kinds": ["component"], "limit": 8})
+        except Exception as exc:  # noqa: BLE001 - the catalog result still stands
+            logger.warning("component_search_intent_library_failed", error=str(exc))
+            return []
+        hits = found.get("results") or []
+        if not hits:
+            # Every word must match in a library search; a long sentence rarely does. Try
+            # the longest words alone and keep what any of them finds.
+            words = sorted({w for w in text.split() if len(w) > 3}, key=len, reverse=True)[:4]
+            seen: dict[str, dict[str, Any]] = {}
+            for word in words:
+                try:
+                    more = await self._library.search(
+                        {"q": word, "kinds": ["component"], "limit": 4}
+                    )
+                except Exception:  # noqa: BLE001 - best effort
+                    continue
+                for h in more.get("results") or []:
+                    seen.setdefault(str(h.get("id")), h)
+            hits = list(seen.values())[:8]
+        return [
+            {
+                "name": h.get("name"),
+                "title": h.get("title"),
+                "mpn": h.get("mpn"),
+                "manufacturer": h.get("manufacturer"),
+                **({"blocked": h["blocked"]} if h.get("blocked") else {}),
+            }
+            for h in hits
+        ]
 
 
 def _parse_filters(raw: Any) -> list[ComponentFilter]:
