@@ -151,6 +151,15 @@ Streamable HTTP at `/mcp`:
 | `GET /mcp` with `Mcp-Session-Id` | a long-lived SSE stream the server pushes requests down |
 | `DELETE /mcp` with `Mcp-Session-Id` | ends the session |
 
+An `Mcp-Session-Id` this server process did not issue, typically one from
+before a restart or a deploy, is answered `404` (a JSON-RPC error,
+`-32001`, "initialize again"), on `POST` and on `GET /mcp`. The client then
+initialises again and re-declares what it can do; without that, a client
+carried across a restart was served with nothing known about it and could
+no longer be prompted for approvals. `initialize` itself is always served, and
+a handshake-free (`2026-07-28`) request, which never initialises, is never
+refused for its session.
+
 A `tools/call` that is held for approval can also be answered as
 `text/event-stream` on its own POST. This happens only when
 the session declared form `elicitation` at `initialize` on revision

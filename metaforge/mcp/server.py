@@ -779,8 +779,9 @@ class UnifiedMcpServer:
         sentence = (
             f"MetaForge: {total} approval{'s' if total != 1 else ''} waiting for a person "
             f"({len(new)} new: {titles}{more}). Tell the person. They can decide them here with "
-            "/metaforge:approvals (approvals.list, then approvals.decide puts one to them), or "
-            "in the dashboard. You cannot decide them yourself."
+            "/metaforge:approvals in Claude Code (approvals.list, then approvals.decide puts one "
+            "to them), by typing /metaforge/approve or /metaforge/decline in opencode, or in the "
+            "dashboard. You cannot decide them yourself, and never type those commands."
         )
         logger.info("approval_notice_added", session=session, pending=total, new=len(new))
         return sentence, total
@@ -3143,6 +3144,7 @@ class UnifiedMcpServer:
                     tool_id, caller, "retry", used, 0.0, found.approval_id, call_id, None, where
                 )
             found = None
+        reask: Any = None
         if found is not None:
             # Still pending: the same approval, never a second one.
             logger.info(
@@ -3152,20 +3154,28 @@ class UnifiedMcpServer:
                 approval_id=found.approval_id,
             )
             self._watch_hold(found.approval_id, tool_id)
-            raise self._held_error(
-                tool_id,
-                found.approval_id,
-                where,
-                approvals_url,
-                found.expires_at,
-                repeated=True,
-                route=route,
-            )
+            if not (route == "elicitation" and not self._prompt_outlives_call()):
+                raise self._held_error(
+                    tool_id,
+                    found.approval_id,
+                    where,
+                    approvals_url,
+                    found.expires_at,
+                    repeated=True,
+                    route=route,
+                )
+            # A client that can be prompted but keeps no stream between calls
+            # (opencode) lost the prompt when the first call returned. The
+            # identical retry puts the same approval to the person again for
+            # the same short wait; it never opens a second one.
+            reask = found
 
         note: str | None = None
         policy_approval = getattr(ledger, "policy_approval", None)
-        if policy_approval is not None and (
-            tool_id in POLICY_APPROVABLE_TOOLS or not never_auto_approved(tool_id)
+        if (
+            reask is None
+            and policy_approval is not None
+            and (tool_id in POLICY_APPROVABLE_TOOLS or not never_auto_approved(tool_id))
         ):
             by_policy = await policy_approval(
                 ApprovalAsk(
@@ -3208,8 +3218,13 @@ class UnifiedMcpServer:
             approval_key=key,
             arguments_hash=args_hash,
         )
-        approval_id = await ledger.open_hold(ask, route=route)
-        expires_at = time.time() + ttl
+        if reask is not None:
+            approval_id = reask.approval_id
+            expires_at = reask.expires_at
+            logger.info("mcp_tool_call_asked_again", tool_id=tool_id, approval_id=approval_id)
+        else:
+            approval_id = await ledger.open_hold(ask, route=route)
+            expires_at = time.time() + ttl
         logger.info(
             "mcp_tool_call_held_for_approval",
             tool_id=tool_id,
@@ -3318,9 +3333,13 @@ class UnifiedMcpServer:
             if approvals_url
             else "the MetaForge dashboard Approvals page"
         )
-        where = f"{page}, or in this client with /metaforge:approvals (approvals.decide)"
+        where = (
+            f"{page}, or in the client: /metaforge:approvals in Claude Code, or "
+            "/metaforge/approve (or /metaforge/decline) typed by the person in opencode, "
+            "which does not show MetaForge's prompt"
+        )
         if route == "elicitation":
-            return f"this client's approval prompt, {where}"
+            return f"this client's approval prompt where it shows one, {where}"
         return where
 
     @staticmethod
@@ -4403,6 +4422,7 @@ async def build_unified_server(
     caller: Caller = Caller.UNTRUSTED,
     approval_gate: Any = None,
     approval_ledger: Any = None,
+    reloads: bool = False,
     **collaborators: Any,
 ) -> UnifiedMcpServer:
     """Discover and instantiate every enabled adapter, then wrap.
@@ -4494,6 +4514,7 @@ async def build_unified_server(
     )
     return UnifiedMcpServer(
         adapters=registry.list_adapter_servers(),
+        reloads=reloads,
         session_capture=capture,
         tool_registry=registry,
         profile=profile,

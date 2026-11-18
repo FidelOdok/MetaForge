@@ -43,6 +43,49 @@ export function expand(template, args) {
   return text ? `${template}\n\n${text}` : template
 }
 
+// -- Approvals ----------------------------------------------------------------
+//
+// opencode 2.3 creates every MCP elicitation form in the session "global"
+// instead of the session whose tool call raised it, and its TUI only shows
+// forms for the session you are in, so MetaForge's approval prompts are never
+// seen (reported upstream). /metaforge/approve and /metaforge/decline let the
+// person answer them. Typed by the person, they answer in code: nothing here
+// goes through the model, which cannot decide an approval.
+//
+// A held call's form exists only while the call waits (about 20 s): opencode
+// keeps no stream open between calls. With nothing waiting, the command asks
+// the agent to make the identical call again; the server puts the same
+// approval to the person again while that call waits, and the person types
+// the command once more to answer it.
+
+// MetaForge's own pending forms from a forms list (opencode's API returns
+// either the array or {data: [...]}).
+export function metaforgeForms(listed, server = "metaforge") {
+  const forms = Array.isArray(listed) ? listed : (listed?.data ?? [])
+  return forms.filter(
+    (form) => form?.metadata?.kind === "mcp-elicitation" && form?.metadata?.server === server,
+  )
+}
+
+// The answer for a decision, from the form's own fields: the boolean is the
+// decision, a text field takes the person's note when there is one.
+export function answerFor(form, approve, note) {
+  const answer = {}
+  for (const field of form?.fields ?? []) {
+    if (field?.type === "boolean") answer[field.key] = approve
+    else if (note && (field?.type === "string" || field?.type === "text")) answer[field.key] = note
+  }
+  return answer
+}
+
+// Whether a form is the one the person named: the approval id, or
+// the text the person typed after the command, must appear in its message.
+export function formMatches(form, wanted) {
+  if (!wanted) return true
+  const message = String(form?.metadata?.message ?? "") + " " + String(form?.title ?? "")
+  return message.includes(wanted)
+}
+
 export default {
   id: "metaforge",
   async setup(ctx) {
@@ -98,6 +141,83 @@ export default {
       }
     })
 
+    // /metaforge/approve and /metaforge/decline (see the note on Approvals).
+    const mcpName = "metaforge"
+
+    // opencode files MCP elicitation forms under the session "global"; a
+    // plugin lists them per session (there is no top-level form client).
+    // Requests about the session "global" name the project in this header,
+    // as opencode's own client does; without it the server answers for its
+    // own working directory, where there are no forms.
+    const globalScope = () => ({
+      headers: { "x-opencode-directory": encodeURIComponent(ctx.location?.directory ?? "") },
+    })
+
+    async function pendingForms() {
+      const listed = await Promise.resolve()
+        .then(() => ctx.session.form.list({ sessionID: "global" }, globalScope()))
+        .catch((error) => {
+          console.error("metaforge: could not list forms", error)
+          return []
+        })
+      return metaforgeForms(listed, mcpName)
+    }
+
+    async function answer(form, decision) {
+      await ctx.session.form.reply(
+        {
+          sessionID: form.sessionID,
+          formID: form.id,
+          answer: answerFor(form, decision.approve, decision.note),
+        },
+        form.sessionID === "global" ? globalScope() : undefined,
+      )
+      console.error(`metaforge: ${decision.approve ? "approved" : "declined"} ${form.id}`)
+    }
+
+    function decisionCommand(approve) {
+      return {
+        name: approve ? "metaforge/approve" : "metaforge/decline",
+        description: approve
+          ? "Approve the MetaForge write waiting for you (opencode does not show its prompt)"
+          : "Decline the MetaForge write waiting for you (opencode does not show its prompt)",
+        execute: async ({ sessionID, prompt, delivery }) => {
+          const wanted = (prompt?.text ?? "").trim()
+          const decision = { approve, wanted, note: approve ? "" : wanted }
+          const waiting = (await pendingForms()).filter((form) => formMatches(form, approve ? wanted : ""))
+          const verb = approve ? "approved" : "declined"
+          if (waiting.length > 0) {
+            await answer(waiting[0], decision)
+            await ctx.session.prompt({
+              ...prompt,
+              sessionID,
+              delivery,
+              text:
+                `I ${verb} the MetaForge approval that was waiting. ` +
+                (approve
+                  ? "If that call has not run yet, make the identical call again now; it runs once."
+                  : "Do not retry that call."),
+            })
+            return
+          }
+          await ctx.session.prompt({
+            ...prompt,
+            sessionID,
+            delivery,
+            text:
+              `I want to ${approve ? "approve" : "decline"} the MetaForge call waiting for my approval, ` +
+              "but its prompt is no longer open. Make that identical call again now (same tool, same " +
+              `arguments): it is put to me again while it waits, and I will type /metaforge/${approve ? "approve" : "decline"} ` +
+              "then. Do not decide it yourself, and do not make any other call that writes until it is answered.",
+          })
+        },
+      }
+    }
+    await ctx.command.transform((editor) => {
+      editor.add(decisionCommand(true))
+      editor.add(decisionCommand(false))
+    })
+
     // The working rules, as an instruction entry on every new session.
     const rules = read(INDEX.rules)
     const controller = new AbortController()
@@ -117,6 +237,7 @@ export default {
         if (!controller.signal.aborted) console.error("metaforge: session events stopped", error)
       }
     })()
+
     return () => controller.abort()
   },
 }

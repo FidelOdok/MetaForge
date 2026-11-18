@@ -434,7 +434,13 @@ WORKFLOWS: dict[str, tuple[str, str]] = {
         "user-scope server entry. If any tool name appears more than once in "
         "your own tool list, say so: calls can land on whichever gateway "
         "answers first, so two connections to different gateways will silently "
-        "disagree about the twin. Only you can see this; the server cannot.",
+        "disagree about the twin. Only you can see this; the server cannot.\n\n"
+        "If you are running in Claude Code, also check its MCP tool timeout: "
+        "an approval prompt counts against it, so with the default (120 s) an "
+        "answer given later is lost and the write stays pending. With a shell, "
+        "read `MCP_TOOL_TIMEOUT`; if it is unset or under 600000, tell the "
+        "person to set it in Claude Code's settings (`env`: "
+        '`"MCP_TOOL_TIMEOUT": "3600000"`, one hour) and restart Claude Code.',
     ),
 }
 

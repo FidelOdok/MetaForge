@@ -1329,7 +1329,9 @@ class TestOpenCodePlugin:
         result = json.loads(done.stdout)
         assert result["id"] == "metaforge"
         assert result["mcp"]["metaforge"] == (preset or index["mcp"]["metaforge"])
-        assert sorted(result["commands"]) == sorted(f"metaforge/{n}" for n in WORKFLOWS)
+        assert sorted(result["commands"]) == sorted(
+            [f"metaforge/{n}" for n in WORKFLOWS] + ["metaforge/approve", "metaforge/decline"]
+        )
         assert len(result["skills"]) == len(index["skills"])
         for skill in result["skills"]:
             assert Path(skill["path"]).is_file() and Path(skill["path"]).is_absolute()
@@ -1342,3 +1344,134 @@ class TestOpenCodePlugin:
         assert result["prompt"]["text"].endswith("\n\nrun_42")
         assert result["prompt"]["text"].startswith("Put a design run")
         assert result["cleanup"] == "function"
+
+
+_FAKE_OPENCODE_FORMS = r"""
+// A stand-in opencode for the approval commands: a forms list, a reply log,
+// and a form.created stream the test can push to.
+const [, , moduleUrl, scenario] = process.argv
+const mod = await import(moduleUrl)
+const commands = {}
+const replies = []
+const prompts = []
+let forms = []
+let push = null
+const stream = (next) => ({ [Symbol.asyncIterator]: () => ({ next }) })
+const created = stream(() => new Promise((r) => { push = r }))
+const idle = stream(() => new Promise(() => {}))
+const editor = {
+  get: () => undefined,
+  set: () => {},
+  add: (c) => { commands[c.name] = c },
+  update: () => {},
+}
+const metaForm = (id, message) => ({
+  id, sessionID: "global", title: "metaforge is requesting input",
+  metadata: { kind: "mcp-elicitation", server: "metaforge", message },
+  fields: [{ key: "approve", type: "boolean" }, { key: "note", type: "string" }],
+})
+const ctx = {
+  location: { directory: "/proj" },
+  mcp: { transform: async (f) => f(editor) },
+  command: { transform: async (f) => f(editor) },
+  skill: { transform: async (f) => f(editor) },
+  agent: { transform: async (f) => f(editor) },
+  event: { subscribe: ({ types }) => (types.includes("form.created") ? created : idle) },
+  session: {
+    instructions: { entry: { put: async () => {} } },
+    prompt: async (p) => { prompts.push(p.text) },
+    form: {
+      // As opencode's plugin client: listed per session, MCP forms are "global".
+      // Like opencode: "global" forms are found only when the request names
+      // the project in x-opencode-directory.
+      list: async ({ sessionID }, opts) =>
+        sessionID === "global" && opts?.headers?.["x-opencode-directory"] === "%2Fproj"
+          ? forms
+          : [],
+      reply: async (r) => { replies.push(r) },
+    },
+  },
+}
+await mod.default.setup(ctx)
+const tick = () => new Promise((r) => setTimeout(r, 10))
+const run = (name, text) =>
+  commands[name].execute({ sessionID: "ses_1", prompt: { text }, delivery: "queue" })
+if (scenario === "waiting") {
+  const other = { kind: "mcp-elicitation", server: "else" }
+  const elsewhere = { ...metaForm("frm_x", "x"), metadata: other }
+  forms = [metaForm("frm_other", "Run sessions.something"), elsewhere]
+  forms.unshift(metaForm("frm_1", "MetaForge wants to run project.create. approval run_abc"))
+  await run("metaforge/approve", "run_abc")
+} else if (scenario === "decline") {
+  forms = [metaForm("frm_2", "MetaForge wants to run project.create.")]
+  await run("metaforge/decline", "wrong part")
+} else if (scenario === "nothing") {
+  // No form waiting (the call returned): the agent is asked to retry.
+  forms = [metaForm("frm_old", "approval run_old, another call")]
+  await run("metaforge/approve", "run_xyz")
+} else if (scenario === "unarmed") {
+  forms = [metaForm("frm_u", "approval run_xyz")]
+  await new Promise((r) => setTimeout(r, 1300))
+}
+console.log(JSON.stringify({ replies, prompts }))
+process.exit(0)
+"""
+
+
+class TestOpenCodeApprovalCommands:
+    """/metaforge/approve and /metaforge/decline.
+
+    opencode 2.3 files MCP elicitation forms under the session "global", which
+    its TUI never shows, so the person answers MetaForge's prompts with these.
+    The answer is given by the plugin's code, never by the model.
+    """
+
+    @pytest.fixture(scope="class")
+    def root(self) -> Path:
+        return build_opencode()
+
+    def _run(self, root: Path, tmp_path: Path, scenario: str) -> dict:
+        import subprocess
+
+        harness = tmp_path / "forms.mjs"
+        harness.write_text(_FAKE_OPENCODE_FORMS, encoding="utf-8")
+        done = subprocess.run(
+            ["node", str(harness), (root / "server.js").as_uri(), scenario],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+            check=False,
+        )
+        assert done.returncode == 0, done.stderr
+        return dict(json.loads(done.stdout))
+
+    def test_approve_answers_the_waiting_metaforge_form(self, root: Path, tmp_path: Path) -> None:
+        result = self._run(root, tmp_path, "waiting")
+        assert result["replies"] == [
+            {"sessionID": "global", "formID": "frm_1", "answer": {"approve": True}}
+        ]
+        assert "approved" in result["prompts"][0] and "again" in result["prompts"][0]
+
+    def test_decline_refuses_it_with_the_reason(self, root: Path, tmp_path: Path) -> None:
+        result = self._run(root, tmp_path, "decline")
+        assert result["replies"] == [
+            {
+                "sessionID": "global",
+                "formID": "frm_2",
+                "answer": {"approve": False, "note": "wrong part"},
+            }
+        ]
+        assert "Do not retry" in result["prompts"][0]
+
+    def test_with_nothing_waiting_it_asks_for_the_retry_and_answers_nothing(
+        self, root: Path, tmp_path: Path
+    ) -> None:
+        result = self._run(root, tmp_path, "nothing")
+        assert result["replies"] == []
+        [prompt] = result["prompts"]
+        assert "identical call again" in prompt
+        assert "/metaforge/approve" in prompt
+        assert "Do not decide it yourself" in prompt
+
+    def test_no_form_is_answered_without_a_command(self, root: Path, tmp_path: Path) -> None:
+        assert self._run(root, tmp_path, "unarmed")["replies"] == []

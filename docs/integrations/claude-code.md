@@ -435,6 +435,21 @@ the server logs it with the route on `mcp_tool_call_held_for_approval`
 (`route`, `window_seconds`, `progress`). An invalid value is logged as
 `approval_hold_env_invalid` and the default is used.
 
+### Give the person time to answer
+
+Claude Code's MCP tool timeout (`MCP_TOOL_TIMEOUT`, 120 s by default)
+includes the time the person takes to answer an approval prompt. Past it,
+Claude Code drops the call while the prompt is still on screen, so an Accept
+given after two minutes never reaches the server and the approval stays
+pending (decide it on the Approvals page, or with `/metaforge:approvals`).
+Give it an hour in your Claude Code settings:
+
+```json
+{ "env": { "MCP_TOOL_TIMEOUT": "3600000" } }
+```
+
+Restart Claude Code after changing it. `/metaforge:doctor` checks it.
+
 ### When it is not approved
 
 The call comes back as a JSON-RPC error naming the outcome, the approval

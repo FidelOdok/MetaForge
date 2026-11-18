@@ -25,8 +25,10 @@ import asyncio
 import json
 import logging
 import os
+import shlex
 import sys
-from collections.abc import AsyncIterator, Callable
+from collections import OrderedDict
+from collections.abc import AsyncIterator, Callable, Mapping
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
@@ -156,7 +158,95 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "to a no-op without one."
         ),
     )
+    parser.add_argument(
+        "--reload",
+        action="store_true",
+        default=False,
+        help=(
+            "Development: restart the server whenever a Python file in the "
+            "source tree changes, so an edit is live without a rebuild or "
+            "deploy. Also set by METAFORGE_MCP_RELOAD=1. Never use in "
+            "production."
+        ),
+    )
+    parser.add_argument(
+        "--no-knowledge",
+        action="store_true",
+        default=False,
+        help=(
+            "Development: do not start the knowledge store (LightRAG over "
+            "pgvector), which is most of the start-up time (minutes on a slow "
+            "disk), so a --reload restart takes seconds. knowledge.* tools are "
+            "then absent. Also set by METAFORGE_MCP_SKIP_KNOWLEDGE=1."
+        ),
+    )
     return parser.parse_args(argv)
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+#: Source packages a ``--reload`` server watches. Relative to the repository
+#: root (the parent of the ``metaforge`` package); missing ones are skipped.
+RELOAD_WATCH_PACKAGES = (
+    "metaforge",
+    "mcp_core",
+    "tool_registry",
+    "api_gateway",
+    "shared",
+    "observability",
+    "twin_core",
+    "orchestrator",
+    "digital_twin",
+    "skill_registry",
+    "domain_agents",
+)
+
+
+def _reload_watch_paths() -> list[str]:
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return [
+        os.path.join(root, pkg)
+        for pkg in RELOAD_WATCH_PACKAGES
+        if os.path.isdir(os.path.join(root, pkg))
+    ]
+
+
+def _without_reload_flag(argv: list[str]) -> list[str]:
+    return [a for a in argv if a != "--reload"]
+
+
+def _run_with_reload(argv: list[str]) -> int:
+    """Supervise the server, restarting it when the source changes.
+
+    The server runs its bootstrap and uvicorn in one event loop (MET-477), so
+    uvicorn's own reloader, which imports an app factory, cannot supervise
+    it. ``watchfiles`` restarts the whole process instead: slower than an
+    in-place reload, but it re-runs the real bootstrap, so what is served is
+    exactly what a fresh start would serve.
+    """
+    from watchfiles import PythonFilter, run_process
+
+    paths = _reload_watch_paths()
+    logger.info("mcp_reload_watching", paths=[os.path.basename(p) for p in paths])
+    # The child must not supervise in turn, and reports that it reloads.
+    os.environ["METAFORGE_MCP_RELOAD_CHILD"] = "1"
+    # A command, not a function: the server runs as ``python -m``, so its
+    # module is ``__main__`` and a function target cannot be found by the
+    # child that ``multiprocessing`` spawns.
+    command = shlex.join([sys.executable, "-m", "metaforge.mcp", *_without_reload_flag(argv)])
+    run_process(
+        *paths,
+        target=command,
+        target_type="command",
+        watch_filter=PythonFilter(),
+        callback=lambda changes: logger.info(
+            "mcp_reload_restarting",
+            changed=sorted({os.path.relpath(path) for _, path in changes})[:10],
+        ),
+    )
+    return 0
 
 
 def _adapter_ids_from_args(raw: str | None) -> list[str] | None:
@@ -540,6 +630,29 @@ def _is_initialize(raw_body: bytes) -> bool:
     return isinstance(message, dict) and message.get("method") == "initialize"
 
 
+#: How many issued session ids an HTTP server remembers (see build_http_app).
+MAX_ISSUED_SESSIONS = 10_000
+
+
+def _unknown_session(
+    session_id: str | None,
+    raw_body: bytes,
+    inbound: Any,
+    issued: Mapping[str, None],
+) -> bool:
+    """Whether a request names a session this process never issued.
+
+    Only for a request that carries ``Mcp-Session-Id`` and is not itself an
+    ``initialize``. A handshake-free (2026-07-28) request never initialises,
+    so its session is never ours to know and it is always served.
+    """
+    if session_id is None or _is_initialize(raw_body) or session_id in issued:
+        return False
+    if isinstance(inbound, dict) and is_modern(request_protocol_version(inbound.get("params"))):
+        return False
+    return True
+
+
 def _session_for_request(headers: dict[str, str], raw_body: bytes) -> str | None:
     """The session id this request belongs to, minting one at initialize.
 
@@ -902,6 +1015,12 @@ def build_http_app(
     # inline approvals existed only on stdio and every held write went to the
     # dashboard queue.
     hub = ElicitationHub()
+    # Session ids this process issued at initialize (Streamable HTTP). A
+    # request carrying any other id belongs to a session this process never
+    # opened, typically one from before a restart, and gets 404 so the client
+    # initialises again and re-declares what it can do. Bounded: the oldest
+    # are dropped, and their clients then start a new session too.
+    issued_sessions: OrderedDict[str, None] = OrderedDict()
     server.attach_elicitor(HttpElicitor(hub))
     server.attach_notifier(HttpNotifier(hub))
 
@@ -935,6 +1054,10 @@ def build_http_app(
                 ),
             )
         assert session_id is not None  # narrowed by session_uuid above
+        if session_id not in issued_sessions:
+            # Opened before a restart, or never: initialise again.
+            logger.info("mcp_session_unknown", session_id=session_id, stream=True)
+            raise HTTPException(status_code=404, detail="Session not found: initialize again.")
         return StreamingResponse(
             hub.stream(session_id),
             media_type="text/event-stream",
@@ -1009,6 +1132,24 @@ def build_http_app(
         if is_jsonrpc_response(inbound) and hub.resolve(inbound):
             # Accepted, and there is nothing to say back.
             return Response(status_code=202)
+
+        if _unknown_session(issued_session, raw_body, inbound, issued_sessions):
+            logger.info("mcp_session_unknown", session_id=issued_session)
+            return JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": inbound.get("id") if isinstance(inbound, dict) else None,
+                    "error": {
+                        "code": -32001,
+                        "message": "Session not found: initialize again to start a new session.",
+                    },
+                },
+                status_code=404,
+            )
+        if issued_session is not None and _is_initialize(raw_body):
+            issued_sessions[issued_session] = None
+            while len(issued_sessions) > MAX_ISSUED_SESSIONS:
+                issued_sessions.popitem(last=False)
 
         # FORGE-599: the version header must agree with the version the body
         # names, or an intermediary routing on one and this server acting on
@@ -1955,7 +2096,13 @@ async def _bootstrap(
     # exposes ``knowledge.*`` tools when ``DATABASE_URL`` is set.
     # ``build_unified_server`` already accepts the kwarg — until now
     # only the gateway wired it.
-    knowledge_service = await _build_knowledge_service()
+    knowledge_service = (
+        None
+        if getattr(args, "no_knowledge", False) or _env_flag("METAFORGE_MCP_SKIP_KNOWLEDGE")
+        else await _build_knowledge_service()
+    )
+    if knowledge_service is None and getattr(args, "no_knowledge", False):
+        logger.info("mcp_knowledge_service_skipped", reason="--no-knowledge")
     # MET-433: bind the twin so ``knowledge.extract`` can resolve MPN
     # → current Datasheet. ``set_twin`` is duck-typed (only the
     # production LightRAG impl needs it); the unit-test fakes used
@@ -2157,6 +2304,9 @@ async def _bootstrap(
         engineering_entity_approver=make_engineering_entity_approver(twin),
         document_recorder=make_document_recorder(twin, project_backend),
         constraint_recorder=make_constraint_recorder(twin, project_backend),
+        # Under --reload the process picks up source changes by itself, so
+        # health/check must not call a SHA difference stale.
+        reloads=_env_flag("METAFORGE_MCP_RELOAD_CHILD"),
         adapter_ids=_adapter_ids_from_args(args.adapters),
         approval_gate=approval_gate,
         approval_ledger=approval_ledger,
@@ -2871,8 +3021,17 @@ def _install_gateway_machine_view(env: Any = None) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    args = _parse_args(raw_argv)
     _configure_logging_for_transport(args.transport)
+    if (args.reload or _env_flag("METAFORGE_MCP_RELOAD")) and not _env_flag(
+        "METAFORGE_MCP_RELOAD_CHILD"
+    ):
+        if args.transport == "stdio":
+            # A restarted stdio server would lose its client's pipe.
+            logger.warning("mcp_reload_ignored", reason="stdio transport")
+        else:
+            return _run_with_reload(raw_argv)
     _install_gateway_machine_view()
 
     # Bootstrap and stdio loop must share one asyncio event loop because
