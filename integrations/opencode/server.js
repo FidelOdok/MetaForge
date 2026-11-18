@@ -147,8 +147,15 @@ export default {
     const mcpName = "metaforge"
     let armed = null // {approve, wanted, note, until, sessionID}
 
+    // opencode files MCP elicitation forms under the session "global"; a
+    // plugin lists them per session (there is no top-level form client).
     async function pendingForms() {
-      const listed = await ctx.form.list({}).catch(() => [])
+      const listed = await Promise.resolve()
+        .then(() => ctx.session.form.list({ sessionID: "global" }))
+        .catch((error) => {
+          console.error("metaforge: could not list forms", error)
+          return []
+        })
       return metaforgeForms(listed, mcpName)
     }
 

@@ -1376,11 +1376,14 @@ const ctx = {
   skill: { transform: async (f) => f(editor) },
   agent: { transform: async (f) => f(editor) },
   event: { subscribe: ({ types }) => (types.includes("form.created") ? created : idle) },
-  form: { list: async () => ({ data: forms }) },
   session: {
     instructions: { entry: { put: async () => {} } },
     prompt: async (p) => { prompts.push(p.text) },
-    form: { reply: async (r) => { replies.push(r) } },
+    form: {
+      // As opencode's plugin client: listed per session, MCP forms are "global".
+      list: async ({ sessionID }) => (sessionID === "global" ? forms : []),
+      reply: async (r) => { replies.push(r) },
+    },
   },
 }
 await mod.default.setup(ctx)
