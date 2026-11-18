@@ -37,6 +37,11 @@
       "file": "commands/metaforge/fea.md"
     },
     {
+      "name": "metaforge/find-part",
+      "description": "Find a real part for a need: the library first, then distributors, then the web",
+      "file": "commands/metaforge/find-part.md"
+    },
+    {
       "name": "metaforge/flow",
       "description": "Plan a design flow for this project",
       "file": "commands/metaforge/flow.md"

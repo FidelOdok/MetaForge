@@ -31,7 +31,7 @@ blocked, and what is still unknown.
      the distributors found something; each web search is a paid API call, so leave it on
      `auto` unless the person asks.
 3. **Read the datasheet** of the distributor part you choose (its `datasheet_url`, with
-   `web_fetch` or `knowledge.extract`) for what the library needs and the distributor does not
+   `web.fetch` or `knowledge.extract`) for what the library needs and the distributor does not
    give: its outline (length, width, height in mm) and its pins. Write down the page each value
    came from. A value you could not find stays out: never estimate a size or a pin.
 4. **Adopt it once** with `component.adopt`: `mpn`, `manufacturer`, `distributor`, `family`

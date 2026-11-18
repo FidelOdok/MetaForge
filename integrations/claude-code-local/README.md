@@ -47,6 +47,7 @@ Persistent stores (Neo4j, Postgres) are optional — without them the twin is in
 - `/metaforge:approvals`
 - `/metaforge:imagine`
 - `/metaforge:drive`
+- `/metaforge:find-part`
 - `/metaforge:doctor`
 
 ## Skills

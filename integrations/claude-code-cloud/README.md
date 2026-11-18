@@ -43,6 +43,7 @@ Install **one**. The manifest has no way to switch a server entry off, so two pa
 - `/metaforge:approvals`
 - `/metaforge:imagine`
 - `/metaforge:drive`
+- `/metaforge:find-part`
 - `/metaforge:doctor`
 
 ## Skills

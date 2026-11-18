@@ -187,6 +187,7 @@ gateway that needs one; a local gateway started without auth does not.
 | `/metaforge:flow` | Propose a design flow: ask for route, maturity and loads, tailor in caller mode, stop at the approval |
 | `/metaforge:verify` | Did a run achieve its intent (the completion verdict) |
 | `/metaforge:replan` | Patch a running flow, re-running only what changed |
+| `/metaforge:find-part` | Find a real part for a need: the library first, then the distributors, then the web; adopt a distributor part into the library once, held for approval |
 | `/metaforge:doctor` | Check the connection, and what is unreachable |
 
 ### Hooks and agents
