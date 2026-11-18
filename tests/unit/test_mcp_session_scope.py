@@ -279,3 +279,72 @@ def test_delete_terminates_the_session_and_releases_the_scope() -> None:
 
 def test_delete_without_a_session_is_a_bad_request() -> None:
     assert _client().request("DELETE", "/mcp").status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# A session this process never issued (one from before a restart) is 404, so
+# the client initialises again and re-declares what it can do. Before this,
+# the call was served with nothing known about the client, and an opencode
+# connected across a reload could no longer be prompted for approvals.
+# ---------------------------------------------------------------------------
+
+
+def _initialize(client) -> str:
+    resp = client.post(
+        "/mcp", json={"jsonrpc": "2.0", "id": "1", "method": "initialize", "params": {}}
+    )
+    return str(resp.headers["mcp-session-id"])
+
+
+def test_a_session_from_before_a_restart_is_404() -> None:
+    stale = str(uuid.uuid4())
+    resp = _client().post(
+        "/mcp",
+        json={"jsonrpc": "2.0", "id": "7", "method": "tools/list", "params": {}},
+        headers={"Mcp-Session-Id": stale},
+    )
+    assert resp.status_code == 404
+    assert resp.json()["id"] == "7"
+    assert "initialize again" in resp.json()["error"]["message"]
+
+
+def test_an_issued_session_is_served() -> None:
+    client = _client()
+    session = _initialize(client)
+    resp = client.post(
+        "/mcp",
+        json={"jsonrpc": "2.0", "id": "2", "method": "tools/list", "params": {}},
+        headers={"Mcp-Session-Id": session},
+    )
+    assert resp.status_code == 200
+
+
+def test_initialize_with_a_stale_session_starts_a_new_one() -> None:
+    resp = _client().post(
+        "/mcp",
+        json={"jsonrpc": "2.0", "id": "1", "method": "initialize", "params": {}},
+        headers={"Mcp-Session-Id": str(uuid.uuid4())},
+    )
+    assert resp.status_code == 200
+
+
+def test_a_handshake_free_request_is_always_served() -> None:
+    """2026-07-28 requests never initialise, so no session of theirs is ours."""
+    from mcp_core.protocol_versions import META_PROTOCOL_VERSION, MODERN_PROTOCOL_VERSIONS
+
+    resp = _client().post(
+        "/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "id": "3",
+            "method": "tools/list",
+            "params": {"_meta": {META_PROTOCOL_VERSION: MODERN_PROTOCOL_VERSIONS[0]}},
+        },
+        headers={"Mcp-Session-Id": str(uuid.uuid4())},
+    )
+    assert resp.status_code != 404
+
+
+def test_a_stream_for_an_unknown_session_is_404() -> None:
+    resp = _client().get("/mcp", headers={"Mcp-Session-Id": str(uuid.uuid4())})
+    assert resp.status_code == 404

@@ -27,7 +27,8 @@ import logging
 import os
 import shlex
 import sys
-from collections.abc import AsyncIterator, Callable
+from collections import OrderedDict
+from collections.abc import AsyncIterator, Callable, Mapping
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
@@ -629,6 +630,29 @@ def _is_initialize(raw_body: bytes) -> bool:
     return isinstance(message, dict) and message.get("method") == "initialize"
 
 
+#: How many issued session ids an HTTP server remembers (see build_http_app).
+MAX_ISSUED_SESSIONS = 10_000
+
+
+def _unknown_session(
+    session_id: str | None,
+    raw_body: bytes,
+    inbound: Any,
+    issued: Mapping[str, None],
+) -> bool:
+    """Whether a request names a session this process never issued.
+
+    Only for a request that carries ``Mcp-Session-Id`` and is not itself an
+    ``initialize``. A handshake-free (2026-07-28) request never initialises,
+    so its session is never ours to know and it is always served.
+    """
+    if session_id is None or _is_initialize(raw_body) or session_id in issued:
+        return False
+    if isinstance(inbound, dict) and is_modern(request_protocol_version(inbound.get("params"))):
+        return False
+    return True
+
+
 def _session_for_request(headers: dict[str, str], raw_body: bytes) -> str | None:
     """The session id this request belongs to, minting one at initialize.
 
@@ -991,6 +1015,12 @@ def build_http_app(
     # inline approvals existed only on stdio and every held write went to the
     # dashboard queue.
     hub = ElicitationHub()
+    # Session ids this process issued at initialize (Streamable HTTP). A
+    # request carrying any other id belongs to a session this process never
+    # opened, typically one from before a restart, and gets 404 so the client
+    # initialises again and re-declares what it can do. Bounded: the oldest
+    # are dropped, and their clients then start a new session too.
+    issued_sessions: OrderedDict[str, None] = OrderedDict()
     server.attach_elicitor(HttpElicitor(hub))
     server.attach_notifier(HttpNotifier(hub))
 
@@ -1024,6 +1054,10 @@ def build_http_app(
                 ),
             )
         assert session_id is not None  # narrowed by session_uuid above
+        if session_id not in issued_sessions:
+            # Opened before a restart, or never: initialise again.
+            logger.info("mcp_session_unknown", session_id=session_id, stream=True)
+            raise HTTPException(status_code=404, detail="Session not found: initialize again.")
         return StreamingResponse(
             hub.stream(session_id),
             media_type="text/event-stream",
@@ -1098,6 +1132,24 @@ def build_http_app(
         if is_jsonrpc_response(inbound) and hub.resolve(inbound):
             # Accepted, and there is nothing to say back.
             return Response(status_code=202)
+
+        if _unknown_session(issued_session, raw_body, inbound, issued_sessions):
+            logger.info("mcp_session_unknown", session_id=issued_session)
+            return JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": inbound.get("id") if isinstance(inbound, dict) else None,
+                    "error": {
+                        "code": -32001,
+                        "message": "Session not found: initialize again to start a new session.",
+                    },
+                },
+                status_code=404,
+            )
+        if issued_session is not None and _is_initialize(raw_body):
+            issued_sessions[issued_session] = None
+            while len(issued_sessions) > MAX_ISSUED_SESSIONS:
+                issued_sessions.popitem(last=False)
 
         # FORGE-599: the version header must agree with the version the body
         # names, or an intermediary routing on one and this server acting on
