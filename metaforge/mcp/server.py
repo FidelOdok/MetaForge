@@ -4403,6 +4403,7 @@ async def build_unified_server(
     caller: Caller = Caller.UNTRUSTED,
     approval_gate: Any = None,
     approval_ledger: Any = None,
+    reloads: bool = False,
     **collaborators: Any,
 ) -> UnifiedMcpServer:
     """Discover and instantiate every enabled adapter, then wrap.
@@ -4494,6 +4495,7 @@ async def build_unified_server(
     )
     return UnifiedMcpServer(
         adapters=registry.list_adapter_servers(),
+        reloads=reloads,
         session_capture=capture,
         tool_registry=registry,
         profile=profile,

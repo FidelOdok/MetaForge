@@ -367,9 +367,27 @@ differently:
 | Service | How it loads code | A `git checkout` on the host |
 |---------|-------------------|------------------------------|
 | `gateway` | uvicorn's reloader supervises it (`--reload`) | picked up within seconds |
-| `mcp-http` | calls `uvicorn.Server.serve()` in the bootstrap's own event loop, so there is no reloader to supervise it | **ignored** until the container restarts |
+| `mcp-http` | calls `uvicorn.Server.serve()` in the bootstrap's own event loop, so uvicorn's reloader cannot supervise it; in development `--reload` restarts the whole process instead | picked up on the next restart under `--reload` (the dev override turns it on); otherwise **ignored** until the container restarts |
 
-So the sidecar needs restarting on deploy. It is not a rebuild:
+### Live code changes in development
+
+`python -m metaforge.mcp --transport http --reload` restarts the server
+whenever a `.py` file in the source packages changes (`metaforge`,
+`mcp_core`, `tool_registry`, `api_gateway`, `shared`, `observability`,
+`twin_core`, `orchestrator`, `digital_twin`, `skill_registry`,
+`domain_agents`). It re-runs the real bootstrap, so what is served is what a
+fresh start would serve, and `health.check` reports `reloads: true`. The dev
+override (`docker-compose.override.yml`) turns it on for `mcp-http` with
+`METAFORGE_MCP_RELOAD=1`; set it to `0` for a production-like sidecar. It is
+ignored for stdio, where a restart would lose the client's pipe.
+
+Most of a start is the knowledge store (LightRAG over pgvector): about six of
+eight minutes on a WSL checkout on a Windows drive. `--no-knowledge` (or
+`METAFORGE_MCP_SKIP_KNOWLEDGE=1`) skips it, so a restart takes seconds; the
+`knowledge.*` tools are then absent. Leave it off when you are working on
+them.
+
+Outside development the sidecar still needs restarting on deploy. It is not a rebuild:
 
 ```bash
 docker compose up -d --force-recreate mcp-http

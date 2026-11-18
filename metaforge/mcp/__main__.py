@@ -25,6 +25,7 @@ import asyncio
 import json
 import logging
 import os
+import shlex
 import sys
 from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Any
@@ -156,7 +157,95 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "to a no-op without one."
         ),
     )
+    parser.add_argument(
+        "--reload",
+        action="store_true",
+        default=False,
+        help=(
+            "Development: restart the server whenever a Python file in the "
+            "source tree changes, so an edit is live without a rebuild or "
+            "deploy. Also set by METAFORGE_MCP_RELOAD=1. Never use in "
+            "production."
+        ),
+    )
+    parser.add_argument(
+        "--no-knowledge",
+        action="store_true",
+        default=False,
+        help=(
+            "Development: do not start the knowledge store (LightRAG over "
+            "pgvector), which is most of the start-up time (minutes on a slow "
+            "disk), so a --reload restart takes seconds. knowledge.* tools are "
+            "then absent. Also set by METAFORGE_MCP_SKIP_KNOWLEDGE=1."
+        ),
+    )
     return parser.parse_args(argv)
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+#: Source packages a ``--reload`` server watches. Relative to the repository
+#: root (the parent of the ``metaforge`` package); missing ones are skipped.
+RELOAD_WATCH_PACKAGES = (
+    "metaforge",
+    "mcp_core",
+    "tool_registry",
+    "api_gateway",
+    "shared",
+    "observability",
+    "twin_core",
+    "orchestrator",
+    "digital_twin",
+    "skill_registry",
+    "domain_agents",
+)
+
+
+def _reload_watch_paths() -> list[str]:
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return [
+        os.path.join(root, pkg)
+        for pkg in RELOAD_WATCH_PACKAGES
+        if os.path.isdir(os.path.join(root, pkg))
+    ]
+
+
+def _without_reload_flag(argv: list[str]) -> list[str]:
+    return [a for a in argv if a != "--reload"]
+
+
+def _run_with_reload(argv: list[str]) -> int:
+    """Supervise the server, restarting it when the source changes.
+
+    The server runs its bootstrap and uvicorn in one event loop (MET-477), so
+    uvicorn's own reloader, which imports an app factory, cannot supervise
+    it. ``watchfiles`` restarts the whole process instead: slower than an
+    in-place reload, but it re-runs the real bootstrap, so what is served is
+    exactly what a fresh start would serve.
+    """
+    from watchfiles import PythonFilter, run_process
+
+    paths = _reload_watch_paths()
+    logger.info("mcp_reload_watching", paths=[os.path.basename(p) for p in paths])
+    # The child must not supervise in turn, and reports that it reloads.
+    os.environ["METAFORGE_MCP_RELOAD_CHILD"] = "1"
+    # A command, not a function: the server runs as ``python -m``, so its
+    # module is ``__main__`` and a function target cannot be found by the
+    # child that ``multiprocessing`` spawns.
+    command = shlex.join([sys.executable, "-m", "metaforge.mcp", *_without_reload_flag(argv)])
+    run_process(
+        *paths,
+        target=command,
+        target_type="command",
+        watch_filter=PythonFilter(),
+        callback=lambda changes: logger.info(
+            "mcp_reload_restarting",
+            changed=sorted({os.path.relpath(path) for _, path in changes})[:10],
+        ),
+    )
+    return 0
 
 
 def _adapter_ids_from_args(raw: str | None) -> list[str] | None:
@@ -1955,7 +2044,13 @@ async def _bootstrap(
     # exposes ``knowledge.*`` tools when ``DATABASE_URL`` is set.
     # ``build_unified_server`` already accepts the kwarg — until now
     # only the gateway wired it.
-    knowledge_service = await _build_knowledge_service()
+    knowledge_service = (
+        None
+        if getattr(args, "no_knowledge", False) or _env_flag("METAFORGE_MCP_SKIP_KNOWLEDGE")
+        else await _build_knowledge_service()
+    )
+    if knowledge_service is None and getattr(args, "no_knowledge", False):
+        logger.info("mcp_knowledge_service_skipped", reason="--no-knowledge")
     # MET-433: bind the twin so ``knowledge.extract`` can resolve MPN
     # → current Datasheet. ``set_twin`` is duck-typed (only the
     # production LightRAG impl needs it); the unit-test fakes used
@@ -2157,6 +2252,9 @@ async def _bootstrap(
         engineering_entity_approver=make_engineering_entity_approver(twin),
         document_recorder=make_document_recorder(twin, project_backend),
         constraint_recorder=make_constraint_recorder(twin, project_backend),
+        # Under --reload the process picks up source changes by itself, so
+        # health/check must not call a SHA difference stale.
+        reloads=_env_flag("METAFORGE_MCP_RELOAD_CHILD"),
         adapter_ids=_adapter_ids_from_args(args.adapters),
         approval_gate=approval_gate,
         approval_ledger=approval_ledger,
@@ -2871,8 +2969,17 @@ def _install_gateway_machine_view(env: Any = None) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    args = _parse_args(raw_argv)
     _configure_logging_for_transport(args.transport)
+    if (args.reload or _env_flag("METAFORGE_MCP_RELOAD")) and not _env_flag(
+        "METAFORGE_MCP_RELOAD_CHILD"
+    ):
+        if args.transport == "stdio":
+            # A restarted stdio server would lose its client's pipe.
+            logger.warning("mcp_reload_ignored", reason="stdio transport")
+        else:
+            return _run_with_reload(raw_argv)
     _install_gateway_machine_view()
 
     # Bootstrap and stdio loop must share one asyncio event loop because
