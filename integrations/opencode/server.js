@@ -43,6 +43,51 @@ export function expand(template, args) {
   return text ? `${template}\n\n${text}` : template
 }
 
+// -- Approvals ----------------------------------------------------------------
+//
+// opencode 2.3 creates every MCP elicitation form in the session "global"
+// instead of the session whose tool call raised it, and its TUI only shows
+// forms for the session you are in, so MetaForge's approval prompts are never
+// seen (reported upstream). /metaforge/approve and /metaforge/decline let the
+// person answer them. Typed by the person, they answer in code: nothing here
+// goes through the model, which cannot decide an approval.
+//
+// A held call's form only exists while the call waits (about 20 s): opencode
+// keeps no stream open between calls. After that the command arms the
+// person's decision for ARM_MS and asks the agent to put the approval to them
+// again with approvals.decide; the form that call raises is answered with the
+// armed decision, once.
+
+export const ARM_MS = 60_000
+
+// MetaForge's own pending forms from a forms list (opencode's API returns
+// either the array or {data: [...]}).
+export function metaforgeForms(listed, server = "metaforge") {
+  const forms = Array.isArray(listed) ? listed : (listed?.data ?? [])
+  return forms.filter(
+    (form) => form?.metadata?.kind === "mcp-elicitation" && form?.metadata?.server === server,
+  )
+}
+
+// The answer for a decision, from the form's own fields: the boolean is the
+// decision, a text field takes the person's note when there is one.
+export function answerFor(form, approve, note) {
+  const answer = {}
+  for (const field of form?.fields ?? []) {
+    if (field?.type === "boolean") answer[field.key] = approve
+    else if (note && (field?.type === "string" || field?.type === "text")) answer[field.key] = note
+  }
+  return answer
+}
+
+// Whether a form is the one an armed decision is about: the approval id, or
+// the text the person typed after the command, must appear in its message.
+export function formMatches(form, wanted) {
+  if (!wanted) return true
+  const message = String(form?.metadata?.message ?? "") + " " + String(form?.title ?? "")
+  return message.includes(wanted)
+}
+
 export default {
   id: "metaforge",
   async setup(ctx) {
@@ -98,6 +143,69 @@ export default {
       }
     })
 
+    // /metaforge/approve and /metaforge/decline (see the note above ARM_MS).
+    const mcpName = "metaforge"
+    let armed = null // {approve, wanted, note, until, sessionID}
+
+    async function pendingForms() {
+      const listed = await ctx.form.list({}).catch(() => [])
+      return metaforgeForms(listed, mcpName)
+    }
+
+    async function answer(form, decision) {
+      await ctx.session.form.reply({
+        sessionID: form.sessionID,
+        formID: form.id,
+        answer: answerFor(form, decision.approve, decision.note),
+      })
+      console.error(`metaforge: ${decision.approve ? "approved" : "declined"} ${form.id}`)
+    }
+
+    function decisionCommand(approve) {
+      return {
+        name: approve ? "metaforge/approve" : "metaforge/decline",
+        description: approve
+          ? "Approve the MetaForge write waiting for you (opencode does not show its prompt)"
+          : "Decline the MetaForge write waiting for you (opencode does not show its prompt)",
+        execute: async ({ sessionID, prompt, delivery }) => {
+          const wanted = (prompt?.text ?? "").trim()
+          const decision = { approve, wanted, note: approve ? "" : wanted }
+          const waiting = (await pendingForms()).filter((form) => formMatches(form, approve ? wanted : ""))
+          const verb = approve ? "approved" : "declined"
+          if (waiting.length > 0) {
+            await answer(waiting[0], decision)
+            await ctx.session.prompt({
+              ...prompt,
+              sessionID,
+              delivery,
+              text:
+                `I ${verb} the MetaForge approval that was waiting. ` +
+                (approve
+                  ? "Make the identical call again now; it runs once."
+                  : "Do not retry that call."),
+            })
+            return
+          }
+          armed = { ...decision, wanted: approve ? wanted : "", until: Date.now() + ARM_MS, sessionID }
+          await ctx.session.prompt({
+            ...prompt,
+            sessionID,
+            delivery,
+            text:
+              `I want to ${approve ? "approve" : "decline"} ` +
+              (wanted && approve ? `the MetaForge approval ${wanted}` : "the newest MetaForge approval waiting for me") +
+              ". Call approvals.list, then approvals.decide with that approval's id so it is put to me; " +
+              "my answer is recorded by the plugin. Do not decide it yourself." +
+              (approve ? " Then make the original call again." : ""),
+          })
+        },
+      }
+    }
+    await ctx.command.transform((editor) => {
+      editor.add(decisionCommand(true))
+      editor.add(decisionCommand(false))
+    })
+
     // The working rules, as an instruction entry on every new session.
     const rules = read(INDEX.rules)
     const controller = new AbortController()
@@ -115,6 +223,32 @@ export default {
         }
       } catch (error) {
         if (!controller.signal.aborted) console.error("metaforge: session events stopped", error)
+      }
+    })()
+
+    // An armed decision answers the next matching MetaForge form, once.
+    void (async () => {
+      try {
+        for await (const event of ctx.event.subscribe({
+          types: ["form.created"],
+          signal: controller.signal,
+        })) {
+          if (armed === null) continue
+          if (Date.now() > armed.until) {
+            armed = null
+            continue
+          }
+          const form = event?.data?.form ?? event?.data
+          const [match] = metaforgeForms([form], mcpName).filter((f) => formMatches(f, armed.wanted))
+          if (!match) continue
+          const decision = armed
+          armed = null
+          await answer(match, decision).catch((error) =>
+            console.error("metaforge: could not answer the approval form", error),
+          )
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) console.error("metaforge: form events stopped", error)
       }
     })()
     return () => controller.abort()

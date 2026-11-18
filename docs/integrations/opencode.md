@@ -89,6 +89,25 @@ The hosted gateway sees opencode as a remote caller, so a tool that writes
 is held for approval. Held calls appear on the dashboard's Approvals page,
 and `/metaforge/approvals` lists them.
 
+### Answering an approval in opencode
+
+opencode 2.3 does not show MetaForge's approval prompt. It receives the MCP
+elicitation and creates the form, but under the session `global` instead of
+the session whose tool call raised it, and the TUI only shows forms for the
+session you are in (reported to opencode). So the plugin adds two commands:
+
+- `/metaforge/approve [approval id]` approves the MetaForge write waiting for
+  you. Then the agent makes the identical call again, and it runs once.
+- `/metaforge/decline [reason]` refuses it; the reason is recorded.
+
+They are answered by the plugin's code, not by the model, and only when you
+type them. A held call's form exists only while the call waits (about 20 s),
+because opencode keeps no stream open between calls. After that the command
+holds your decision for 60 seconds and asks the agent to put the approval to
+you again with `approvals.decide`; the form that call raises is answered
+with your decision, once, and only if it names the approval you gave. You
+can always decide it on the dashboard's Approvals page instead.
+
 ## Tool names
 
 opencode names an MCP tool `<server>_<tool>`, replacing anything other than
