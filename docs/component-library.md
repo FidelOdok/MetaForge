@@ -199,8 +199,17 @@ distributor (DigiKey, Mouser, Nexar, Farnell, Arrow). It returns two ranked list
   marked `in_library` when the library already holds that order code, and listing what is
   still `unknown` (size, pins, price).
 
-`searched` says what was searched and how each distributor answered (how many it found, or
-why it could not: no credentials, a timeout, an error). Nothing found is a normal answer.
+- `web`: when the library finds nothing and the distributors fewer than three (`web: "auto"`,
+  the default; `"on"` always, `"off"` never), pages from the configured web search
+  (`BRAVE_API_KEY`) for the need plus "datasheet": each a title, address and snippet, marked
+  as a `datasheet` when it is a PDF, with the maker, order code, size, pins and price all
+  `unknown` until the page is read. A part found only on the web (a board its maker sells
+  directly) is registered with `library.register_component`, every value sourced to the page,
+  since `component.adopt` records a distributor's offer.
+
+`searched` says what was searched and how each source answered (how many it found, or why it
+could not: no credentials or no web search key, a timeout, an error). Nothing found is a
+normal answer.
 `region` limits library parts to those with a seller serving that region; `distributors:
 false` searches only the library.
 

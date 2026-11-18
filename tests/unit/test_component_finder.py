@@ -239,3 +239,47 @@ async def test_search_intent_reads_the_library_first() -> None:
     # a sentence rarely matches every word; its longest words are tried alone
     hits = await server._library_matches("I need an esp32s3 board for a lamp")
     assert [h["name"] for h in hits] == ["seeed_xiao_esp32s3"]
+
+
+class FakeWeb:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.calls: list[str] = []
+        self._fail = fail
+
+    async def search(self, query: str, *, limit: int = 10) -> list[Any]:
+        from tool_registry.tools.web.base import SearchHit
+
+        self.calls.append(query)
+        if self._fail:
+            raise RuntimeError("429 rate limited")
+        return [
+            SearchHit(title="Acme Glow Ring", url="https://acme.example/glow", snippet="12 LEDs"),
+            SearchHit(title="Glow Ring datasheet", url="https://acme.example/glow.pdf?v=2"),
+        ]
+
+
+async def test_the_web_is_searched_only_when_the_others_find_little() -> None:
+    web = FakeWeb()
+    server = ComponentFinderServer(_library(), [MOUSER], web=web)
+    # the library finds the XIAO: no web search
+    found = await server.handle_find({"need": "xiao esp32s3"})
+    assert found["web"] == [] and web.calls == [] and found["searched"]["web"] == "not searched"
+    # nothing in the library or the distributors: the web, with 'datasheet' added
+    glow = await server.handle_find({"need": "glow ring"})
+    assert web.calls == ["glow ring datasheet"]
+    assert [h["page"] for h in glow["web"]] == ["page", "datasheet"]
+    assert glow["web"][0]["unknown"][0] == "maker"
+    assert glow["next"].startswith("Only web pages found")
+    # on: even with a library hit; off: never
+    await server.handle_find({"need": "xiao esp32s3", "web": "on"})
+    assert len(web.calls) == 2
+    off = await server.handle_find({"need": "glow ring", "web": "off"})
+    assert off["web"] == [] and len(web.calls) == 2
+
+
+async def test_no_web_key_or_a_failing_web_is_said_not_fatal() -> None:
+    none = await ComponentFinderServer(_library(), []).handle_find({"need": "glow ring"})
+    assert none["searched"]["web"] == "no web search is configured"
+    failing = ComponentFinderServer(_library(), [], web=FakeWeb(fail=True))
+    out = await failing.handle_find({"need": "glow ring"})
+    assert out["web"] == [] and out["searched"]["web"].startswith("failed: 429")

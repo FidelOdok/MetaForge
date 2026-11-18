@@ -66,10 +66,12 @@ def _score_distributor(hit: dict[str, Any]) -> tuple[int, int, int]:
 class ComponentFinderServer(McpToolServer):
     """``component.find`` and ``component.adopt`` over the library and the distributors."""
 
-    def __init__(self, library: Any, adapters: list[DistributorAdapter]) -> None:
+    def __init__(self, library: Any, adapters: list[DistributorAdapter], web: Any = None) -> None:
         super().__init__(adapter_id="component_finder", version="0.1.0")
         self._library = library
         self._adapters = adapters
+        #: A web search provider (``tool_registry.tools.web.base.WebSearchProvider``), or None.
+        self._web = web
         self._register_tools()
 
     def _register_tools(self) -> None:
@@ -87,7 +89,12 @@ class ComponentFinderServer(McpToolServer):
                     "(size, pins, price). Prefer a library part; reuse it with its name. A "
                     "distributor part you choose is registered with component.adopt, after you "
                     "read its size and pins from its datasheet. need: words describing the part "
-                    "(e.g. 'ESP32-S3 module', '12 pixel RGB LED ring 5V'); a part number works too."
+                    "(e.g. 'ESP32-S3 module', '12 pixel RGB LED ring 5V'); a part number "
+                    "works too. "
+                    "When neither finds enough, it searches the web (web: auto); a web result is "
+                    "only a page (a maker's product page or a datasheet): read it with web.fetch "
+                    "before trusting it, and register a part found that way with "
+                    "library.register_component, every value sourced to the page."
                 ),
                 capability="component_search",
                 input_schema={
@@ -105,6 +112,13 @@ class ComponentFinderServer(McpToolServer):
                             "description": "Search distributors too (default true). False "
                             "searches only the library.",
                         },
+                        "web": {
+                            "type": "string",
+                            "enum": ["auto", "on", "off"],
+                            "description": "Search the web too: auto (default) only when the "
+                            "library finds nothing and the distributors fewer than three; on "
+                            "always; off never. Each web search is a paid API call.",
+                        },
                     },
                     "required": ["need"],
                 },
@@ -113,6 +127,7 @@ class ComponentFinderServer(McpToolServer):
                     "properties": {
                         "library": {"type": "array"},
                         "distributors": {"type": "array"},
+                        "web": {"type": "array"},
                         "searched": {"type": "object"},
                         "next": {"type": "string"},
                     },
@@ -252,6 +267,31 @@ class ComponentFinderServer(McpToolServer):
         hits.sort(key=_score_distributor, reverse=True)
         return hits, status
 
+    async def _web_hits(self, need: str, limit: int) -> tuple[list[dict[str, Any]], str]:
+        """Pages about the part: a maker's product page or a datasheet, unverified."""
+        try:
+            hits = await asyncio.wait_for(
+                self._web.search(f"{need} datasheet", limit=limit), _PER_ADAPTER_TIMEOUT_S
+            )
+        except TimeoutError:
+            return [], "timed out"
+        except Exception as exc:  # noqa: BLE001 - the web failing leaves the other lists
+            return [], f"failed: {exc}"[:200]
+        out = []
+        for h in hits:
+            url = str(h.url)
+            out.append(
+                {
+                    "source": "web",
+                    "title": h.title,
+                    "url": url,
+                    "snippet": h.snippet,
+                    "page": "datasheet" if url.lower().split("?")[0].endswith(".pdf") else "page",
+                    "unknown": ["maker", "order code", "size", "pins", "price"],
+                }
+            )
+        return out, f"{len(out)} found"
+
     async def handle_find(self, arguments: dict[str, Any]) -> dict[str, Any]:
         need = str(arguments.get("need") or "").strip()
         if not need:
@@ -272,9 +312,19 @@ class ComponentFinderServer(McpToolServer):
                 for hit in distributors:
                     if not hit.get("in_library") and await self._held(hit["mpn"]):
                         hit["in_library"] = True
+            mode = str(arguments.get("web") or "auto")
+            web: list[dict[str, Any]] = []
+            web_status = "not searched"
+            if self._web is None:
+                web_status = "no web search is configured"
+            elif mode == "on" or (mode == "auto" and not library and len(distributors) < 3):
+                web, web_status = await self._web_hits(need, limit)
             span.set_attribute("component_find.library", len(library))
             span.set_attribute("component_find.distributors", len(distributors))
-        logger.info("component_find", library=len(library), distributors=len(distributors))
+            span.set_attribute("component_find.web", len(web))
+        logger.info(
+            "component_find", library=len(library), distributors=len(distributors), web=len(web)
+        )
         if library:
             nxt = "Prefer a library part: set the studio part's library to its name."
         elif distributors:
@@ -282,13 +332,21 @@ class ComponentFinderServer(McpToolServer):
                 "No library part fits. Read the best candidate's datasheet for its size and "
                 "pins, then register it with component.adopt."
             )
+        elif web:
+            nxt = (
+                "Only web pages found: no distributor carries it. Read the most likely page "
+                "with web.fetch; if it is the part, register it with library.register_component, "
+                "its maker, order code, size and pins each sourced to that page."
+            )
         else:
             nxt = "Nothing found. Try other words, a part number, or fewer constraints."
         return {
             "library": library,
             "distributors": distributors[: limit * 2],
+            "web": web,
             "searched": {
                 "library": self._library is not None,
+                "web": web_status,
                 "distributors": status
                 or ({} if self._adapters else {"none": "no distributor is configured"}),
             },

@@ -15,7 +15,7 @@ blocked, and what is still unknown.
 1. **Say the need in a few words**, with the part's job and its key limits: `"ESP32-S3
    module USB-C"`, `"WS2812B ring 12 pixel"`, `"BLDC driver 24V 5A"`. A part number works
    too. Pass `region` (for example `UK`) when the owner wants local supply.
-2. **Call `component.find` once.** Read both lists before choosing.
+2. **Call `component.find` once.** Read every list before choosing.
    - **A library part fits:** use it. Link it by its library `name` (in a studio, the
      part's `"library"`); the library fills its maker, order code, datasheet, size, model
      and price. Do not read the entry unless you need something in it to decide.
@@ -23,6 +23,13 @@ blocked, and what is still unknown.
      and what you would use instead.
    - **Only distributor parts fit:** prefer one in production, in stock, with a datasheet.
      Note which distributor you will record (`source`).
+   - **Only web pages fit** (`web`): no distributor carries the part, as for many boards
+     sold only by their maker. A web result is a page, not a part: read it with `web.fetch`.
+     If it is the part, register it with `library.register_component` (maker, order code,
+     datasheet, size and pins, each sourced to the page you read), not `component.adopt`,
+     which needs a distributor's offer. `web: "on"` searches the web even when the library or
+     the distributors found something; each web search is a paid API call, so leave it on
+     `auto` unless the person asks.
 3. **Read the datasheet** of the distributor part you choose (its `datasheet_url`, with
    `web_fetch` or `knowledge.extract`) for what the library needs and the distributor does not
    give: its outline (length, width, height in mm) and its pins. Write down the page each value
