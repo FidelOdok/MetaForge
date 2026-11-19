@@ -2809,13 +2809,66 @@ class UnifiedMcpServer:
                     tool_id, caller, "policy", by_policy, 0.0, None, call_id
                 )
 
+        # A question asked inside the result (2026-07-28: Claude Code,
+        # claude.ai connected to a machine) is a durable approval too, like
+        # the stream route's: keyed by session, tool, arguments and project,
+        # open for the full approval lifetime. A person who does not answer
+        # before the client gives up (Claude Code: 120 s) finds it on the
+        # dashboard, behind the item link, and the identical retry asks again
+        # about the same approval or runs once on a decision made meanwhile.
+        mrtr_durable = (
+            can_elicit
+            and mrtr is not None
+            and callable(getattr(ledger, "find_hold", None))
+            and callable(getattr(ledger, "consume_hold", None))
+        )
+        durable_ask: dict[str, Any] = {}
+        reuse_id: str | None = None
+        # find_hold / consume_hold are the durable ledger's, checked above.
+        durable: Any = ledger
+        if mrtr_durable:
+            project = _effective_project(arguments)
+            key, args_hash = approval_key(
+                tool_id, arguments, session=_stable_session(), project=project
+            )
+            durable_ask = {
+                "approval_key": key,
+                "arguments_hash": args_hash,
+                "session_id": _stable_session() or None,
+            }
+            found = await durable.find_hold(key)
+            if found is not None and found.resolution is not None:
+                used = await durable.consume_hold(found.approval_id, retry=True)
+                if used is not None:
+                    self._forget_hold(found.approval_id)
+                    item_url = approval_url(found.approval_id, self._deeplinks)
+                    return await self._approved(
+                        tool_id,
+                        caller,
+                        "retry",
+                        used,
+                        0.0,
+                        found.approval_id,
+                        call_id,
+                        None,
+                        self._durable_where("elicitation", item_url),
+                    )
+            elif found is not None:
+                reuse_id = found.approval_id
+                logger.info(
+                    "mcp_tool_call_asked_again",
+                    tool_id=tool_id,
+                    approval_id=reuse_id,
+                    route="mrtr",
+                )
+
         # In-harness first: the person who asked for this is looking at that
         # window. Not a fallback chain -- once a client has been asked, going
         # on to the dashboard would put the same question to a second person
         # and discard the first answer.
         if can_elicit and mrtr is not None and self._approval_ledger is not None:
             # FORGE-601: the question goes back inside the result.
-            gate: Any = mrtr_gate(mrtr, self._mrtr_signer, self._approval_ledger)
+            gate: Any = mrtr_gate(mrtr, self._mrtr_signer, self._approval_ledger, reuse=reuse_id)
         else:
             gate = (
                 elicitation_gate(self._elicitor, self._approval_ledger)
@@ -2901,10 +2954,11 @@ class UnifiedMcpServer:
                         caller=caller,
                         reason=decision.reason,
                         project=_effective_project(arguments),
-                        timeout_seconds=window,
+                        timeout_seconds=tool_approval_ttl_seconds() if mrtr_durable else window,
                         on_held=on_held if route == "dashboard" else None,
                         client=self._client_label(),
                         requested_by=_requester(),
+                        **durable_ask,
                     )
                 )
             )
@@ -2934,6 +2988,10 @@ class UnifiedMcpServer:
                 detail=str(unattended),
             )
             return await self._authorise(tool_id, arguments, call_id, progress_token)
+        if mrtr_durable and resolution.approval_id:
+            # Answered in the prompt and acted on now: used, so the identical
+            # call later does not run it a second time.
+            await durable.consume_hold(resolution.approval_id)
         return await self._approved(
             tool_id,
             caller,

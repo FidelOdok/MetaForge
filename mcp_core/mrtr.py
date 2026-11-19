@@ -264,12 +264,25 @@ def _outcome(result: ElicitResult) -> ApprovalOutcome:
     return outcome_of_answer(result)
 
 
-def mrtr_gate(ctx: MrtrContext, signer: StateSigner, ledger: ApprovalLedger) -> ApprovalGateFn:
-    """The approval gate for a held write on a handshake-free request."""
+def mrtr_gate(
+    ctx: MrtrContext,
+    signer: StateSigner,
+    ledger: ApprovalLedger,
+    reuse: str | None = None,
+) -> ApprovalGateFn:
+    """The approval gate for a held write on a handshake-free request.
+
+    ``reuse`` names a still-pending durable approval for the identical call
+    (a person who did not answer last time is asked again about the same
+    approval, never a second one).
+    """
 
     async def gate(ask: ApprovalAsk) -> ApprovalResolution:
         key = ctx.next_key()
         approval_id = ctx.holds.get(key)
+        if approval_id is None and reuse is not None:
+            approval_id = reuse
+            ctx.holds[key] = approval_id
         if approval_id is None:
             # FORGE-473 still holds: the entry exists before the question.
             approval_id = await ledger.open_hold(ask, route=MRTR_ROUTE)
