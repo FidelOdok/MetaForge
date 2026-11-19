@@ -312,6 +312,17 @@ projects. The pending queue keeps polling in a background browser tab, so an
 item that appears while the person is in another window is there when they
 look.
 
+### Questions asked inside the result
+
+A client on the handshake-free revision (Claude Code, claude.ai connected to
+a machine) is asked inside the tool result (`input_required`). That approval is
+durable too: keyed like any held write, open for
+`METAFORGE_TOOL_APPROVAL_TTL_S`, and used once. If the client drops the call
+before the person answers (Claude Code gives up after 120 s), the approval
+stays pending on the dashboard and the identical call asks about it again, or
+runs once on a decision made meanwhile. An answer given in the prompt and acted
+on marks the approval used, so a later identical call is asked afresh.
+
 ### A link for clients that cannot show a prompt
 
 Claude Desktop and claude.ai do not declare MCP elicitation, so their held

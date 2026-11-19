@@ -8,6 +8,7 @@ The ledger is the real gateway app over ASGI, as in the FORGE-473 tests.
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import httpx
@@ -206,6 +207,79 @@ class TestAHeldWriteAsksInsideTheResult:
                 rid=2,
             )
         assert ran == []  # the dashboard said no first
+
+
+@pytest.mark.asyncio
+class TestTheApprovalOutlivesTheClient:
+    """A question asked inside the result is a durable approval (one hour).
+
+    Claude Code and claude.ai drop the call after about 120 s while the prompt
+    is on screen. The approval then waits on the dashboard, behind its item
+    link, and the identical call made again asks about the same approval, or
+    runs once on a decision made meanwhile.
+    """
+
+    async def test_an_unanswered_question_stays_pending_for_the_hour(
+        self, gateway: httpx.AsyncClient
+    ) -> None:
+        ran: list[str] = []
+        async with gateway as http:
+            await _call(_server(http, ran), _params())
+            [entry] = await _entries(http)
+        assert entry["status"] == "awaiting_approval"
+        assert entry["request"]["approval_key"]
+        assert float(entry["request"]["expires_at"]) - time.time() > 3500
+        assert ran == []
+
+    async def test_a_fresh_identical_call_asks_about_the_same_approval(
+        self, gateway: httpx.AsyncClient
+    ) -> None:
+        ran: list[str] = []
+        async with gateway as http:
+            server = _server(http, ran)
+            await _call(server, _params())  # the client gave up on this one
+            again = (await _call(server, _params(), rid=2))["result"]
+            entries = await _entries(http)
+            done = await _call(
+                server,
+                _params(inputResponses=_approve(), requestState=again["requestState"]),
+                rid=3,
+            )
+        assert again["resultType"] == "input_required"
+        assert len(entries) == 1  # never a second approval
+        assert done["result"]["resultType"] == "complete"
+        assert ran == ["twin.commit_geometry"]
+
+    async def test_a_dashboard_approval_runs_the_fresh_call_once(
+        self, gateway: httpx.AsyncClient
+    ) -> None:
+        ran: list[str] = []
+        async with gateway as http:
+            server = _server(http, ran)
+            await _call(server, _params())
+            [entry] = await _entries(http)
+            await http.post(f"{LIST}/{entry['id']}/resolve", json={"outcome": "approved"})
+            runs = await _call(server, _params(), rid=2)
+            once_more = (await _call(server, _params(), rid=3))["result"]
+        assert runs["result"]["resultType"] == "complete"
+        assert ran == ["twin.commit_geometry"]
+        assert once_more["resultType"] == "input_required"  # a new approval, not a rerun
+
+    async def test_answered_in_the_prompt_it_is_not_run_again_later(
+        self, gateway: httpx.AsyncClient
+    ) -> None:
+        ran: list[str] = []
+        async with gateway as http:
+            server = _server(http, ran)
+            first = (await _call(server, _params()))["result"]
+            await _call(
+                server,
+                _params(inputResponses=_approve(), requestState=first["requestState"]),
+                rid=2,
+            )
+            later = (await _call(server, _params(), rid=3))["result"]
+        assert ran == ["twin.commit_geometry"]
+        assert later["resultType"] == "input_required"
 
 
 @pytest.mark.asyncio

@@ -450,6 +450,12 @@ Give it an hour in your Claude Code settings:
 
 Restart Claude Code after changing it. `/metaforge:doctor` checks it.
 
+Either way the approval itself is not lost: a question asked inside the
+result is a durable approval, open for an hour like any held write. Unanswered,
+it waits on the dashboard behind its item link, and the identical call made
+again asks about the same approval (never a second one), or runs once on a
+decision made there meanwhile.
+
 ### When it is not approved
 
 The call comes back as a JSON-RPC error naming the outcome, the approval
