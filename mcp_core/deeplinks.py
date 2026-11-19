@@ -163,3 +163,21 @@ def links_for(builder: DeepLinkBuilder | None, tool_id: str, result: Any) -> lis
     if builder is None:
         return []
     return [{"url": link.url, "label": link.label} for link in builder.for_tool(tool_id, result)]
+
+
+#: Where the server finds the dashboard; also read by tools that build a link
+#: without a server instance at hand (approvals.decide).
+DASHBOARD_URL_ENV = "METAFORGE_DASHBOARD_URL"
+
+
+def approval_url(approval_id: str, builder: DeepLinkBuilder | None = None) -> str | None:
+    """The dashboard page for one approval: ``/approvals?item=<id>``.
+
+    The Approvals page opens with that item first and highlighted. ``None``
+    when no dashboard URL is configured, so nobody is sent a link that does
+    not go anywhere.
+    """
+    import os
+
+    links = builder or DeepLinkBuilder(os.environ.get(DASHBOARD_URL_ENV))
+    return links.build("approvals", {"item": approval_id})

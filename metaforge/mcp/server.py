@@ -48,7 +48,7 @@ from mcp_core.approval_hold import (
     tool_approval_ttl_seconds,
 )
 from mcp_core.auth import UNKNOWN_AUTH, AuthPosture
-from mcp_core.deeplinks import DeepLinkBuilder, links_for
+from mcp_core.deeplinks import DeepLinkBuilder, approval_url, links_for
 from mcp_core.elicitation import (
     ELICITATION_PROTOCOL_VERSION,
     ElicitationUnavailableError,
@@ -3155,11 +3155,12 @@ class UnifiedMcpServer:
             )
             self._watch_hold(found.approval_id, tool_id)
             if not (route == "elicitation" and not self._prompt_outlives_call()):
+                item_url = approval_url(found.approval_id, self._deeplinks) or approvals_url
                 raise self._held_error(
                     tool_id,
                     found.approval_id,
-                    where,
-                    approvals_url,
+                    self._durable_where(route, item_url),
+                    item_url,
                     found.expires_at,
                     repeated=True,
                     route=route,
@@ -3322,14 +3323,21 @@ class UnifiedMcpServer:
             route=route,
             window_seconds=ttl,
         )
+        item_url = approval_url(approval_id, self._deeplinks) or approvals_url
         raise self._held_error(
-            tool_id, approval_id, where, approvals_url, expires_at, route=route, note=note
+            tool_id,
+            approval_id,
+            self._durable_where(route, item_url),
+            item_url,
+            expires_at,
+            route=route,
+            note=note,
         )
 
     def _durable_where(self, route: str, approvals_url: str | None) -> str:
         """Every place a durable hold can be decided, for the agent to relay."""
         page = (
-            f"the MetaForge dashboard Approvals page ({approvals_url})"
+            f"the MetaForge dashboard Approvals page ({approvals_url}, one click to decide it)"
             if approvals_url
             else "the MetaForge dashboard Approvals page"
         )
