@@ -2552,6 +2552,17 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
     except Exception as exc:  # noqa: BLE001
         logger.warning("mcp_collaborator_init_failed", collaborator="renderer", error=str(exc))
 
+    # twin.delete_work_product: the same delete as DELETE /v1/twin/nodes/{id}.
+    try:
+        from api_gateway.twin.node_delete import make_work_product_deleter
+
+        if project_backend is not None:
+            bindings["work_product_deleter"] = make_work_product_deleter(
+                twin, unlink_everywhere=project_backend.unlink_work_product_everywhere
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("mcp_collaborator_init_failed", collaborator="deleter", error=str(exc))
+
     # FORGE-687: twin.record_design_files, whose kicad.export_svg previews go
     # through this server's own registry once it exists.
     try:

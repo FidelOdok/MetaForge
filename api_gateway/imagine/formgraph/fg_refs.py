@@ -302,6 +302,13 @@ def validate_refs(refs, folder, cfg, E, W):
                 v = r.get(k)
                 if v is not None and not (isinstance(v, list) and len(v) == 3 and all(isinstance(x, (int, float)) for x in v)):
                     E.append(f'{where}: {k} must be [x, y, z].')
+            # MetaForge: one colour and opacity for the whole reference, in place of the role's.
+            c = r.get('color')
+            if c is not None and not (isinstance(c, str) and re.fullmatch(r'#[0-9A-Fa-f]{6}', c)):
+                E.append(f'{where}: color must be a hex colour like #3A5F7D.')
+            o = r.get('opacity')
+            if o is not None and not (isinstance(o, (int, float)) and not isinstance(o, bool) and 0.05 <= o <= 1):
+                E.append(f'{where}: opacity must be between 0.05 and 1.')
         if r['kind'] == 'video' and len(r.get('frames') or []) > MAX_FRAMES:
             E.append(f'{where} lists {len(r["frames"])} frames; keep it to {MAX_FRAMES} or fewer to save compute.')
         if r['kind'] == 'video' and not r.get('frames'):

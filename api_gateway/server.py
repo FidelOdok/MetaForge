@@ -1013,14 +1013,19 @@ async def _init_orchestrator(app: FastAPI) -> None:
     )
     # FORGE-630: twin.render_work_product -- the model converted to GLB and
     # rendered by blender.render over the same lazy-bridge seam.
+    from api_gateway.projects.routes import unlink_work_product_from_all_projects
     from api_gateway.twin.concept_image import make_concept_image_recorder
     from api_gateway.twin.concept_mesh import make_concept_mesh_recorder
     from api_gateway.twin.concept_parts import make_concept_parts_service
     from api_gateway.twin.image_critique import make_concept_image_critic
+    from api_gateway.twin.node_delete import make_work_product_deleter
     from api_gateway.twin.render_recorder import make_work_product_renderer
     from api_gateway.twin.sketch_generation import make_sketch_generator
     from api_gateway.twin.structured_mesh import make_structured_mesh_recorder
 
+    work_product_deleter_fn = make_work_product_deleter(
+        twin, unlink_everywhere=unlink_work_product_from_all_projects
+    )
     work_product_renderer_bridge = _LazyBridge()
     work_product_renderer_fn = make_work_product_renderer(
         twin, project_backend, mcp_bridge=work_product_renderer_bridge
@@ -1375,6 +1380,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
         overhang_evaluator=overhang_evaluator_fn,
         # FORGE-630: renders of a work product, bound to active_bridge below.
         work_product_renderer=work_product_renderer_fn,
+        # twin.delete_work_product: the same delete as DELETE /v1/twin/nodes/{id}.
+        work_product_deleter=work_product_deleter_fn,
         # FORGE-761: AI concept images from a block layout and a brief. The
         # provider is resolved per call, so an unconfigured one is a clear
         # error on that call and never a startup failure.

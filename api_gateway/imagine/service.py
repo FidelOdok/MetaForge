@@ -752,6 +752,10 @@ class ImagineService:
         note: str | None = None,
         units: str | None = None,
         up: str | None = None,
+        at: list[float] | None = None,
+        rotate: list[float] | None = None,
+        color: str | None = None,
+        opacity: float | None = None,
         actor: str,
         step_converter: Any = None,
     ) -> StudioResponse:
@@ -763,6 +767,12 @@ class ImagineService:
         display and writes it into ``context.references`` as the studio's next revision.
         A reference with the same id is replaced. The full mesh's size is kept in
         ``stats``; the page and its checks use that.
+
+        The engine centres the mesh on X and Z and puts its lowest point at Y = 0, then
+        moves it to ``at`` and turns it by ``rotate`` (degrees, about X, Y, Z). ``origin``
+        records which point of the file that is, in studio axes (mm, Y up), so an offset
+        worked out from the full-resolution model lands where it was meant to.
+        ``color`` and ``opacity`` replace the role's see-through colour for the whole mesh.
         """
         import os
         import tempfile
@@ -821,6 +831,19 @@ class ImagineService:
                 raise ImagineError(f"units must be one of {', '.join(sorted(fg_refs.UNITS))}")
             if up is not None and up not in ("y", "z"):
                 raise ImagineError("up must be y or z")
+            for name, vec in (("at", at), ("rotate", rotate)):
+                if vec is not None and not (
+                    isinstance(vec, list)
+                    and len(vec) == 3
+                    and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in vec)
+                ):
+                    raise ImagineError(f"{name} must be [x, y, z]")
+            if color is not None and not re.fullmatch(r"#[0-9A-Fa-f]{6}", str(color)):
+                raise ImagineError("color must be a hex colour like #3A5F7D")
+            if opacity is not None:
+                numeric = isinstance(opacity, (int, float)) and not isinstance(opacity, bool)
+                if not numeric or not 0.05 <= float(opacity) <= 1:
+                    raise ImagineError("opacity must be between 0.05 and 1")
 
             def _read(data: bytes) -> tuple[Any, str, str]:
                 with tempfile.TemporaryDirectory() as tmp:
@@ -855,6 +878,16 @@ class ImagineService:
             }
             if note:
                 ref["note"] = note
+            lo, hi = packed["stats"]["min"], packed["stats"]["max"]
+            ref["origin"] = [round((lo[0] + hi[0]) / 2, 2), lo[1], round((lo[2] + hi[2]) / 2, 2)]
+            for key, value in (
+                ("at", at),
+                ("rotate", rotate),
+                ("color", color),
+                ("opacity", opacity),
+            ):
+                if value is not None:
+                    ref[key] = value
             config = copy.deepcopy(head.state["config"])
             context = config.setdefault("context", {})
             refs = context.get("references")

@@ -1456,7 +1456,12 @@ per-product formgraph config for Create's Imagine stage
 - `twin.imagine_add_mesh_reference` (additive): puts a twin model in the studio
   as a see-through mesh reference. Takes `work_product_id` (a STEP, GLB, STL or
   OBJ in the twin), `id` (a slug), `title`, `role` (`context` by default,
-  `envelope`, `target` or `look`), and optionally `note`, `units` and `up`. A
+  `envelope`, `target` or `look`), and optionally `note`, `units`, `up`, `at`
+  (mm), `rotate` (degrees about X, Y, Z), `color` (hex) and `opacity` (0.05 to
+  1). The studio centres the mesh on X and Z with its lowest point at Y = 0,
+  then moves it to `at`; the stored `origin` is the file point that lands
+  there, in studio axes, so `at = W - (P - origin)` puts file point P at W.
+  `twin.imagine_patch_studio` changes any of these later. A
   STEP goes through the OCCT converter the viewer uses (millimetres, Z up). The
   mesh is reduced for display and written into `context.references` with its
   full size in `stats`, as the next revision; a reference with the same id is

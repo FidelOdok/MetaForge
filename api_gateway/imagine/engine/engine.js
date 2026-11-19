@@ -2739,8 +2739,9 @@ lbx.addEventListener('click',e=>{if(e.target.closest&&e.target.closest('figure')
 function refMesh(r){if(REFO[r.id])return REFO[r.id];const buf=x=>Uint8Array.from(atob(x),c=>c.charCodeAt(0)).buffer;
   const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(buf(r.mesh.pos)),3));g.setIndex(new THREE.BufferAttribute(new Uint32Array(buf(r.mesh.idx)),1));
   g.computeBoundingBox();const bb=g.boundingBox;g.translate(-(bb.min.x+bb.max.x)/2,-bb.min.y,-(bb.min.z+bb.max.z)/2);g.computeVertexNormals();
-  const col=r.role==='envelope'?'#d9534f':r.role==='target'?'#3b82f6':'#9aa3ad';
-  const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:new THREE.Color(col).convertSRGBToLinear(),transparent:true,opacity:.26,depthWrite:false,roughness:.85,side:THREE.DoubleSide}));
+  const col=/^#[0-9a-f]{6}$/i.test(r.color||'')?r.color:r.role==='envelope'?'#d9534f':r.role==='target'?'#3b82f6':'#9aa3ad';
+  const op=typeof r.opacity==='number'&&r.opacity>=.05&&r.opacity<=1?r.opacity:.26;
+  const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:new THREE.Color(col).convertSRGBToLinear(),transparent:op<1,opacity:op,depthWrite:op>=1,roughness:.85,side:THREE.DoubleSide}));
   const at=r.at||[0,0,0],ro=(r.rotate||[0,0,0]).map(d=>d*Math.PI/180);m.position.set(at[0],at[1],at[2]);m.rotation.set(ro[0],ro[1],ro[2]);m.renderOrder=3;scene.add(m);REFO[r.id]=m;return m;}
 const refShown=r=>S.refShow[r.id]!=null?S.refShow[r.id]:r.role!=='look';
 function refVis(){REFS.filter(r=>r.kind==='mesh'&&r.mesh).forEach(r=>{refMesh(r).visible=refShown(r)&&S.view!=='sim';});}

@@ -688,6 +688,8 @@ DESTRUCTIVE: frozenset[str] = frozenset(
         "omniverse_usd.convert_glb_to_usd",
         "project.delete",
         "project.update",
+        # Removes a node, its stored files and its project links; not undoable.
+        "twin.delete_work_product",
         "twin.approve_engineering_change",
         "twin.approve_engineering_entity",
         # Same human-authority-approval family as the two lines above: it

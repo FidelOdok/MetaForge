@@ -176,3 +176,70 @@ async def test_the_tool_returns_the_reference_without_the_mesh(tmp_path: Path) -
     assert "mesh" not in got["reference"]
     with pytest.raises(ValueError, match="'id' is required"):
         await srv.imagine_add_mesh_reference({"project_id": PROJECT, "work_product_id": wp_id})
+
+
+async def test_placement_and_colour_are_stored_with_the_origin(tmp_path: Path) -> None:
+    svc, wp_id = await _studio_with(tmp_path, "airframe", "stl", _stl())
+    out = await svc.add_mesh_reference(
+        PROJECT,
+        work_product_id=wp_id,
+        ref_id="m30",
+        title="M30",
+        at=[0, -120.5, 0],
+        rotate=[0, 90, 0],
+        color="#3A3F44",
+        opacity=0.6,
+        actor="test",
+    )
+    ref = _ref(out, "m30")
+    assert ref["at"] == [0, -120.5, 0] and ref["rotate"] == [0, 90, 0]
+    assert ref["color"] == "#3A3F44" and ref["opacity"] == 0.6
+    # The box spans x 0..100, height 0..10, depth -20..0 in studio axes, so the point
+    # the engine moves to `at` is its X/Z centre at its base.
+    assert ref["origin"] == [50.0, 0.0, -10.0]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "says"),
+    [
+        ({"at": [1, 2]}, "at must be"),
+        ({"rotate": [0, "90", 0]}, "rotate must be"),
+        ({"color": "grey"}, "hex colour"),
+        ({"opacity": 0}, "opacity"),
+        ({"opacity": True}, "opacity"),
+    ],
+)
+async def test_a_bad_placement_or_colour_is_refused(
+    tmp_path: Path, kwargs: dict[str, Any], says: str
+) -> None:
+    svc, wp_id = await _studio_with(tmp_path, "airframe", "stl", _stl())
+    with pytest.raises(ImagineError, match=says):
+        await svc.add_mesh_reference(
+            PROJECT, work_product_id=wp_id, ref_id="m30", title="M30", actor="test", **kwargs
+        )
+
+
+async def test_a_patch_moves_and_recolours_the_reference(tmp_path: Path) -> None:
+    svc, wp_id = await _studio_with(tmp_path, "airframe", "stl", _stl())
+    out = await svc.add_mesh_reference(
+        PROJECT, work_product_id=wp_id, ref_id="m30", title="M30", actor="test"
+    )
+    base = "/context/references/references/m30"
+    patched = await svc.patch_studio(
+        PROJECT,
+        out.revision,
+        [
+            {"op": "add", "path": f"{base}/at", "value": [10, 0, 5]},
+            {"op": "add", "path": f"{base}/color", "value": "#202428"},
+        ],
+        actor="test",
+    )
+    ref = _ref(patched, "m30")
+    assert ref["at"] == [10, 0, 5] and ref["color"] == "#202428"
+    with pytest.raises(ImagineError):
+        await svc.patch_studio(
+            PROJECT,
+            patched.revision,
+            [{"op": "add", "path": f"{base}/opacity", "value": 5}],
+            actor="test",
+        )

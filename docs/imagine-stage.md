@@ -682,6 +682,13 @@ and writes it into `context.references` as the next revision. Use it for a model
 draw from primitives: an airframe the product mounts on (`context`), a space it must fit
 (`envelope`). A surface-only STEP, with no solids, still shows; it cannot be used for fit checks.
 
+The engine centres the mesh on X and Z, puts its lowest point at Y = 0, then moves it to `at` (mm)
+and turns it by `rotate` (degrees about X, Y and Z). Studio axes are Y up, so a Z-up STEP point
+(x, y, z) is (x, z, -y). The reference records `origin`, the file point that lands on `at`, so an
+offset worked out from the full-resolution model is exact: `at = W - (P - origin)`. `color` (hex)
+and `opacity` replace the role's see-through colour for the whole mesh. The STEP's own face colours
+are not kept: the display reduction merges vertices, so a per-face colour has nowhere to go yet.
+
 ### Real parts and the component library
 
 A real part in `context.components.parts` can name its entry in the component library with
