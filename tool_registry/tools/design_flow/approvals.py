@@ -27,6 +27,7 @@ from typing import Any
 import structlog
 
 from mcp_core.context import current_context
+from mcp_core.deeplinks import approval_url
 from mcp_core.elicitation import ElicitAction, ElicitResult, current_elicitor, inline_approver
 from mcp_core.guardrails import Approver
 from observability.tracing import get_tracer
@@ -192,11 +193,18 @@ def approval_question(
 
 
 def _open(item: dict[str, Any] | None, message: str) -> dict[str, Any]:
-    return {
+    out: dict[str, Any] = {
         "status": "pending",
         "approval": _summary(item) if item else None,
         "message": message,
     }
+    url = approval_url(str(item["id"])) if item and item.get("id") else None
+    if url:
+        # A client that cannot show a prompt (claude.ai, Claude Desktop) can
+        # still give the person one click to the decision.
+        out["approve_url"] = url
+        out["message"] = f"{message} Give the person this link to decide it: {url}"
+    return out
 
 
 async def decide_approval(

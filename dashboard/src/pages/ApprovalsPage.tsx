@@ -1,46 +1,46 @@
-import { useState } from 'react';
-import { PageHeader } from '../components/ui/PageHeader';
-import { Link } from 'react-router-dom';
+import { useEffect, useRef, useState } from "react";
+import { PageHeader } from "../components/ui/PageHeader";
+import { Link, useSearchParams } from "react-router-dom";
 
-import { ApprovalCard } from '../components/approvals/ApprovalCard';
-import { EmptyState } from '../components/ui/EmptyState';
-import { useActiveProject } from '../hooks/use-active-project';
-import { useApprovals } from '../hooks/use-approvals';
-import { formatRelativeTime } from '../utils/format-time';
-import type { ApprovalItem, ApprovalKind } from '../types/approvals';
+import { ApprovalCard } from "../components/approvals/ApprovalCard";
+import { EmptyState } from "../components/ui/EmptyState";
+import { useActiveProject } from "../hooks/use-active-project";
+import { useApprovals } from "../hooks/use-approvals";
+import { formatRelativeTime } from "../utils/format-time";
+import type { ApprovalItem, ApprovalKind } from "../types/approvals";
 
 const KC = {
-  onSurface: 'var(--mf-c-e2e2eb)',
-  onSurfaceVariant: 'var(--mf-c-9a9aaa)',
-  success: 'var(--mf-c-3dd68c)',
-  error: 'var(--mf-c-ffb4ab)',
-  border: 'var(--mf-r-65-72-90-0p2)',
-  glass: 'var(--mf-r-30-31-38-0p85)',
-  surfaceLowest: 'var(--mf-c-0c0e14)',
+  onSurface: "var(--mf-c-e2e2eb)",
+  onSurfaceVariant: "var(--mf-c-9a9aaa)",
+  success: "var(--mf-c-3dd68c)",
+  error: "var(--mf-c-ffb4ab)",
+  border: "var(--mf-r-65-72-90-0p2)",
+  glass: "var(--mf-r-30-31-38-0p85)",
+  surfaceLowest: "var(--mf-c-0c0e14)",
 } as const;
 
 const KINDS: { value: ApprovalKind; label: string }[] = [
-  { value: 'gate', label: 'Gate' },
-  { value: 'flow_proposal', label: 'Flow proposal' },
-  { value: 'flow_version', label: 'Flow version' },
-  { value: 'flow_patch', label: 'Flow patch' },
-  { value: 'tool_call', label: 'Tool call' },
-  { value: 'human_authority', label: 'Human authority' },
-  { value: 'design_change', label: 'Design change' },
-  { value: 'design_loop', label: 'Design loop' },
-  { value: 'sketch', label: 'Sketch' },
-  { value: 'parametric_sketch', label: 'Parametric sketch' },
-  { value: 'rerun', label: 'Re-check' },
-  { value: 'drawing', label: 'Drawing' },
-  { value: 'upload', label: 'Upload' },
+  { value: "gate", label: "Gate" },
+  { value: "flow_proposal", label: "Flow proposal" },
+  { value: "flow_version", label: "Flow version" },
+  { value: "flow_patch", label: "Flow patch" },
+  { value: "tool_call", label: "Tool call" },
+  { value: "human_authority", label: "Human authority" },
+  { value: "design_change", label: "Design change" },
+  { value: "design_loop", label: "Design loop" },
+  { value: "sketch", label: "Sketch" },
+  { value: "parametric_sketch", label: "Parametric sketch" },
+  { value: "rerun", label: "Re-check" },
+  { value: "drawing", label: "Drawing" },
+  { value: "upload", label: "Upload" },
 ];
 
-type Tab = 'pending' | 'audit';
+type Tab = "pending" | "audit";
 
 const panel: React.CSSProperties = {
   background: KC.glass,
-  backdropFilter: 'blur(16px)',
-  WebkitBackdropFilter: 'blur(16px)',
+  backdropFilter: "blur(16px)",
+  WebkitBackdropFilter: "blur(16px)",
   border: `1px solid ${KC.border}`,
   borderRadius: 4,
 };
@@ -48,9 +48,12 @@ const panel: React.CSSProperties = {
 function AuditTable({ items }: { items: ApprovalItem[] }) {
   return (
     <div className="overflow-auto">
-      <table className="w-full font-mono" style={{ fontSize: 12, color: KC.onSurface }}>
+      <table
+        className="w-full font-mono"
+        style={{ fontSize: 12, color: KC.onSurface }}
+      >
         <thead>
-          <tr style={{ color: KC.onSurfaceVariant, textAlign: 'left' }}>
+          <tr style={{ color: KC.onSurfaceVariant, textAlign: "left" }}>
             <th>Item</th>
             <th>Outcome</th>
             <th>Who</th>
@@ -65,18 +68,37 @@ function AuditTable({ items }: { items: ApprovalItem[] }) {
           {items.map((item) => {
             const d = item.decision;
             return (
-              <tr key={item.id} data-testid="audit-row" style={{ borderTop: `1px solid ${KC.border}` }}>
+              <tr
+                key={item.id}
+                data-testid="audit-row"
+                style={{ borderTop: `1px solid ${KC.border}` }}
+              >
                 <td>{item.title}</td>
-                <td style={{ color: item.status === 'approved' ? KC.success : item.status === 'rejected' ? KC.error : undefined }}>
+                <td
+                  style={{
+                    color:
+                      item.status === "approved"
+                        ? KC.success
+                        : item.status === "rejected"
+                          ? KC.error
+                          : undefined,
+                  }}
+                >
                   {d ? d.decision : item.status}
-                  {d?.reason ? `: ${d.reason}` : ''}
+                  {d?.reason ? `: ${d.reason}` : ""}
                 </td>
-                <td>{d?.approver ?? 'unknown'}</td>
-                <td>{d?.surface ?? 'unknown'}</td>
-                <td>{d?.agent ?? 'none'}</td>
-                <td>{d?.on_behalf_of ?? 'none'}</td>
-                <td>{d ? (d.approver_verified ? 'verified' : 'unverified') : 'n/a'}</td>
-                <td>{d ? formatRelativeTime(d.decided_at) : 'n/a'}</td>
+                <td>{d?.approver ?? "unknown"}</td>
+                <td>{d?.surface ?? "unknown"}</td>
+                <td>{d?.agent ?? "none"}</td>
+                <td>{d?.on_behalf_of ?? "none"}</td>
+                <td>
+                  {d
+                    ? d.approver_verified
+                      ? "verified"
+                      : "unverified"
+                    : "n/a"}
+                </td>
+                <td>{d ? formatRelativeTime(d.decided_at) : "n/a"}</td>
               </tr>
             );
           })}
@@ -86,17 +108,47 @@ function AuditTable({ items }: { items: ApprovalItem[] }) {
   );
 }
 
+/**
+ * The approval a link points at (`/approvals?item=<id>`): an MCP client that
+ * cannot show an approval prompt (Claude Desktop, claude.ai) gives the person
+ * this link instead. Matches the full id (`tool:run_...`) or the bare one the
+ * held call reported (`run_...`).
+ */
+export function matchesLinkedItem(
+  itemId: string,
+  linked: string | null,
+): boolean {
+  if (!linked) return false;
+  return itemId === linked || itemId.endsWith(`:${linked}`);
+}
+
 export function ApprovalsPage() {
   const { activeProjectId } = useActiveProject();
-  const [tab, setTab] = useState<Tab>('pending');
-  const [kind, setKind] = useState<ApprovalKind | ''>('');
+  const [tab, setTab] = useState<Tab>("pending");
+  const [kind, setKind] = useState<ApprovalKind | "">("");
 
   const query = useApprovals({
-    status: tab === 'pending' ? 'pending' : 'decided',
+    status: tab === "pending" ? "pending" : "decided",
     projectId: activeProjectId ?? undefined,
     kind: kind || undefined,
   });
-  const items = query.data?.items ?? [];
+  const [params] = useSearchParams();
+  const linked = params.get("item");
+  const all = query.data?.items ?? [];
+  // The linked approval first, so one click from the chat lands on it.
+  const items = linked
+    ? [
+        ...all.filter((i) => matchesLinkedItem(i.id, linked)),
+        ...all.filter((i) => !matchesLinkedItem(i.id, linked)),
+      ]
+    : all;
+  const linkedFound =
+    linked !== null && all.some((i) => matchesLinkedItem(i.id, linked));
+  const linkedRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (linkedFound)
+      linkedRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [linkedFound]);
   // Items with no project are dropped server-side when a project is selected.
   // Said out loud: an approval that quietly disappears is the one nobody answers.
   const unscoped = query.data?.unscopedCount ?? 0;
@@ -105,29 +157,33 @@ export function ApprovalsPage() {
     <div>
       <PageHeader
         title="Approvals"
-        meta={`human-in-the-loop review · ${activeProjectId ? 'this project' : 'all projects'}`}
+        meta={`human-in-the-loop review · ${activeProjectId ? "this project" : "all projects"}`}
         actions={
-        <label className="mf-field">
-          Kind
-          <select
-            aria-label="Filter by kind"
-            value={kind}
-            onChange={(e) => setKind(e.target.value as ApprovalKind | '')}
-            className="mf-select"
-          >
-            <option value="">All kinds</option>
-            {KINDS.map((k) => (
-              <option key={k.value} value={k.value}>
-                {k.label}
-              </option>
-            ))}
-          </select>
-        </label>
+          <label className="mf-field">
+            Kind
+            <select
+              aria-label="Filter by kind"
+              value={kind}
+              onChange={(e) => setKind(e.target.value as ApprovalKind | "")}
+              className="mf-select"
+            >
+              <option value="">All kinds</option>
+              {KINDS.map((k) => (
+                <option key={k.value} value={k.value}>
+                  {k.label}
+                </option>
+              ))}
+            </select>
+          </label>
         }
       />
 
-      <div role="tablist" aria-label="Approvals views" className="mf-chips mb-3">
-        {(['pending', 'audit'] as const).map((t) => (
+      <div
+        role="tablist"
+        aria-label="Approvals views"
+        className="mf-chips mb-3"
+      >
+        {(["pending", "audit"] as const).map((t) => (
           <button
             key={t}
             type="button"
@@ -136,21 +192,43 @@ export function ApprovalsPage() {
             onClick={() => setTab(t)}
             className="mf-chip"
           >
-            {t === 'pending' ? 'PENDING' : 'AUDIT'}
+            {t === "pending" ? "PENDING" : "AUDIT"}
           </button>
         ))}
       </div>
 
+      {linked && tab === "pending" && !query.isLoading && !linkedFound && (
+        <p
+          className="font-mono"
+          role="status"
+          data-testid="approvals-linked-missing"
+          style={{ fontSize: 12, color: KC.onSurfaceVariant }}
+        >
+          The approval you followed a link to is not pending here: it may
+          already be decided, have expired, or belong to another project.
+        </p>
+      )}
+
       {unscoped > 0 && (
-        <p className="font-mono" role="status" data-testid="approvals-unscoped" style={{ fontSize: 12, color: KC.onSurfaceVariant }}>
-          {unscoped} item{unscoped === 1 ? '' : 's'} not shown: no project recorded.
+        <p
+          className="font-mono"
+          role="status"
+          data-testid="approvals-unscoped"
+          style={{ fontSize: 12, color: KC.onSurfaceVariant }}
+        >
+          {unscoped} item{unscoped === 1 ? "" : "s"} not shown: no project
+          recorded.
         </p>
       )}
 
       {query.isLoading ? (
         <div className="space-y-3">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="rounded-lg h-24 animate-pulse" style={{ background: KC.glass, border: `1px solid ${KC.border}` }} />
+            <div
+              key={i}
+              className="rounded-lg h-24 animate-pulse"
+              style={{ background: KC.glass, border: `1px solid ${KC.border}` }}
+            />
           ))}
         </div>
       ) : query.isError ? (
@@ -166,23 +244,44 @@ export function ApprovalsPage() {
           <div style={{ padding: 12 }}>
             {items.length === 0 ? (
               <EmptyState
-                title={tab === 'pending' ? 'Nothing awaiting approval' : 'No decisions recorded yet'}
+                title={
+                  tab === "pending"
+                    ? "Nothing awaiting approval"
+                    : "No decisions recorded yet"
+                }
                 description={
-                  tab === 'pending'
-                    ? 'Gates, proposals, held tool calls and design changes that need a human will appear here.'
-                    : 'Decided approvals, with who decided and from where, will appear here.'
+                  tab === "pending"
+                    ? "Gates, proposals, held tool calls and design changes that need a human will appear here."
+                    : "Decided approvals, with who decided and from where, will appear here."
                 }
                 icon={
-                  <span className="material-symbols-outlined" style={{ fontSize: 40, color: KC.onSurfaceVariant }}>
+                  <span
+                    className="material-symbols-outlined"
+                    style={{ fontSize: 40, color: KC.onSurfaceVariant }}
+                  >
                     inbox
                   </span>
                 }
               />
-            ) : tab === 'pending' ? (
+            ) : tab === "pending" ? (
               <div className="space-y-3">
-                {items.map((item) => (
-                  <ApprovalCard key={item.id} item={item} />
-                ))}
+                {items.map((item) =>
+                  matchesLinkedItem(item.id, linked) ? (
+                    <div
+                      key={item.id}
+                      ref={linkedRef}
+                      data-testid="approvals-linked-item"
+                      style={{
+                        outline: "2px solid var(--mf-c-ff5a0a, #ff5a0a)",
+                        borderRadius: 8,
+                      }}
+                    >
+                      <ApprovalCard item={item} />
+                    </div>
+                  ) : (
+                    <ApprovalCard key={item.id} item={item} />
+                  ),
+                )}
               </div>
             ) : (
               <AuditTable items={items} />

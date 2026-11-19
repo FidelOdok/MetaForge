@@ -131,6 +131,24 @@ def test_a_client_that_cannot_ask_decides_nothing() -> None:
     assert gw.decided == []
 
 
+def test_a_client_that_cannot_ask_gets_a_link_to_decide_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Claude Desktop and claude.ai cannot show a prompt: one click instead."""
+    monkeypatch.setenv("METAFORGE_DASHBOARD_URL", "https://app.example.test/")
+    gw = _Gateway([HELD_WRITE])
+    out = _decide(gw, None, "tool:run_9")
+    assert out["approve_url"] == "https://app.example.test/approvals?item=tool%3Arun_9"
+    assert out["approve_url"] in out["message"]
+    assert gw.decided == []
+
+
+def test_no_link_without_a_dashboard_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("METAFORGE_DASHBOARD_URL", raising=False)
+    out = _decide(_Gateway([HELD_WRITE]), None, "tool:run_9")
+    assert "approve_url" not in out
+
+
 def test_an_unknown_or_undecidable_item_is_not_asked() -> None:
     gw = _Gateway([{**HELD_WRITE, "decidable": False, "not_decidable_reason": "it expired"}])
     person = _Person(ElicitResult(ElicitAction.ACCEPT, {"decision": "approve"}))

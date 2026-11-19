@@ -312,6 +312,16 @@ projects. The pending queue keeps polling in a background browser tab, so an
 item that appears while the person is in another window is there when they
 look.
 
+### A link for clients that cannot show a prompt
+
+Claude Desktop and claude.ai do not declare MCP elicitation, so their held
+writes can only be decided on the dashboard. With `METAFORGE_DASHBOARD_URL`
+set, the held-call message and `approvals.decide` (as `approve_url`) give a
+link to that one approval, `/approvals?item=<id>`. The Approvals page opens
+with it first, highlighted and scrolled into view, or says it is no longer
+pending in that view. The link takes either the full id (`tool:run_...`) or
+the bare held-call id (`run_...`).
+
 ## Held tool calls
 
 A write that needs a person (an MCP caller outside a claimed run task, for

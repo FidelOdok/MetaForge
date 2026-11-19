@@ -461,6 +461,28 @@ class TestTheRetryAsksAgain:
         assert response["result"]["_meta"]["approval"]["repeated"] is True
 
 
+class TestTheHeldCallLinksToItsApproval:
+    """A client that cannot show a prompt (Claude Desktop, claude.ai) is given
+    one click to the decision: the Approvals page opened on this approval."""
+
+    async def test_the_message_links_to_this_approval(self, gateway: httpx.AsyncClient) -> None:
+        ran: list[tuple[str, dict[str, Any]]] = []
+        async with gateway as http:
+            server = UnifiedMcpServer(
+                [_adapter(ran)],
+                caller=Caller.REMOTE,
+                approval_gate=build_remote_approval_gate("http://gateway.test", client=http),
+                approval_ledger=RemoteApprovalLedger("http://gateway.test", client=http),
+                dashboard_url="https://app.example.test",
+            )
+            response = await _call(server)
+            approval_id = _held(response)["approval_id"]
+
+        link = f"https://app.example.test/approvals?item={approval_id}"
+        assert link in _text(response)
+        assert ran == []
+
+
 class TestDecideFromAnywhere:
     async def test_the_approvals_page_decides_an_inline_hold_and_first_wins(
         self, gateway: httpx.AsyncClient
