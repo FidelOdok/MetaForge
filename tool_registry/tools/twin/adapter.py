@@ -409,6 +409,8 @@ def _critique_assembly_args(tool: str, arguments: dict[str, Any]) -> dict[str, A
 
 #: Where the dashboard and the gateway are served from, set by the deployment.
 _DASHBOARD_URL_ENV = "METAFORGE_DASHBOARD_URL"
+#: The gateway as the MCP server is told it is reached (file links use the same).
+_GATEWAY_PUBLIC_URL_ENV = "METAFORGE_GATEWAY_PUBLIC_URL"
 _PUBLIC_URL_ENV = "METAFORGE_PUBLIC_URL"
 
 
@@ -425,7 +427,11 @@ def _with_studio_links(project_id: str, studio: dict[str, Any]) -> dict[str, Any
     from urllib.parse import quote
 
     dashboard = (os.environ.get(_DASHBOARD_URL_ENV) or "").strip().rstrip("/")
-    public = (os.environ.get(_PUBLIC_URL_ENV) or "").strip().rstrip("/")
+    public = (
+        (os.environ.get(_GATEWAY_PUBLIC_URL_ENV) or os.environ.get(_PUBLIC_URL_ENV) or "")
+        .strip()
+        .rstrip("/")
+    )
     studio["studio_url"] = (
         f"{dashboard}/create/{quote(project_id, safe='')}?stage=imagine" if dashboard else None
     )

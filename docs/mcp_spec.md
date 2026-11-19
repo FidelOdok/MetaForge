@@ -1430,7 +1430,8 @@ per-product formgraph config for Create's Imagine stage
   new config. `studio_url` is the absolute dashboard link to the studio
   (`<METAFORGE_DASHBOARD_URL>/create/<id>?stage=imagine`), the one to give a
   person; `engine_page_url` is the bare engine page
-  (`<METAFORGE_PUBLIC_URL>` plus `engine_url`), whose token expires after ten
+  (`<METAFORGE_GATEWAY_PUBLIC_URL>` plus `engine_url`, falling back to
+  `METAFORGE_PUBLIC_URL`), whose token expires after ten
   minutes. Each is `null` when its host is not configured.
   `twin.imagine_put_studio` returns the same two links.
 - `twin.imagine_put_studio` (additive): takes `config`, checks it with the

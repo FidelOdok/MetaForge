@@ -1674,6 +1674,7 @@ async def test_the_studio_comes_with_links_a_person_can_open(
 
     monkeypatch.delenv("METAFORGE_DASHBOARD_URL", raising=False)
     monkeypatch.delenv("METAFORGE_PUBLIC_URL", raising=False)
+    monkeypatch.delenv("METAFORGE_GATEWAY_PUBLIC_URL", raising=False)
     bare = await srv.imagine_get_studio({"project_id": PROJECT})
     assert bare["studio_url"] is None and bare["engine_page_url"] is None
 
@@ -1685,3 +1686,6 @@ async def test_the_studio_comes_with_links_a_person_can_open(
     assert got["engine_url"].startswith("/v1/twin/projects/")
     put = await srv.imagine_put_studio({"project_id": PROJECT, "config": full_config()})
     assert put["studio_url"] == got["studio_url"]
+    monkeypatch.setenv("METAFORGE_GATEWAY_PUBLIC_URL", "https://gw.example.test")
+    again = await srv.imagine_get_studio({"project_id": PROJECT})
+    assert again["engine_page_url"].startswith("https://gw.example.test/v1/twin/projects/")

@@ -1099,7 +1099,7 @@ gateway. An agent has no such base, so `twin.imagine_get_studio` and
 dashboard's Create page on the Imagine stage
 (`<METAFORGE_DASHBOARD_URL>/create/<id>?stage=imagine`), which signs the person
 in and renews the engine token each time it loads, so it keeps working; and
-`engine_page_url`, the engine page itself (`<METAFORGE_PUBLIC_URL>` plus
+`engine_page_url`, the engine page itself (`<METAFORGE_GATEWAY_PUBLIC_URL>`, else `METAFORGE_PUBLIC_URL`, plus
 `engine_url`), which stops working when its token expires. Each is `null` when
 the MCP server does not have that variable: it never guesses a host.
 
