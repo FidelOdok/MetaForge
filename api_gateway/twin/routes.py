@@ -63,7 +63,7 @@ from api_gateway.twin.version_schemas import (
 )
 from api_gateway.twin.version_service import VersionService
 from observability.tracing import get_tracer
-from twin_core.api import InMemoryTwinAPI, OrphanWouldBeCreatedError
+from twin_core.api import InMemoryTwinAPI
 from twin_core.models.enums import HISTORY_WORK_PRODUCT_TYPES, EdgeType, WorkProductType
 from twin_core.models.work_product import WorkProduct
 from twin_core.representation import representation_of
@@ -900,65 +900,19 @@ async def delete_node(
     Without ``cascade`` a delete that would orphan dependents returns 409.
     Best-effort on the blob (a storage failure doesn't block the delete).
     """
-    with tracer.start_as_current_span("twin.delete_node") as span:
-        span.set_attribute("twin.node_id", node_id)
-        try:
-            uid = UUID(node_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid node ID format")
+    from api_gateway.projects.routes import unlink_work_product_from_all_projects
+    from api_gateway.twin.node_delete import DeleteRefused, make_work_product_deleter
 
-        wp = await _twin.get_work_product(uid)
-        if wp is None:
-            raise HTTPException(status_code=404, detail="Node not found")
-
-        # Best-effort: remove the MinIO blob so deleting the node doesn't
-        # orphan its object. A storage hiccup must not block the delete.
-        object_key = wp.metadata.get("minio_object_key")
-        if isinstance(object_key, str) and object_key:
-            try:
-                from api_gateway.twin.blob_store import delete_work_product_blob
-
-                delete_work_product_blob(object_key)
-            except Exception as exc:  # noqa: BLE001 — best-effort cleanup
-                logger.warning("wp_blob_delete_failed", key=object_key, error=str(exc))
-
-        # MET-740: a robot_description node stores one extra MinIO object
-        # per link's mesh file (metadata["mesh_files"], link_name -> key) —
-        # clean those up too, same best-effort discipline as the primary blob.
-        mesh_files = wp.metadata.get("mesh_files")
-        if isinstance(mesh_files, dict):
-            from api_gateway.twin.blob_store import delete_work_product_blob
-
-            for link_name, mesh_key in mesh_files.items():
-                if not isinstance(mesh_key, str) or not mesh_key:
-                    continue
-                try:
-                    delete_work_product_blob(mesh_key)
-                except Exception as exc:  # noqa: BLE001 — best-effort cleanup
-                    logger.warning(
-                        "wp_mesh_blob_delete_failed",
-                        key=mesh_key,
-                        link_name=link_name,
-                        error=str(exc),
-                    )
-
-        try:
-            await _twin.delete_work_product(uid, cascade=cascade)
-        except OrphanWouldBeCreatedError as exc:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Delete would orphan dependents; retry with ?cascade=true ({exc})",
-            ) from exc
-
-        from api_gateway.projects.routes import unlink_work_product_from_all_projects
-
-        links_removed = await unlink_work_product_from_all_projects(str(uid))
-        logger.info(
-            "twin_node_deleted",
-            node_id=node_id,
-            cascade=cascade,
-            links_removed=links_removed,
-        )
+    delete = make_work_product_deleter(
+        _twin, unlink_everywhere=unlink_work_product_from_all_projects
+    )
+    try:
+        await delete(work_product_id=node_id, cascade=cascade)
+    except DeleteRefused as exc:
+        detail = "Node not found" if exc.status == 404 else exc.message
+        if exc.status == 400:
+            detail = "Invalid node ID format"
+        raise HTTPException(status_code=exc.status, detail=detail) from exc
 
 
 # ---------------------------------------------------------------------------

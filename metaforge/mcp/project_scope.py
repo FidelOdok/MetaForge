@@ -314,6 +314,7 @@ TOOL_RULES: dict[str, ToolRule] = {
     "twin.rank_sensitivity": _either(("work_product_id", _NODE)),
     "twin.run_item_fea": _either(("node_id", _NODE)),
     "twin.render_work_product": _either(("work_product_id", _NODE)),
+    "twin.delete_work_product": _entity(("work_product_id", _NODE)),
     "twin.start_design_loop": _either(("work_product_id", _NODE)),
     "twin.start_tube_height_design_loop": _either(("work_product_id", _NODE)),
     "twin.get_design_loop": _blocked(_LOOP),

@@ -491,6 +491,7 @@ class TwinServer(McpToolServer):
         thermal_evaluator: Any = None,
         overhang_evaluator: Any = None,
         work_product_renderer: Any = None,
+        work_product_deleter: Any = None,
         revalidation_executor: Any = None,
         sensitivity_ranker: Any = None,
         promotion_attempter: Any = None,
@@ -736,6 +737,9 @@ class TwinServer(McpToolServer):
         # (make_work_product_renderer) -- a work product rendered by
         # blender.render over MCP and kept as a ``render`` work product.
         self._work_product_renderer = work_product_renderer
+        # MetaForge: an injected async ``delete(*, work_product_id, cascade)``
+        # (make_work_product_deleter) -- the same delete as DELETE /nodes/{id}.
+        self._work_product_deleter = work_product_deleter
         # FORGE-316: an injected async ``execute(ect_id) -> dict``
         # (make_revalidation_executor) -- re-runs exactly the Evidence a
         # committed ECT's real revalidation_plan marked stale, for any
@@ -951,6 +955,8 @@ class TwinServer(McpToolServer):
             self._register_evaluate_overhang_metric()
         if work_product_renderer is not None:
             self._register_render_work_product()
+        if work_product_deleter is not None:
+            self._register_delete_work_product()
         if revalidation_executor is not None:
             self._register_execute_revalidation_plan()
         if sensitivity_ranker is not None:
@@ -8001,6 +8007,81 @@ class TwinServer(McpToolServer):
     # twin.record_design_files (FORGE-687)
     # ------------------------------------------------------------------
 
+    def _register_delete_work_product(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.delete_work_product",
+                adapter_id="twin",
+                name="Delete Work Product",
+                description=(
+                    "Permanently delete a work product from the twin: the node, its stored "
+                    "files and its links to every project. It cannot be undone, so it always "
+                    "waits for a person's approval, and no approval policy can approve it. "
+                    "Use it to remove a stale or duplicate file (an older model superseded "
+                    "by a newer one). A delete that would leave other work products without "
+                    "a node they depend on is refused and nothing is deleted; cascade "
+                    "deletes those too. Say in 'reason' why it should go; the person sees it."
+                ),
+                capability="twin_write",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {
+                            "type": "string",
+                            "description": "The work product to delete.",
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "Why it should be deleted, for the person approving.",
+                        },
+                        "cascade": {
+                            "type": "boolean",
+                            "description": "Also delete the work products that depend on it. "
+                            "Default false.",
+                        },
+                    },
+                    "required": ["work_product_id", "reason"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "deleted": {"type": "boolean"},
+                        "work_product_id": {"type": "string"},
+                        "name": {"type": "string"},
+                        "cascade": {"type": "boolean"},
+                        "links_removed": {"type": "integer"},
+                        "files_removed": {"type": "integer"},
+                        "reason": {"type": "string"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.delete_work_product,
+        )
+
+    async def delete_work_product(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.delete_work_product"
+        wp_id = arguments.get("work_product_id")
+        reason = arguments.get("reason")
+        if not isinstance(wp_id, str) or not wp_id.strip():
+            raise ValueError(f"{tool}: 'work_product_id' is required")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError(f"{tool}: say in 'reason' why it should be deleted")
+        cascade = arguments.get("cascade", False)
+        if not isinstance(cascade, bool):
+            raise ValueError(f"{tool}: 'cascade' must be true or false")
+        try:
+            result: dict[str, Any] = await self._work_product_deleter(
+                work_product_id=wp_id.strip(), cascade=cascade
+            )
+        except Exception as exc:
+            message = getattr(exc, "message", None)
+            if message:
+                raise ValueError(f"{tool}: {message}") from exc
+            raise
+        return {**result, "reason": reason.strip()}
+
     def _register_record_design_files(self) -> None:
         self.register_tool(
             manifest=ToolManifest(
@@ -9471,7 +9552,15 @@ class TwinServer(McpToolServer):
                     "The mesh is reduced for display, its full size is kept in stats, and it "
                     "is written as the studio's next revision. A reference with the same id "
                     "is replaced. Use it for a large supplier model (an airframe, a host "
-                    "device) the studio cannot draw from primitives."
+                    "device) the studio cannot draw from primitives. Placement: the studio "
+                    "centres the mesh on X and Z with its lowest point at Y = 0, then moves "
+                    "it to 'at' (mm) and turns it by 'rotate' (degrees about X, Y, Z). "
+                    "Studio axes are Y up: a Z-up STEP point (x, y, z) is (x, z, -y) here. "
+                    "The result's reference.origin is the file point that lands on 'at', so "
+                    "to put file point P at studio point W, set at = W - (P - origin). "
+                    "'color' (hex) and 'opacity' replace the role's see-through grey. "
+                    "Change any of these later with twin.imagine_patch_studio at "
+                    "/context/references/references/<id>/at (or rotate, color, opacity)."
                 ),
                 capability="twin_imagine",
                 input_schema={
@@ -9499,6 +9588,22 @@ class TwinServer(McpToolServer):
                             "format's default (GLB metres, STL and OBJ millimetres).",
                         },
                         "up": {"type": "string", "enum": ["y", "z"]},
+                        "at": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 3,
+                            "maxItems": 3,
+                            "description": "Where the mesh's origin goes, [x, y, z] mm, Y up.",
+                        },
+                        "rotate": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 3,
+                            "maxItems": 3,
+                            "description": "Degrees about X, Y and Z.",
+                        },
+                        "color": {"type": "string", "description": "Hex colour, e.g. #3A5F7D."},
+                        "opacity": {"type": "number", "minimum": 0.05, "maximum": 1},
                     },
                     "required": ["work_product_id", "id", "title"],
                 },
@@ -10009,6 +10114,10 @@ class TwinServer(McpToolServer):
                 note=arguments.get("note"),
                 units=arguments.get("units"),
                 up=arguments.get("up"),
+                at=arguments.get("at"),
+                rotate=arguments.get("rotate"),
+                color=arguments.get("color"),
+                opacity=arguments.get("opacity"),
                 actor=actor,
             )
         except Exception as exc:

@@ -373,6 +373,7 @@ async def bootstrap_tool_registry(
     thermal_evaluator: Any = None,
     overhang_evaluator: Any = None,
     work_product_renderer: Any = None,
+    work_product_deleter: Any = None,
     design_files_recorder: Any = None,
     imagine_studio: Any = None,
     release_path_service: Any = None,
@@ -553,6 +554,9 @@ async def bootstrap_tool_registry(
             registers ``twin.render_work_product``: a STEP or mesh work
             product rendered by ``blender.render`` and stored as a
             ``render`` work product. ``None`` skips registration.
+        work_product_deleter: Optional async ``delete(*, work_product_id,
+            cascade)`` (make_work_product_deleter). When supplied, registers
+            ``twin.delete_work_product``, always held for a person.
         design_files_recorder: Optional async ``record(...)``
             (make_design_files_recorder, FORGE-687). When supplied,
             registers ``twin.record_design_files``: KiCad and firmware
@@ -917,6 +921,7 @@ async def bootstrap_tool_registry(
                     thermal_evaluator=thermal_evaluator,
                     overhang_evaluator=overhang_evaluator,
                     work_product_renderer=work_product_renderer,
+                    work_product_deleter=work_product_deleter,
                     design_files_recorder=design_files_recorder,
                     imagine_studio=imagine_studio,
                     release_path_service=release_path_service,
