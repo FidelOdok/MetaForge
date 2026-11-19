@@ -407,6 +407,43 @@ def _critique_assembly_args(tool: str, arguments: dict[str, Any]) -> dict[str, A
     return out
 
 
+#: Where the dashboard and the gateway are served from, set by the deployment.
+_DASHBOARD_URL_ENV = "METAFORGE_DASHBOARD_URL"
+#: The gateway as the MCP server is told it is reached (file links use the same).
+_GATEWAY_PUBLIC_URL_ENV = "METAFORGE_GATEWAY_PUBLIC_URL"
+_PUBLIC_URL_ENV = "METAFORGE_PUBLIC_URL"
+
+
+def _with_studio_links(project_id: str, studio: dict[str, Any]) -> dict[str, Any]:
+    """Add absolute links to the studio, so nobody has to know the hosts.
+
+    ``engine_url`` stays the gateway path the dashboard resolves itself.
+    ``studio_url`` is the dashboard's Create page on the Imagine stage
+    (``/create/<id>?stage=imagine``), which signs in and renews the engine
+    token, so it is the link to give a person. ``engine_page_url`` is the
+    bare engine page with its ten-minute token. Each is ``None`` when its
+    host is not configured: a guessed host is worse than no link.
+    """
+    from urllib.parse import quote
+
+    dashboard = (os.environ.get(_DASHBOARD_URL_ENV) or "").strip().rstrip("/")
+    public = (
+        (os.environ.get(_GATEWAY_PUBLIC_URL_ENV) or os.environ.get(_PUBLIC_URL_ENV) or "")
+        .strip()
+        .rstrip("/")
+    )
+    studio["studio_url"] = (
+        f"{dashboard}/create/{quote(project_id, safe='')}?stage=imagine" if dashboard else None
+    )
+    engine = studio.get("engine_url")
+    studio["engine_page_url"] = (
+        f"{public}{engine}"
+        if public and isinstance(engine, str) and engine.startswith("/")
+        else None
+    )
+    return studio
+
+
 class TwinServer(McpToolServer):
     """MCP adapter wrapping ``TwinAPI`` for harness consumption."""
 
@@ -9287,6 +9324,8 @@ class TwinServer(McpToolServer):
                 "revision": {"type": "integer"},
                 "config_ref": {"type": ["string", "null"]},
                 "engine_url": {"type": "string"},
+                "studio_url": {"type": ["string", "null"]},
+                "engine_page_url": {"type": ["string", "null"]},
                 "config": {"type": ["object", "null"]},
                 "collections": {"type": "object"},
                 "warnings": {"type": "array", "items": {"type": "string"}},
@@ -9303,7 +9342,10 @@ class TwinServer(McpToolServer):
                     "person did in the browser (choices, scenarios, context edits, confirmed "
                     "assumptions, requirement status, ledger review, screening results). "
                     "Read it before writing a new config so the person's choices carry over. "
-                    "Reads only."
+                    "To send the person to the studio, give them studio_url (the dashboard "
+                    "page, which keeps working); engine_page_url is the bare studio page and "
+                    "expires after ten minutes. Both are null when the deployment has not "
+                    "said where it is served. Reads only."
                 ),
                 capability="twin_imagine",
                 input_schema={"type": "object", "properties": project},
@@ -9867,7 +9909,7 @@ class TwinServer(McpToolServer):
     async def imagine_get_studio(self, arguments: dict[str, Any]) -> dict[str, Any]:
         pid = self._imagine_project(arguments, "twin.imagine_get_studio")
         studio = await self._imagine_studio.get_studio(pid)
-        return dict(studio.model_dump(mode="json"))
+        return _with_studio_links(pid, dict(studio.model_dump(mode="json")))
 
     async def imagine_put_studio(self, arguments: dict[str, Any]) -> dict[str, Any]:
         pid = self._imagine_project(arguments, "twin.imagine_put_studio")
@@ -9888,7 +9930,7 @@ class TwinServer(McpToolServer):
             if message:
                 raise ValueError(f"twin.imagine_put_studio: {message}") from exc
             raise
-        return dict(studio.model_dump(mode="json"))
+        return _with_studio_links(pid, dict(studio.model_dump(mode="json")))
 
     async def imagine_patch_studio(self, arguments: dict[str, Any]) -> dict[str, Any]:
         tool = "twin.imagine_patch_studio"

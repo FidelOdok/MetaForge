@@ -1662,3 +1662,30 @@ async def test_a_mesh_still_clears_the_concept_item(
     await _add_mesh(twin)
     item = _items((await client.get(f"{BASE}/handover")).json())["concept_assembly"]
     assert item["status"] == "done" and "concept mesh exists" in item["detail"]
+
+
+async def test_the_studio_comes_with_links_a_person_can_open(
+    service: ImagineService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tool_registry.tools.twin.adapter import TwinServer
+
+    srv = TwinServer(twin=service.twin, imagine_studio=service)
+    await srv.imagine_put_studio({"project_id": PROJECT, "config": full_config()})
+
+    monkeypatch.delenv("METAFORGE_DASHBOARD_URL", raising=False)
+    monkeypatch.delenv("METAFORGE_PUBLIC_URL", raising=False)
+    monkeypatch.delenv("METAFORGE_GATEWAY_PUBLIC_URL", raising=False)
+    bare = await srv.imagine_get_studio({"project_id": PROJECT})
+    assert bare["studio_url"] is None and bare["engine_page_url"] is None
+
+    monkeypatch.setenv("METAFORGE_DASHBOARD_URL", "https://app.example.test/")
+    monkeypatch.setenv("METAFORGE_PUBLIC_URL", "https://api.example.test")
+    got = await srv.imagine_get_studio({"project_id": PROJECT})
+    assert got["studio_url"] == f"https://app.example.test/create/{PROJECT}?stage=imagine"
+    assert got["engine_page_url"] == "https://api.example.test" + got["engine_url"]
+    assert got["engine_url"].startswith("/v1/twin/projects/")
+    put = await srv.imagine_put_studio({"project_id": PROJECT, "config": full_config()})
+    assert put["studio_url"] == got["studio_url"]
+    monkeypatch.setenv("METAFORGE_GATEWAY_PUBLIC_URL", "https://gw.example.test")
+    again = await srv.imagine_get_studio({"project_id": PROJECT})
+    assert again["engine_page_url"].startswith("https://gw.example.test/v1/twin/projects/")
