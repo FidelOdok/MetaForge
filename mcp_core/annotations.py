@@ -477,6 +477,8 @@ ADDITIVE: frozenset[str] = frozenset(
         "twin.imagine_put_studio",
         # MetaForge: the same next revision, from a list of changes.
         "twin.imagine_patch_studio",
+        # MetaForge: the same next revision, with a twin model as a mesh reference.
+        "twin.imagine_add_mesh_reference",
         # FORGE-687: a new design-files node (or the next revision of its
         # item); the files it reads on the workspace are not touched.
         "twin.record_design_files",

@@ -37,6 +37,8 @@ KEEPOUT = {'antenna', 'sky', 'airflow', 'heat', 'magnetic', 'clearance'}
 ROLES_FIXED = {'board', 'battery', 'fixing', 'material', 'other'}
 PLACES = {'floor', 'ceil', 'wall', 'any'}
 BUSES = {'pwr', 'i2c', 'uart', 'spi', 'gpio', 'usb', 'rf', 'pwm', 'can', 'analog'}
+# MetaForge: how a part is held, kept apart from its electrical interfaces.
+MECH_KINDS = {'screw', 'bolt', 'clip', 'snap', 'slot', 'press_fit', 'adhesive', 'magnet', 'strap', 'rest', 'other'}
 OPS = {'>=', '<=', '>', '<', '=='}
 FUNCS = {'min', 'max', 'sqrt', 'pow', 'abs', 'exp', 'log', 'log10', 'sin', 'cos', 'tan', 'atan', 'floor', 'ceil', 'round', 'clamp'}
 CONSTS = {'pi', 'g', 'e'}
@@ -206,6 +208,7 @@ def validate_context(cfg, ctx, cat, E, W):
             E.append(f'{where}: cost must be {{"unit": GBP, "qty": n, "source": "..."}}.')
         validate_geometry(where, p, E, W)
         validate_interfaces(where, p, E, W)
+        validate_mechanical(where, p, E, W)
         for k, val in (p.get('sets') or {}).items():
             if k not in model_inputs(ctx):
                 E.append(f'{where}: sets "{k}", which is not a model input (model.input).')
@@ -578,13 +581,14 @@ def validate_interfaces(where, p, E, W):
     for j, f in enumerate(ifs):
         w = f'{where}: interfaces[{j}]'
         if not f.get('id') or not NAME.match(str(f['id'])):
-            E.append(f'{w} needs an "id" (letters, digits, underscore).')
+            E.append(f'{w} needs an "id" (letters, digits, underscore){_id_hint(f.get("id"))}.')
             continue
         if f['id'] in seen:
             E.append(f'{w}: "{f["id"]}" appears twice.')
         seen.add(f['id'])
         if f.get('bus') not in BUSES:
-            E.append(f'{w}: bus must be one of {", ".join(sorted(BUSES))}.')
+            E.append(f'{w}: bus must be one of {", ".join(sorted(BUSES))}. Interfaces are electrical; '
+                     'record screws, clips, slots and other mechanical joins in the part\'s "mechanical" list.')
         if f.get('dir') not in ('in', 'out', 'bi'):
             E.append(f'{w}: dir must be in, out or bi.')
         v = f.get('v')
@@ -605,6 +609,58 @@ def validate_interfaces(where, p, E, W):
         if at is not None and not (isinstance(at, list) and len(at) == 3 and all(isinstance(x, (int, float)) for x in at)):
             E.append(f'{w}: at must be [x, y, z] in mm from the part centre.')
 
+
+
+
+def _id_hint(raw):
+    """MetaForge: the id the author probably meant, so a refusal is fixed in one step."""
+    if not isinstance(raw, str) or not raw.strip():
+        return ''
+    fixed = re.sub(r'[^A-Za-z0-9_]+', '_', raw.strip()).strip('_')
+    if fixed and not NAME.match(fixed):
+        fixed = f'_{fixed}'
+    return f'; "{raw}" would be "{fixed}"' if fixed and fixed != raw else ''
+
+def _point(pt):
+    return isinstance(pt, list) and len(pt) == 3 and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in pt)
+
+
+def validate_mechanical(where, p, E, W):
+    """MetaForge: each mechanical join (screw, clip, slot ...): id, kind, and what it joins.
+
+    Kept apart from interfaces, which the page turns into electrical ports and wires.
+    """
+    mech = p.get('mechanical')
+    if mech is None:
+        return
+    if not isinstance(mech, list):
+        E.append(f'{where}: mechanical must be a list of joins.')
+        return
+    seen = set()
+    for j, m in enumerate(mech):
+        w = f'{where}: mechanical[{j}]'
+        if not isinstance(m, dict):
+            E.append(f'{w} must be an object.')
+            continue
+        if not m.get('id') or not NAME.match(str(m['id'])):
+            E.append(f'{w} needs an "id" (letters, digits, underscore){_id_hint(m.get("id"))}.')
+            continue
+        if m['id'] in seen:
+            E.append(f'{w}: "{m["id"]}" appears twice.')
+        seen.add(m['id'])
+        if m.get('kind') not in MECH_KINDS:
+            E.append(f'{w}: kind must be one of {", ".join(sorted(MECH_KINDS))}.')
+        for k, example in (('to', 'the part or part.interface it joins'), ('fastener', 'for example "M3 x 8 pan head"'), ('note', 'free text')):
+            if k in m and not (isinstance(m[k], str) and m[k].strip()):
+                E.append(f'{w}: {k} is text, {example}.')
+        count = m.get('count')
+        if count is not None and not (isinstance(count, int) and not isinstance(count, bool) and count > 0):
+            E.append(f'{w}: count must be a whole number above zero.')
+        at = m.get('at')
+        if at is not None and not (_point(at) or (isinstance(at, list) and at and all(_point(pt) for pt in at))):
+            E.append(f'{w}: at is [x, y, z] in mm from the part centre, or a list of them, one per hole.')
+        if m.get('kind') in ('screw', 'bolt') and not m.get('fastener'):
+            W.append(f'{w}: a {m["kind"]} join with no "fastener"; name the size when it is known.')
 
 def part_ports(p):
     """Engine ports from interfaces: ins, outs, input voltage windows and output rails."""

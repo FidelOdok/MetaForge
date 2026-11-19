@@ -1010,6 +1010,9 @@ services:
       - BLENDER_WORK_DIR=/workspace
       - BLENDER_BINARY=blender
       - MCP_PORT=8202
+      # The largest request the adapter reads, in MiB: renders send the model
+      # inline as base64 (aiohttp's own default is 1 MiB).
+      - BLENDER_MAX_REQUEST_MB=${BLENDER_MAX_REQUEST_MB:-256}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
     deploy:
       resources:

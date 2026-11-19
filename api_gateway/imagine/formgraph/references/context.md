@@ -59,6 +59,23 @@ Every electrical part lists its interfaces. The page turns them into typed ports
 - `connector`: family, pins, pitch, and the mating housing as `mate`. These become harness BOM lines.
 - `at`: where the interface sits on the part, in mm from the part centre. Harness length is routed between these points.
 
+### Mechanical joins: how a part is held
+
+`interfaces` are electrical only. How a part is fixed to the rest of the product goes in its `mechanical` list, which no wiring check reads:
+
+```json
+"mechanical": [
+  { "id": "to_bracket_a", "kind": "clip", "to": "psdk-bracket-a", "note": "Bracket B clicks into Bracket A" },
+  { "id": "base_screws", "kind": "screw", "fastener": "M2 x 6", "count": 4, "to": "base-plate", "at": [[-30, 0, -30], [30, 0, -30], [-30, 0, 30], [30, 0, 30]] }
+]
+```
+
+- `id`: letters, digits and underscores, unique on the part.
+- `kind`: one of screw, bolt, clip, snap, slot, press_fit, adhesive, magnet, strap, rest, other.
+- `to`: the part (or `part.interface`) it joins, as text. `fastener`: the fastener as text, for example `M3 x 8 pan head`; a screw or bolt without one is flagged. `count`: how many.
+- `at`: where it sits, in mm from the part centre: one `[x, y, z]`, or a list of them, one per hole.
+- Hole positions not yet known: leave `at` out and say so in `note`, and keep the part's geometry marked as an approximation.
+
 ### Boards and power from another system
 
 - A board's `specs.elec` gives `vin` [min, max], `vnom` (the voltage it actually runs at, for example 7.4 for a 2S pack), `sleep` and `active` in mA, and its pin counts (`gpio`, `uart`, `spi`). Without `vnom`, heat is worked out at the middle of `vin`, which is wrong for wide-input boards.
