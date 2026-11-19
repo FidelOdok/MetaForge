@@ -908,6 +908,8 @@ CREATE_STAGE_TOOLS: dict[str, frozenset[str]] = {
         "twin.imagine_put_studio",
         # A change to the studio as a list of edits, not the whole config.
         "twin.imagine_patch_studio",
+        # twin.imagine_add_mesh_reference is left out: the set is at its cap, and an
+        # external agent (MCP clients see every tool) is who brings a supplier model.
         # A dry run of the Imagine gates. Imagine's own work, so it is not in the
         # reads every stage carries: Develop, Check and Make are near the cap.
         "twin.imagine_validate",

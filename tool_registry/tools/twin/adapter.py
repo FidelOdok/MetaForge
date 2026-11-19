@@ -9459,6 +9459,66 @@ class TwinServer(McpToolServer):
         )
         self.register_tool(
             manifest=ToolManifest(
+                tool_id="twin.imagine_add_mesh_reference",
+                adapter_id="twin",
+                name="Imagine: Add Mesh Reference",
+                description=(
+                    "Put a model from the twin into the Imagine studio as a see-through mesh "
+                    "reference: what the product sits on or next to (role 'context', the "
+                    "default), a space it must fit (role 'envelope'), or a shape to match "
+                    "('target'). Give the work_product_id of a STEP, GLB, STL or OBJ in the "
+                    "twin; a STEP is converted with the viewer's converter (millimetres, Z up). "
+                    "The mesh is reduced for display, its full size is kept in stats, and it "
+                    "is written as the studio's next revision. A reference with the same id "
+                    "is replaced. Use it for a large supplier model (an airframe, a host "
+                    "device) the studio cannot draw from primitives."
+                ),
+                capability="twin_imagine",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        **project,
+                        "work_product_id": {
+                            "type": "string",
+                            "description": "The twin work product holding the model file.",
+                        },
+                        "id": {
+                            "type": "string",
+                            "description": "Reference id: lowercase letters, digits, dashes.",
+                        },
+                        "title": {"type": "string", "description": "What it is, for the page."},
+                        "role": {
+                            "type": "string",
+                            "enum": ["context", "envelope", "target", "look"],
+                        },
+                        "note": {"type": "string"},
+                        "units": {
+                            "type": "string",
+                            "enum": ["mm", "cm", "m", "in"],
+                            "description": "Only for a mesh file whose units are not the "
+                            "format's default (GLB metres, STL and OBJ millimetres).",
+                        },
+                        "up": {"type": "string", "enum": ["y", "z"]},
+                    },
+                    "required": ["work_product_id", "id", "title"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {"type": "string"},
+                        "revision": {"type": "integer"},
+                        "config_ref": {"type": ["string", "null"]},
+                        "reference": {"type": "object"},
+                        "warnings": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=2048, max_cpu_seconds=300),
+            ),
+            handler=self.imagine_add_mesh_reference,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
                 tool_id="twin.imagine_handover_status",
                 adapter_id="twin",
                 name="Imagine: Handover Status",
@@ -9931,6 +9991,51 @@ class TwinServer(McpToolServer):
                 raise ValueError(f"twin.imagine_put_studio: {message}") from exc
             raise
         return _with_studio_links(pid, dict(studio.model_dump(mode="json")))
+
+    async def imagine_add_mesh_reference(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = "twin.imagine_add_mesh_reference"
+        pid = self._imagine_project(arguments, tool)
+        for key in ("work_product_id", "id", "title"):
+            if not isinstance(arguments.get(key), str) or not arguments[key].strip():
+                raise ValueError(f"{tool}: '{key}' is required")
+        actor = str(current_context().actor_id or "agent")
+        try:
+            studio = await self._imagine_studio.add_mesh_reference(
+                pid,
+                work_product_id=arguments["work_product_id"],
+                ref_id=arguments["id"],
+                title=arguments["title"],
+                role=arguments.get("role") or "context",
+                note=arguments.get("note"),
+                units=arguments.get("units"),
+                up=arguments.get("up"),
+                actor=actor,
+            )
+        except Exception as exc:
+            detail = getattr(exc, "detail", None)
+            if isinstance(detail, dict) and detail.get("errors"):
+                raise ValueError(
+                    f"{tool}: the studio with this reference does not pass the formgraph "
+                    "checks: " + "; ".join(str(e) for e in detail["errors"][:20])
+                ) from exc
+            message = getattr(exc, "message", None)
+            if message:
+                raise ValueError(f"{tool}: {message}") from exc
+            raise
+        refs = ((studio.config or {}).get("context") or {}).get("references") or {}
+        ref = next((r for r in refs.get("references") or [] if r.get("id") == arguments["id"]), {})
+        summary = {k: v for k, v in ref.items() if k != "mesh"}
+        return _with_studio_links(
+            pid,
+            {
+                "project_id": studio.project_id,
+                "revision": studio.revision,
+                "config_ref": studio.config_ref,
+                "engine_url": studio.engine_url,
+                "reference": summary,
+                "warnings": list(studio.warnings or []),
+            },
+        )
 
     async def imagine_patch_studio(self, arguments: dict[str, Any]) -> dict[str, Any]:
         tool = "twin.imagine_patch_studio"

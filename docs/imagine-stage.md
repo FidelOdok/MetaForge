@@ -662,6 +662,26 @@ the roughness of its finish and a metallic look for a metal, and the mass is sum
 part's own material. A part without one takes the product colour from the swatches. Moving a slider runs the code again with no model call. The enclosure's
 own node graph editor is hidden, because it edits parameters a form made of code has none.
 
+### Mechanical joins
+
+A part's `interfaces` are electrical: the page turns them into ports and wires them. How a part is
+held (screws, clips, slots, press fits) goes in its `mechanical` list, `{id, kind, to, fastener,
+count, at, note}`, which no wiring check reads. `kind` is one of screw, bolt, clip, snap, slot,
+press_fit, adhesive, magnet, strap, rest or other; a screw or bolt with no `fastener` is flagged.
+An interface whose `bus` is not electrical is refused with a pointer to this list, and an id that
+breaks the naming rule is refused with the id that would pass (`"to-bracket-a"` would be
+`"to_bracket_a"`). See `formgraph/references/context.md`.
+
+### A supplier's model as a reference
+
+A hosted studio reads no files, so a mesh reference arrives packed.
+`twin.imagine_add_mesh_reference` packs one from the twin: it reads a work product's STEP, GLB, STL
+or OBJ, converts a STEP with the OCCT converter the viewer uses (which keeps millimetres and Z up),
+reduces the mesh to at most 40,000 triangles for display, keeps the full mesh's size in `stats`,
+and writes it into `context.references` as the next revision. Use it for a model the studio cannot
+draw from primitives: an airframe the product mounts on (`context`), a space it must fit
+(`envelope`). A surface-only STEP, with no solids, still shows; it cannot be used for fit checks.
+
 ### Real parts and the component library
 
 A real part in `context.components.parts` can name its entry in the component library with

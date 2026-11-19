@@ -741,6 +741,149 @@ class ImagineService:
             )
             return out
 
+    async def add_mesh_reference(
+        self,
+        project_id: str,
+        *,
+        work_product_id: str,
+        ref_id: str,
+        title: str,
+        role: str = "context",
+        note: str | None = None,
+        units: str | None = None,
+        up: str | None = None,
+        actor: str,
+        step_converter: Any = None,
+    ) -> StudioResponse:
+        """Put a twin model in the studio as a see-through mesh reference (MetaForge).
+
+        A hosted studio reads no files, so a mesh reference has to arrive packed. This
+        reads the work product's stored file, turns a STEP into a mesh with the same
+        OCCT converter the viewer and renders use (millimetres, Z up), reduces it for
+        display and writes it into ``context.references`` as the studio's next revision.
+        A reference with the same id is replaced. The full mesh's size is kept in
+        ``stats``; the page and its checks use that.
+        """
+        import os
+        import tempfile
+
+        from api_gateway.imagine.formgraph import fg_refs
+        from api_gateway.twin.blob_store import resolve_work_product_blob
+
+        with tracer.start_as_current_span("imagine.add_mesh_reference") as span:
+            span.set_attribute("project_id", project_id)
+            span.set_attribute("work_product_id", work_product_id)
+            if not fg_refs.SLUG.match(ref_id or ""):
+                raise ImagineError(
+                    f"reference id {ref_id!r} must be a slug (lowercase letters, digits, dashes)"
+                )
+            if role not in fg_refs.ROLES:
+                raise ImagineError(f"role must be one of {', '.join(sorted(fg_refs.ROLES))}")
+            head = await self._head(project_id)
+            if head is None or not isinstance(head.state.get("config"), dict):
+                _count("reference", "refused")
+                raise ImagineError(
+                    "There is no studio to add a reference to yet; write the first config "
+                    "with twin.imagine_put_studio.",
+                    404,
+                )
+            try:
+                wp = await self.twin.get_work_product(UUID(str(work_product_id)))
+            except ValueError as exc:
+                raise ImagineError(f"invalid work_product_id {work_product_id!r}") from exc
+            if wp is None:
+                raise ImagineError(f"no work product {work_product_id!r}", 404)
+            try:
+                content, filename = resolve_work_product_blob(wp)
+            except Exception as exc:  # noqa: BLE001 - HTTPException from the resolver
+                detail = getattr(exc, "detail", None) or str(exc)
+                raise ImagineError(
+                    f"{wp.name!r} has no readable model file: {detail}", 404
+                ) from exc
+            ext = os.path.splitext(filename)[1].lower().lstrip(".") or str(wp.format or "").lower()
+            span.set_attribute("reference.source_format", ext)
+            if ext in ("step", "stp"):
+                from api_gateway.twin.render_recorder import RenderError, convert_step_to_glb
+
+                convert = step_converter or convert_step_to_glb
+                try:
+                    content = await asyncio.to_thread(convert, content, filename)
+                except RenderError as exc:
+                    raise ImagineError(str(exc), 502) from exc
+                # Measured: the converter keeps the STEP's millimetres and its Z-up axes.
+                ext, units, up = "glb", units or "mm", up or "z"
+            elif ext not in ("glb", "stl", "obj"):
+                raise ImagineError(
+                    f"{wp.name!r} is a {ext or 'format-less'} file; a mesh reference needs a "
+                    "STEP, GLB, STL or OBJ"
+                )
+            if units is not None and units not in fg_refs.UNITS:
+                raise ImagineError(f"units must be one of {', '.join(sorted(fg_refs.UNITS))}")
+            if up is not None and up not in ("y", "z"):
+                raise ImagineError("up must be y or z")
+
+            def _read(data: bytes) -> tuple[Any, str, str]:
+                with tempfile.TemporaryDirectory() as tmp:
+                    path = os.path.join(tmp, f"model.{ext}")
+                    with open(path, "wb") as fh:
+                        fh.write(data)
+                    tris, used_units, used_up = fg_refs.read_mesh(path, units, up)
+                if not tris:
+                    raise ImagineError(f"{wp.name!r} has no triangles to show")
+                return (
+                    {"stats": fg_refs.mesh_stats(tris), "mesh": fg_refs.reduce_mesh(tris)},
+                    used_units,
+                    used_up,
+                )
+
+            try:
+                packed, used_units, used_up = await asyncio.to_thread(_read, content)
+            except ImagineError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - a malformed mesh is the caller's input
+                raise ImagineError(f"{wp.name!r} could not be read as a mesh: {exc}") from exc
+            ref: dict[str, Any] = {
+                "id": ref_id,
+                "kind": "mesh",
+                "role": role,
+                "title": title,
+                "units": used_units,
+                "up": used_up,
+                "fileName": filename,
+                "source": f"twin work product {work_product_id}",
+                **packed,
+            }
+            if note:
+                ref["note"] = note
+            config = copy.deepcopy(head.state["config"])
+            context = config.setdefault("context", {})
+            refs = context.get("references")
+            if not isinstance(refs, dict):
+                refs = {"schemaVersion": 1, "references": []}
+                context["references"] = refs
+            listed = [r for r in refs.get("references") or [] if r.get("id") != ref_id]
+            refs["references"] = [*listed, ref]
+            span.set_attribute("reference.triangles", packed["stats"]["triangles"])
+            out = await self._put(
+                project_id,
+                config,
+                actor=actor,
+                span=span,
+                expect_revision=head.revision,
+                reason=f"mesh reference {ref_id} from work product {work_product_id}",
+                metric="reference",
+            )
+            logger.info(
+                "imagine_mesh_reference_added",
+                project_id=project_id,
+                reference=ref_id,
+                work_product_id=work_product_id,
+                triangles=packed["stats"]["triangles"],
+                size_mm=packed["stats"]["size"],
+                revision=out.revision,
+            )
+            return out
+
     async def _put(
         self,
         project_id: str,

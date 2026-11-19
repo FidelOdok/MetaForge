@@ -1453,6 +1453,16 @@ per-product formgraph config for Create's Imagine stage
   config_ref, engine_url, applied, warnings}`, not the config. REST: `PATCH
   /v1/twin/projects/{id}/imagine/studio` with `{base_revision, changes}`
   (409, 400 and 422 as above).
+- `twin.imagine_add_mesh_reference` (additive): puts a twin model in the studio
+  as a see-through mesh reference. Takes `work_product_id` (a STEP, GLB, STL or
+  OBJ in the twin), `id` (a slug), `title`, `role` (`context` by default,
+  `envelope`, `target` or `look`), and optionally `note`, `units` and `up`. A
+  STEP goes through the OCCT converter the viewer uses (millimetres, Z up). The
+  mesh is reduced for display and written into `context.references` with its
+  full size in `stats`, as the next revision; a reference with the same id is
+  replaced. Returns `{project_id, revision, config_ref, engine_url,
+  studio_url, engine_page_url, reference, warnings}`, the reference without its
+  mesh. Not in the Imagine stage's in-app tool set, which is at its cap.
 - `twin.imagine_handover_status` (read-only): `{ready, items: [{id, label,
   status, detail}]}`, the checklist that gates Imagine to Develop.
 - `twin.imagine_validate` (read-only, never held for approval): a dry run of
