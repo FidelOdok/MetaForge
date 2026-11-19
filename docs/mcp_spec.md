@@ -1424,9 +1424,15 @@ per-product formgraph config for Create's Imagine stage
 (UUID), defaulting to the call context's project.
 
 - `twin.imagine_get_studio` (read-only): `{project_id, status, revision,
-  config_ref, engine_url, config, updated_at, handover, collections,
-  warnings}`. `collections` is what the person did in the browser, keyed by
-  collection and document id; read it before writing a new config.
+  config_ref, engine_url, studio_url, engine_page_url, config, updated_at,
+  handover, collections, warnings}`. `collections` is what the person did in
+  the browser, keyed by collection and document id; read it before writing a
+  new config. `studio_url` is the absolute dashboard link to the studio
+  (`<METAFORGE_DASHBOARD_URL>/create/<id>?stage=imagine`), the one to give a
+  person; `engine_page_url` is the bare engine page
+  (`<METAFORGE_PUBLIC_URL>` plus `engine_url`), whose token expires after ten
+  minutes. Each is `null` when its host is not configured.
+  `twin.imagine_put_studio` returns the same two links.
 - `twin.imagine_put_studio` (additive): takes `config`, checks it with the
   merged formgraph rules and writes it as the next `IMG-STUDIO` revision. The
   product context goes inline as `config.context`; a context folder path or a
