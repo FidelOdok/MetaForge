@@ -267,6 +267,35 @@ Full tool catalog and Phase-1 limits: \
 https://github.com/FidelOdok/MetaForge/blob/main/docs/capability-matrix.md"""
 
 
+#: How many in-result questions' first-asked times are remembered.
+_MAX_ASKED_AT = 2048
+
+
+def _notice_label(item: dict[str, Any]) -> str:
+    """An approval as the notice names it: title, what it is about, its id.
+
+    "Tool call: project.create" alone named a different pending item than the
+    one an agent had just made, and it told the person a leftover belonged to
+    their new project. The arguments and the id tell them apart.
+    """
+    title = str(item.get("title") or item.get("kind") or "approval")
+    raw_detail = item.get("detail")
+    detail: dict[str, Any] = raw_detail if isinstance(raw_detail, dict) else {}
+    raw_args = detail.get("arguments")
+    args: dict[str, Any] = raw_args if isinstance(raw_args, dict) else {}
+    shown = []
+    for key in ("name", "title", "project_id", "obj_id"):
+        value = args.get(key)
+        if value not in (None, ""):
+            text = str(value)
+            shown.append(f"{key}={text[:40] + '...' if len(text) > 40 else text}")
+        if len(shown) == 2:
+            break
+    about = f" ({', '.join(shown)})" if shown else ""
+    ident = f" [{item.get('id')}]" if item.get("id") else ""
+    return f"{title}{about}{ident}"
+
+
 class PromptNotFoundError(Exception):
     """``prompts/get`` named a workflow that does not exist (FORGE-340)."""
 
@@ -316,10 +345,19 @@ class ApprovalRecord:
         who = f" by {self.approver}" if self.approver else ""
         ident = f" (approval {self.approval_id})" if self.approval_id else ""
         unverified = "" if self.approver_verified or not self.approver else ", identity unverified"
+        # Where the person answered, in words: "via elicitation" read to a
+        # model like something automatic, and it told the person their
+        # approvals were being accepted without them.
+        place = {
+            "elicitation": "in the person's approval prompt in this client",
+            "dashboard": "on the MetaForge dashboard",
+            "retry": "earlier (on the dashboard or in a prompt), and used by this identical call",
+            "policy": "by the project's approval policy",
+        }.get(self.route, f"via {self.route}")
         return (
             f"This write was held for human approval and was {self.outcome}"
-            f"{who}{ident} after {self.held_seconds:.1f}s"
-            f" via {self.route}{unverified}."
+            f"{who}{ident} {place}, {self.held_seconds:.0f}s after it was first asked"
+            f"{unverified}."
         )
 
 
@@ -420,6 +458,10 @@ class UnifiedMcpServer:
         # FORGE-417: call id -> how its approval ended, read once by the
         # MCP envelope and popped. Bounded by that pop; see _remember_hold.
         self._approval_records: dict[str, ApprovalRecord] = {}
+        # When each in-result question was first asked: the answer comes back
+        # on a later request, so that request alone measures only itself
+        # (it said "after 0.1s", which read as nobody having looked).
+        self._asked_at: dict[str, float] = {}
         self._exempt_local_writes = exempt_local_writes
         # The installed release (stamped by the release workflow), unless a
         # caller names one. It used to be a literal "0.1.0".
@@ -773,7 +815,7 @@ class UnifiedMcpServer:
         if not new:
             return None
         told |= live
-        titles = "; ".join(str(i.get("title") or i.get("id")) for i in new[:3])
+        titles = "; ".join(_notice_label(i) for i in new[:3])
         more = f" and {len(new) - 3} more" if len(new) > 3 else ""
         total = len(items)
         sentence = (
@@ -1697,6 +1739,10 @@ class UnifiedMcpServer:
                     with with_mrtr(mrtr):
                         response = await self._call_with_handle(raw_message, method, params)
                     if mrtr.pending:
+                        for hold in mrtr.holds.values():
+                            self._asked_at.setdefault(hold, time.time())
+                        while len(self._asked_at) > _MAX_ASKED_AT:
+                            self._asked_at.pop(next(iter(self._asked_at)))
                         logger.info(
                             "mcp_mrtr_input_required",
                             method=method,
@@ -3649,6 +3695,9 @@ class UnifiedMcpServer:
                 "the approval was granted but the gate did not identify who granted it",
             )
 
+        asked = self._asked_at.pop(approval_id, None) if approval_id else None
+        if asked is not None:
+            held_seconds = max(held_seconds, time.time() - asked)
         if call_id:
             self._remember_hold(
                 call_id,

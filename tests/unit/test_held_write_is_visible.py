@@ -177,7 +177,8 @@ class TestTheRecordRendersHonestly:
         # human approval" regardless.
         assert " by " not in sentence
         assert "(approval " not in sentence
-        assert "elicitation" in sentence
+        # Where it was answered, in words a model reads as a person's act.
+        assert "approval prompt" in sentence
 
     def test_an_unverified_identity_is_qualified_in_the_sentence(self) -> None:
         record = ApprovalRecord(
@@ -243,3 +244,33 @@ class TestTheRecordStoreDoesNotLeak:
                 f"call-{i}", ApprovalRecord(outcome="approved", route="d", held_seconds=0.0)
             )
         assert len(server._approval_records) <= 65
+
+
+class TestTheTimingAndTheNotice:
+    """An in-result answer said "after 0.1s via elicitation", and claude.ai's
+    agent told the person their approvals were being accepted automatically.
+    A pending item named only "Tool call: project.create" was taken for one the
+    agent had just made."""
+
+    def test_the_seconds_count_from_the_first_question(self) -> None:
+        sentence = ApprovalRecord(
+            outcome="approved", route="elicitation", held_seconds=83.4
+        ).as_sentence()
+        assert "83s after it was first asked" in sentence
+        assert "via elicitation" not in sentence
+
+    def test_the_notice_names_an_item_by_its_arguments_and_id(self) -> None:
+        from metaforge.mcp.server import _notice_label
+
+        label = _notice_label(
+            {
+                "id": "tool:run_1",
+                "title": "Tool call: project.create",
+                "detail": {
+                    "tool": "project.create",
+                    "arguments": {"name": "durable approval test"},
+                },
+            }
+        )
+        assert label == "Tool call: project.create (name=durable approval test) [tool:run_1]"
+        assert _notice_label({"id": "gate:x", "title": "Gate"}) == "Gate [gate:x]"
