@@ -697,6 +697,34 @@ class InterfaceQuantity(BaseModel):
 
 *Source: `twin_core/models/interface.py`*
 
+#### Boards, modules and cables: the system schematic
+
+Not every component sits on the same board, so the same `SYSTEM_ARCHITECTURE`
+record is also the system schematic. All of these fields are optional; a record
+that uses none of them is valid as before.
+
+| On | Field | Meaning |
+|---|---|---|
+| a component | `kind` | `board` (a PCB designed here), `module` (bought, seen only by its interfaces), `part`, `subsystem` or `other` |
+| a component | `location` | where it sits in the product, e.g. `base`, `head`; the dashboard groups by it |
+| a board | `parts` | its components, `{ref, name, mpn, library}`. A ref is the board's own: each board may have a `J1`, but not two |
+| an interface | `kind` | `cable`, `connector`, `bus`, `mechanical` or `other` |
+| a cable | `from_connector`, `to_connector`, `wires`, `length_mm`, `signals` | the connector at each end, a whole number of wires, a positive length |
+
+`twin.commit_system_architecture` refuses an unknown kind, parts on anything
+but a board, a ref twice on one board, and a non-positive wire count or length.
+The record's markdown gains a *Boards and modules* table and a *Cables* table,
+and its metadata `boards` (the board names) and `cables` (their count).
+
+Each board then has its own schematic and layout: `twin.record_design_files`
+takes `board`, stored as the files' `metadata.board`, so the design-files view
+(`designFiles.board` on `GET /v1/twin/nodes`) says which board a schematic or
+PCB belongs to. A system architecture node's response carries
+`systemArchitecture: {systemName, components, interfaces, boards}` for the
+dashboard's System view.
+
+*Source: `api_gateway/twin/structured_document_recorder.py`*
+
 ### 2.12 Tiered Evaluator
 
 Not a node type -- a computation, invoked via `twin.evaluate_metric` (spec §30, "prefer the minimum sufficient fidelity; escalate only when evidence quality demands it"). Only `metric="tip_deflection"` is implemented: a tier-0 closed-form cantilever-beam estimate against a CAD `WorkProduct`'s own recorded `geometry_features.properties.bounding_box`, escalating to a real tier-2 `calculix.run_fea` call when the estimate's margin to a supplied `limit_mm` falls inside its error band.

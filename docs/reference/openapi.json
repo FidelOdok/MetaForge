@@ -27301,6 +27301,18 @@
             "title": "Status",
             "type": "string"
           },
+          "systemArchitecture": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Systemarchitecture"
+          },
           "technicalDrawing": {
             "anyOf": [
               {

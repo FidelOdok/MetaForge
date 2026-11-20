@@ -139,7 +139,10 @@ describe('Develop', () => {
     develop([CAD]);
     const col = document.querySelector('.cv-stage-col');
     expect(col).toHaveClass('is-model');
-    expect(col?.firstElementChild).toHaveAttribute('aria-label', 'Product');
+    // The studio's main area opens on the 3D view: the view switch, then the model.
+    const main = document.querySelector('.cv-develop-main');
+    expect(main?.children[1]).toHaveAttribute('aria-label', 'Product');
+    expect(screen.getByRole('tab', { name: '3D' })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('offers Make it editable for an accepted concept', async () => {
@@ -214,5 +217,65 @@ describe('Build exact model', () => {
     await userEvent.click(within(blocked).getByRole('button', { name: 'Open the editable sketch' }));
     expect(props.onSketchFix).toHaveBeenCalledWith('editable');
     expect(requestExactBuild).not.toHaveBeenCalled();
+  });
+});
+
+
+// The system schematic and each board's own sheets: not every component sits
+// on the same board.
+const ARCH = {
+  ...node('Lamp architecture', { wp_type: 'system_architecture' }),
+  systemArchitecture: {
+    systemName: 'Lamp',
+    components: [
+      { name: 'Mains module', kind: 'module', location: 'base' },
+      { name: 'Controller board', kind: 'board', location: 'base', parts: [{ ref: 'U1' }, { ref: 'U2' }] },
+      { name: 'LED board', kind: 'board', location: 'head', parts: [{ ref: 'D1' }] },
+    ],
+    interfaces: [
+      { from: 'Mains module', to: 'Controller board', kind: 'cable', wires: 2, length_mm: 120 },
+      { from: 'Controller board', to: 'LED board', kind: 'cable', from_connector: 'J4', to_connector: 'J1', wires: 4, length_mm: 450 },
+    ],
+    boards: ['Controller board', 'LED board'],
+  },
+} as TwinNode;
+const CTL_SCH = {
+  ...node('Controller schematic', { wp_type: 'schematic' }),
+  designFiles: { files: [{ path: 'ctl.kicad_sch' }], previews: ['ctl.svg'], layers: [], buildOutputs: [], sources: [], board: 'Controller board' },
+} as TwinNode;
+
+describe('System and boards', () => {
+  it('asks for a system schematic when there is none', async () => {
+    const props = develop([CAD]);
+    await userEvent.click(screen.getByRole('tab', { name: 'System' }));
+    expect(screen.getByTestId('system-empty')).toHaveTextContent('No system schematic yet');
+    await userEvent.click(within(screen.getByTestId('system-empty')).getByRole('button', { name: 'Describe the system' }));
+    expect(props.onAsk).toHaveBeenCalledWith(expect.stringContaining('boards, bought modules and cables'));
+  });
+
+  it('draws boards, the module and the cables, and opens a board', async () => {
+    develop([CAD, ARCH, CTL_SCH]);
+    await userEvent.click(screen.getByRole('tab', { name: 'System' }));
+    const diagram = screen.getByTestId('system-diagram');
+    expect(diagram).toHaveTextContent('Controller board');
+    expect(diagram).toHaveTextContent('bought · interfaces only');
+    expect(diagram).toHaveTextContent('J4→J1 · 4 wires · 450 mm');
+    await userEvent.click(screen.getByRole('button', { name: 'Open the schematic of Controller board' }));
+    expect(screen.getByRole('tab', { name: 'Schematic' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByAltText('Controller schematic: ctl.svg')).toBeInTheDocument();
+  });
+
+  it('shows each board its own sheets, and offers to generate a missing one', async () => {
+    const props = develop([CAD, ARCH, CTL_SCH]);
+    await userEvent.click(screen.getByRole('tab', { name: 'Schematic' }));
+    await userEvent.click(screen.getByRole('button', { name: 'LED board' }));
+    expect(screen.getByTestId('board-schematic-empty')).toHaveTextContent('No schematic for LED board yet');
+    await userEvent.click(screen.getByRole('button', { name: 'Generate schematic' }));
+    expect(props.onAsk).toHaveBeenCalledWith('Generate the schematic for LED board and run ERC.');
+  });
+
+  it('puts the nearest missing board sheet in the next step', () => {
+    develop([CAD, ARCH, CTL_SCH]);
+    expect(screen.getByTestId('develop-next')).toHaveTextContent('Controller board has no layout');
   });
 });
