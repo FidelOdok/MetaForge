@@ -36792,6 +36792,60 @@
         ]
       }
     },
+    "/v1/library/{kind_path}/{ref}/publish": {
+      "post": {
+        "description": "Move an account's entry into the shared library (the deployment only).\n\nAccounts are refused twice: the auth middleware blocks writes under\n``/v1/library/`` that are not their own entries, and this route refuses a\nservice call that carries an account's library view (the MCP sidecar), so\nan account cannot publish through a tool either.",
+        "operationId": "publish_entry_v1_library__kind_path___ref__publish_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind_path",
+            "required": true,
+            "schema": {
+              "title": "Kind Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Publish Entry V1 Library  Kind Path   Ref  Publish Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Publish Entry",
+        "tags": [
+          "library"
+        ]
+      }
+    },
     "/v1/links/{token}": {
       "get": {
         "description": "A download link's file, or an upload link's page.",

@@ -1354,6 +1354,47 @@ class SqliteCatalog:
             self.relink_organisations(by=by)
         return entry
 
+    def publish(self, entry_id: str, *, by: str = "", editor: Any = FROM_CONTEXT) -> Any:
+        """Move an account's entry into the shared library, for every account.
+
+        Only the deployment (an unscoped ``editor``) may publish: an account
+        cannot decide what everyone sees. The entry keeps its id, so the
+        account's projects that point at it still do; the account no longer
+        owns it and cannot change it. Refused when the shared library already
+        has an entry of that kind and name.
+        """
+        if resolve(editor) is not None:
+            raise CatalogPermissionError(
+                "only the deployment can publish to the shared library; an account cannot"
+            )
+        owner = self.owner_of(entry_id)
+        entry = self.get(entry_id, viewer=None)
+        if owner is None:
+            raise CatalogError(f"{entry.name} is already in the shared library")
+        with self._lock:
+            clash = self._conn.execute(
+                "SELECT 1 FROM catalog_entries WHERE kind = ? AND name = ? AND owner = ''",
+                (entry.kind, entry.name),
+            ).fetchone()
+            if clash:
+                raise CatalogError(
+                    f"the shared library already has a {entry.kind} named {entry.name}"
+                )
+            self._conn.execute(
+                "UPDATE catalog_entries SET owner = '' WHERE id = ? AND owner = ?",
+                (entry_id, owner),
+            )
+            self._conn.commit()
+        logger.info(
+            "catalog_entry_published",
+            entry_id=entry_id,
+            kind=entry.kind,
+            name=entry.name,
+            from_account=owner,
+            by=by,
+        )
+        return entry
+
     def update(
         self, entry_id: str, changes: dict[str, Any], *, by: str = "", editor: Any = FROM_CONTEXT
     ) -> Any:

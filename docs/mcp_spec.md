@@ -223,7 +223,7 @@ carries `tool_id`, `code` and `retryable`:
 | `not_found` | a project or entity outside the account's projects, worded exactly as one that does not exist |
 | `project_required` / `entity_required` | the tool needs a project (or the id it names) on a shared server |
 | `tool_not_scoped` | the tool, or one of its arguments, cannot be traced to a project and is refused |
-| `library_read_only` / `library_not_scoped` | the account cannot add to the library, or the library is served remotely |
+| `library_read_only` | the account cannot add to the library (its scope names no account). A library served by the gateway is no longer refused: the account's view is forwarded with each call |
 | `not_signed_in` | a token not bound to a person, such as one issued before the identity login |
 | `scope_unavailable` | the provider or an owner lookup could not answer; retryable |
 | `registration_failed` | `project.create` could not register the project to the account; nothing was created |

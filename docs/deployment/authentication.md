@@ -213,13 +213,33 @@ cannot take a shared entry's name. A local gateway and the deployment's own
 services see every entry, and what they add is shared. Each entry the API
 returns carries `shared: true|false`.
 
+**Through MCP.** The MCP sidecar calls the gateway with the deployment's
+service credential (`METAFORGE_GATEWAY_API_KEY`). During a signed-in person's
+tool call it forwards that person's library view in `X-MetaForge-Library-View`
+(`twin_core/library/viewer.py`, base64url so any tenant key is header-safe),
+and the gateway applies it: the shared entries and the account's own to read,
+the account's own to write. The gateway honours the header **only** on a
+request made with the service credential; a person's token cannot name another
+account's view, and a malformed value narrows to the shared layer (and refuses
+writes) rather than widening to everything. So `library.*` works from Claude
+Code, claude.ai and other MCP clients exactly as on the dashboard.
+
+**Filling the shared library.** Shared entries are written by the deployment
+itself: the seeds (materials, machine models, ergonomic limits) and an
+unscoped caller. The operator can also **publish** an account's entry for
+everyone: `POST /v1/library/{kind}/{entry_id}/publish` with the service
+credential and no forwarded view (`kind`: `processes`, `materials`,
+`components`, `appearances`, `ergonomic-limits`, `organisations`). The entry
+keeps its id, so the account's projects still point at it; it becomes shared
+and the account can no longer change it. It is refused (409) when the shared
+library already has that kind and name, and refused (403) to any account,
+directly or through an MCP tool. Use the entry's id rather than its name, which
+can be the same in several accounts. Machines are a separate store and cannot
+be published yet.
+
 Not yet confined: a design-flow **run** executing in the Temporal worker has
 no request, so it reads the library unscoped and can see other accounts'
-entries; so does the MCP sidecar's remote library, which calls the gateway
-as the deployment's service. Both are open in the hosted-pilot plan. (For a
-person signed in to MCP, `library.*` through a remote library is refused
-rather than answered unscoped; see
-[MCP calls are confined to the person's projects](#mcp-calls-are-confined-to-the-persons-projects).)
+entries. It is open in the hosted-pilot plan.
 
 A few routes the dashboard calls are still refused because their stores do
 not record a project yet (baselines, design-loop, design-flow versions,
