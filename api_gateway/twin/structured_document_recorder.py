@@ -296,6 +296,66 @@ def _validate_interface_quantities(interfaces: list[dict[str, Any]]) -> list[dic
     return validated
 
 
+_COMPONENT_KINDS = frozenset({"board", "module", "part", "subsystem", "other"})
+_INTERFACE_KINDS = frozenset({"cable", "connector", "bus", "mechanical", "other"})
+
+
+def _validate_boards_and_cables(
+    components: list[dict[str, Any]], interfaces: list[dict[str, Any]]
+) -> None:
+    """The system schematic's rules: what a board and a cable must say.
+
+    A component may be a ``board`` (a PCB designed here, with its ``parts``) or
+    a ``module`` (bought, seen only by its interfaces). Reference designators
+    are the board's own: each board can have a J1, but not two. A ``cable``
+    names whole wires and a positive length. Everything here is optional; a
+    record that uses none of it is valid as before.
+    """
+    for c in components:
+        kind = c.get("kind")
+        if kind is not None and kind not in _COMPONENT_KINDS:
+            raise ValueError(
+                f"component {c.get('name')!r}: kind must be one of "
+                f"{', '.join(sorted(_COMPONENT_KINDS))}"
+            )
+        parts = c.get("parts")
+        if parts is None:
+            continue
+        if kind != "board":
+            raise ValueError(f"component {c.get('name')!r}: only a board lists parts")
+        if not isinstance(parts, list):
+            raise ValueError(f"board {c.get('name')!r}: parts must be a list")
+        seen: set[str] = set()
+        for part in parts:
+            ref = part.get("ref") if isinstance(part, dict) else None
+            if not isinstance(ref, str) or not ref.strip():
+                raise ValueError(f"board {c.get('name')!r}: every part needs a ref, e.g. 'U1'")
+            if ref in seen:
+                raise ValueError(f"board {c.get('name')!r}: {ref} appears twice on the board")
+            seen.add(ref)
+    for i in interfaces:
+        kind = i.get("kind")
+        if kind is not None and kind not in _INTERFACE_KINDS:
+            raise ValueError(
+                f"interface {i.get('from')}->{i.get('to')}: kind must be one of "
+                f"{', '.join(sorted(_INTERFACE_KINDS))}"
+            )
+        wires = i.get("wires")
+        if wires is not None and (
+            isinstance(wires, bool) or not isinstance(wires, int) or wires < 1
+        ):
+            raise ValueError(
+                f"interface {i.get('from')}->{i.get('to')}: wires must be a whole number above zero"
+            )
+        length = i.get("length_mm")
+        if length is not None and (
+            isinstance(length, bool) or not isinstance(length, (int, float)) or length <= 0
+        ):
+            raise ValueError(
+                f"interface {i.get('from')}->{i.get('to')}: length_mm must be above zero"
+            )
+
+
 def render_system_architecture_markdown(
     name: str,
     system_name: str,
@@ -303,6 +363,7 @@ def render_system_architecture_markdown(
     interfaces: list[dict[str, Any]],
 ) -> tuple[str, dict[str, Any]]:
     interfaces = _validate_interface_quantities(interfaces)
+    _validate_boards_and_cables(components, interfaces)
     known = {c["name"] for c in components}
     dangling = [i for i in interfaces if i["from"] not in known or i["to"] not in known]
     mermaid_lines = ["```mermaid", "graph LR"]
@@ -321,6 +382,50 @@ def render_system_architecture_markdown(
             parts.append(f"{q['metric']}{limit}")
         return "; ".join(parts)
 
+    boards = [c for c in components if c.get("kind") == "board"]
+    modules = [c for c in components if c.get("kind") == "module"]
+    cables = [i for i in interfaces if i.get("kind") == "cable"]
+    hardware: list[str] = []
+    if boards or modules:
+        hardware += [
+            "## Boards and modules",
+            "",
+            _md_table(
+                ["Name", "Kind", "Location", "Parts"],
+                [
+                    [
+                        c["name"],
+                        str(c.get("kind")),
+                        str(c.get("location") or ""),
+                        ", ".join(
+                            f"{p['ref']} {p.get('name') or p.get('mpn') or ''}".strip()
+                            for p in c.get("parts") or []
+                        ),
+                    ]
+                    for c in boards + modules
+                ],
+            ),
+            "",
+        ]
+    if cables:
+        hardware += [
+            "## Cables",
+            "",
+            _md_table(
+                ["From", "To", "Wires", "Length (mm)", "Signals"],
+                [
+                    [
+                        f"{i['from']} {i.get('from_connector') or ''}".strip(),
+                        f"{i['to']} {i.get('to_connector') or ''}".strip(),
+                        str(i.get("wires") or ""),
+                        str(i.get("length_mm") or ""),
+                        ", ".join(i.get("signals") or []),
+                    ]
+                    for i in cables
+                ],
+            ),
+            "",
+        ]
     md = "\n".join(
         [
             f"# System Architecture: {system_name}",
@@ -337,6 +442,7 @@ def render_system_architecture_markdown(
                 ],
             ),
             "",
+            *hardware,
             "## Interfaces",
             "",
             _md_table(
@@ -362,6 +468,8 @@ def render_system_architecture_markdown(
         "dangling_interfaces": dangling,
         "components": components,
         "interfaces": interfaces,
+        "boards": [c["name"] for c in boards],
+        "cables": len(cables),
     }
     return md, metadata
 

@@ -1176,3 +1176,58 @@ body.cv-resizing {
     grid-column: 2;
   }
 }
+
+
+/* Develop studio: the view switch, the system schematic, a board's sheets and
+   Imagine's next-step pattern on the side. */
+.cv-develop { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 12px; min-height: 0; flex: 1; }
+.cv-develop-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0; }
+.cv-develop-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.cv-system { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--cv-line); border-radius: 12px; background: var(--cv-panel); padding: 8px; }
+.cv-system svg { width: 100%; height: auto; min-width: 560px; display: block; }
+.cv-system-loc { font-size: 11px; letter-spacing: .08em; fill: var(--cv-muted); }
+.cv-system-box rect { fill: var(--cv-panel); stroke: var(--cv-accent); stroke-width: 1.5; }
+.cv-system-box.is-module rect { stroke: var(--cv-muted); stroke-dasharray: 5 4; }
+.cv-system-box.is-board { cursor: pointer; }
+.cv-system-box.is-board:hover rect, .cv-system-box.is-board:focus-visible rect { stroke-width: 2.5; }
+.cv-system-box:focus { outline: none; }
+.cv-system-name { font-size: 13px; font-weight: 600; fill: var(--cv-text); }
+.cv-system-sub { font-size: 11px; fill: var(--cv-muted); }
+.cv-system-wire path { fill: none; stroke: var(--cv-muted); stroke-width: 1.5; }
+.cv-system-wire.is-cable path { stroke: var(--cv-info); stroke-width: 2.5; }
+.cv-system-wire text { font-size: 10.5px; fill: var(--cv-text); font-family: ui-monospace, Menlo, monospace; }
+.cv-system-key { font-size: 11.5px; margin: 6px 4px 0; }
+.cv-board-sheets { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--cv-line); border-radius: 12px; background: #fff; padding: 12px; display: grid; gap: 12px; }
+.cv-board-sheets img { width: 100%; height: auto; }
+.cv-dev-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; overflow: auto; }
+.cv-dev-next { border: 1px solid var(--cv-accent); border-radius: 10px; padding: 12px; display: grid; gap: 6px; }
+.cv-dev-next h3 { margin: 0; font-size: 15px; }
+.cv-dev-next p { margin: 0; font-size: 12.5px; color: var(--cv-muted); }
+.cv-dev-next .cv-primary { justify-self: start; }
+.cv-dev-kicker { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--cv-accent); font-weight: 600; }
+.cv-dev-row { border: 1px solid var(--cv-line); border-radius: 10px; background: var(--cv-panel); }
+.cv-dev-row > button { width: 100%; display: flex; justify-content: space-between; gap: 8px; align-items: center; padding: 10px 12px; background: transparent; border: 0; color: inherit; cursor: pointer; text-align: left; }
+.cv-dev-sum { display: flex; gap: 6px; align-items: center; color: var(--cv-muted); font-size: 12px; }
+.cv-dev-body { padding: 0 12px 12px; font-size: 12.5px; }
+.cv-dev-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.cv-dev-list li { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.cv-dev-links { display: flex; gap: 8px; }
+.cv-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; background: var(--cv-muted); }
+.cv-dot.is-ok { background: var(--cv-ok); } .cv-dot.is-warn { background: var(--cv-warn); } .cv-dot.is-none { background: var(--cv-line); }
+@media (max-width: 1100px) { .cv-develop { grid-template-columns: minmax(0, 1fr); } }
+/* The Develop studio's views share the 3D view's height, less the view switch,
+   so switching views never moves the buttons under them. */
+.cv-develop .cv-stage-canvas,
+.cv-develop .cv-system,
+.cv-develop .cv-board-sheets,
+.cv-develop-main > .cv-empty {
+  height: max(380px, calc(100vh - 436px));
+  height: max(380px, calc(100dvh - 436px));
+  flex: none;
+}
+.cv-develop-main > .cv-empty { justify-content: center; border: 1px solid var(--cv-line); border-radius: 12px; }
+.cv-system { display: flex; flex-direction: column; justify-content: center; }
+.cv-dev-side { max-height: calc(100dvh - 392px); }
+/* One sheet fits the view whole; several scroll, each at full width. */
+.cv-board-sheets:has(> img:only-child) { display: flex; align-items: center; justify-content: center; }
+.cv-board-sheets > img:only-child { width: 100%; height: 100%; object-fit: contain; }

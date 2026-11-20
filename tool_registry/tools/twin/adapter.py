@@ -5997,7 +5997,15 @@ class TwinServer(McpToolServer):
                     "Persist a cross-discipline component/interface map (block "
                     "diagram + interface table) as a SYSTEM_ARCHITECTURE work "
                     "product -- captures what talks to what before detailed "
-                    "design starts. Called by shared.define_system_architecture."
+                    "design starts. Called by shared.define_system_architecture. "
+                    "It is also the system schematic: give a component kind "
+                    "'board' and its parts (refs are the board's own: each "
+                    "board may have a J1, but not two), "
+                    "'module' for a bought module seen only by its interfaces, "
+                    "and its location in the product; give a cable between two "
+                    "boards kind 'cable' with its connectors, wires and length. "
+                    "Each board then gets its own schematic and layout, recorded "
+                    "with twin.record_design_files' board."
                 ),
                 capability="twin_system_architecture",
                 input_schema={
@@ -6014,6 +6022,31 @@ class TwinServer(McpToolServer):
                                     "name": {"type": "string"},
                                     "discipline": {"type": "string"},
                                     "description": {"type": "string"},
+                                    "kind": {
+                                        "type": "string",
+                                        "enum": ["board", "module", "part", "subsystem", "other"],
+                                        "description": "board: a PCB you design. module: a "
+                                        "bought assembly seen only by its interfaces.",
+                                    },
+                                    "location": {
+                                        "type": "string",
+                                        "description": "Where it sits, e.g. 'base', 'head'.",
+                                    },
+                                    "parts": {
+                                        "type": "array",
+                                        "description": "A board's components, by their "
+                                        "reference designator on that board.",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "ref": {"type": "string"},
+                                                "name": {"type": "string"},
+                                                "mpn": {"type": "string"},
+                                                "library": {"type": "string"},
+                                            },
+                                            "required": ["ref"],
+                                        },
+                                    },
                                 },
                                 "required": ["name"],
                             },
@@ -6027,6 +6060,21 @@ class TwinServer(McpToolServer):
                                     "to": {"type": "string"},
                                     "interface_type": {"type": "string"},
                                     "description": {"type": "string"},
+                                    "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                            "cable",
+                                            "connector",
+                                            "bus",
+                                            "mechanical",
+                                            "other",
+                                        ],
+                                    },
+                                    "from_connector": {"type": "string"},
+                                    "to_connector": {"type": "string"},
+                                    "wires": {"type": "integer", "minimum": 1},
+                                    "length_mm": {"type": "number", "exclusiveMinimum": 0},
+                                    "signals": {"type": "array", "items": {"type": "string"}},
                                     # FORGE-313: the interface's own
                                     # measurable properties -- e.g. "tip
                                     # deflection <= 0.5mm", owned by
@@ -8147,6 +8195,11 @@ class TwinServer(McpToolServer):
                             ),
                         },
                         "preview": {"type": "boolean", "description": "Default true."},
+                        "board": {
+                            "type": "string",
+                            "description": "The board these files belong to: a component of "
+                            "kind 'board' in the system architecture.",
+                        },
                         "item_key": {"type": "string"},
                         "supersedes": {"type": "string"},
                         "change_reason": {"type": "string"},
@@ -8186,6 +8239,11 @@ class TwinServer(McpToolServer):
         if not isinstance(sources, list):
             raise ValueError("twin.record_design_files: 'source_node_ids' must be a list")
         metadata = arguments.get("metadata")
+        board = arguments.get("board")
+        if board is not None:
+            if not isinstance(board, str) or not board.strip():
+                raise ValueError("twin.record_design_files: 'board' must be the board's name")
+            metadata = {**(metadata if isinstance(metadata, dict) else {}), "board": board.strip()}
         options = {
             key: arguments[key]
             for key in ("project_id", "item_key", "supersedes", "change_reason", "source_ref")

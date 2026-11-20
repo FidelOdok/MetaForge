@@ -60,6 +60,9 @@ export interface TwinNode {
   // FORGE-687: a node kept by twin.record_design_files (schematic, board,
   // gerbers, placement, pin map, firmware). Undefined for every other node.
   designFiles?: DesignFilesView;
+  // The system schematic: boards, bought modules and the cables between them.
+  // Undefined for every node but a system_architecture.
+  systemArchitecture?: SystemArchitectureView;
   // CDE slice 6: where a geometry artifact stands (Concept / Preview / Exact /
   // Validated) and the revision it is. Undefined for nodes that are not geometry.
   geometryState?: GeometryStateView;
@@ -115,12 +118,48 @@ export interface DesignFilesView {
   /** SVG previews (one per schematic sheet, or the board's top side). */
   previews: string[];
   previewError?: string | null;
+  /** Made but not stored (object storage unavailable). */
+  storeError?: string | null;
   /** A gerber set's files and what each layer is. */
   layers: { path: string; layer: string }[];
   /** A firmware project's build output (firmware.elf/.bin/.hex). */
   buildOutputs: string[];
   /** Node ids it was generated from. */
   sources: string[];
+  /** The board these files belong to (a board in the system architecture). */
+  board?: string | null;
+}
+
+/** A component of the system schematic: a board, a bought module, a part. */
+export interface SystemComponent {
+  name: string;
+  kind?: 'board' | 'module' | 'part' | 'subsystem' | 'other';
+  discipline?: string;
+  description?: string;
+  location?: string;
+  parts?: { ref: string; name?: string; mpn?: string; library?: string }[];
+}
+
+/** A link between two components: a cable, a connector, a bus. */
+export interface SystemInterface {
+  from: string;
+  to: string;
+  kind?: 'cable' | 'connector' | 'bus' | 'mechanical' | 'other';
+  interface_type?: string;
+  description?: string;
+  from_connector?: string;
+  to_connector?: string;
+  wires?: number;
+  length_mm?: number;
+  signals?: string[];
+}
+
+/** A system_architecture node's diagram data. */
+export interface SystemArchitectureView {
+  systemName: string;
+  components: SystemComponent[];
+  interfaces: SystemInterface[];
+  boards: string[];
 }
 
 export interface AssemblyPartBox {

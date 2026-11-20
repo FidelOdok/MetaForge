@@ -13,6 +13,25 @@ import { ProductStage, defaultStageNode, isEngineering, isVisual } from './Produ
 import { StageActions, type StageAction } from './StageActions';
 import { StageDisclosures } from './StageDisclosures';
 import { DEVELOP_LABEL, developPrimary, latestParametricSketch } from './stage-logic';
+import { BoardSheets } from './develop/BoardSheets';
+import { DevelopSide } from './develop/DevelopSide';
+import { SystemDiagram } from './develop/SystemDiagram';
+import type { SystemArchitectureView } from '../../types/twin';
+
+type DevelopView = 'model' | 'system' | 'schematic' | 'pcb';
+const DEVELOP_VIEWS: { id: DevelopView; label: string }[] = [
+  { id: 'model', label: '3D' },
+  { id: 'system', label: 'System' },
+  { id: 'schematic', label: 'Schematic' },
+  { id: 'pcb', label: 'PCB' },
+];
+
+/** The newest system schematic among the project's nodes. */
+export function latestArchitecture(nodes: TwinNode[]): SystemArchitectureView | undefined {
+  return nodes
+    .filter((n) => n.systemArchitecture && n.systemArchitecture.components.length > 0)
+    .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))[0]?.systemArchitecture;
+}
 
 interface DevelopStageProps {
   projectId: string;
@@ -55,6 +74,14 @@ export function DevelopStage({
   const [editableOpen, setEditableOpen] = useState(false);
   const [openDetail, setOpenDetail] = useState<string | null>(null);
   const [partsState, setPartsState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  const [devView, setDevView] = useState<DevelopView>('model');
+  const [board, setBoard] = useState<string | null>(null);
+  const arch = useMemo(() => latestArchitecture(nodes), [nodes]);
+  const activeBoard = board && arch?.boards.includes(board) ? board : (arch?.boards[0] ?? null);
+  const openBoard = (b: string, sheet: 'schematic' | 'pcb') => {
+    setBoard(b);
+    setDevView(sheet);
+  };
 
   const visual = nodes.filter(isVisual);
   const node = visual.find((n) => n.id === selectedId) ?? defaultStageNode(visual);
@@ -109,13 +136,58 @@ export function DevelopStage({
 
   return (
     <div className="cv-stage-col is-model">
-      <ProductStage
-        projectId={projectId}
-        nodes={nodes}
-        selectedId={selectedId}
-        working={working}
-        engineeringChecks={engineeringChecks}
-      />
+      <div className="cv-develop" data-testid="develop-studio">
+        <div className="cv-develop-main">
+          <div className="cv-develop-bar">
+            <div className="cv-seg" role="tablist" aria-label="Develop view">
+              {DEVELOP_VIEWS.map((v) => (
+                <button
+                  key={v.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={devView === v.id}
+                  className={devView === v.id ? 'is-on' : ''}
+                  onClick={() => setDevView(v.id)}
+                >
+                  {v.label}
+                </button>
+              ))}
+            </div>
+            {(devView === 'schematic' || devView === 'pcb') && arch && arch.boards.length > 1 && (
+              <div className="cv-seg" role="group" aria-label="Board">
+                {arch.boards.map((b) => (
+                  <button key={b} type="button" aria-pressed={activeBoard === b} className={activeBoard === b ? 'is-on' : ''} onClick={() => setBoard(b)}>
+                    {b}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {devView === 'model' && (
+            <ProductStage
+              projectId={projectId}
+              nodes={nodes}
+              selectedId={selectedId}
+              working={working}
+              engineeringChecks={engineeringChecks}
+            />
+          )}
+          {devView === 'system' &&
+            (arch ? (
+              <SystemDiagram arch={arch} onOpenBoard={(b) => openBoard(b, 'schematic')} />
+            ) : (
+              <div className="cv-empty" data-testid="system-empty">
+                <h2>No system schematic yet</h2>
+                <p className="cv-muted">Which boards, bought modules and cables the product has, and where each sits.</p>
+                <button type="button" className="cv-primary" onClick={() => onAsk('Define the system architecture: the boards, bought modules and cables, with each part on one board.')}>
+                  Describe the system
+                </button>
+              </div>
+            ))}
+          {(devView === 'schematic' || devView === 'pcb') && <BoardSheets nodes={nodes} board={activeBoard} sheet={devView} onAsk={onAsk} />}
+        </div>
+        <DevelopSide arch={arch} nodes={nodes} onAsk={onAsk} onOpenBoard={openBoard} />
+      </div>
 
       <StageDisclosures
         open={openDetail}

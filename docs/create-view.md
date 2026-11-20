@@ -588,6 +588,32 @@ the one primary action (see [the table above](#one-primary-action-per-stage)),
 **More**, and a button for each kind of detail, which opens it in place and
 closes it again. Nothing is open by default, and one detail opens at a time.
 
+### Views: 3D, System, Schematic, PCB
+
+A switch above the model picks what the stage shows; every view keeps the
+model's height, so the buttons under it never move.
+
+- **3D**: the model, as below.
+- **System**: the system schematic, drawn from the project's newest
+  [system architecture](twin_schema.md#boards-modules-and-cables-the-system-schematic):
+  boards (solid) and bought modules (dashed, interfaces only), in columns by
+  where each sits, joined by their cables with connectors, wires and length.
+  A cable that skips a column runs in its own lane below the boxes, so it is
+  never read as a link to a box it passes. Clicking a board opens its
+  schematic. With no system architecture, it offers to describe the system.
+- **Schematic** and **PCB**: one board's sheets, picked with a board switch
+  when there are several. They show the newest `schematic` or `pcb_layout`
+  design files whose `board` is that board, as their SVG previews; one sheet
+  fits the view, several scroll. A board with none says so and offers to
+  generate it. A preview that was made but could not be stored says why.
+
+Beside the views, as in Imagine's studio, a **Next step** card names the
+nearest missing piece (no system schematic, then each board's schematic,
+then its layout) with one button, and two rows open in place: **Boards**,
+each with its schematic and layout or what is missing, and **Cables**, each
+with its connectors, wires and length. The buttons hand the request to the
+assistant, which runs the same tools and approvals as any other request.
+
 ### The model and its label
 
 The model is the existing 3D viewer, read only, with one label above it: the

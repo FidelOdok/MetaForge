@@ -235,6 +235,7 @@ def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
         assemblyParts=assembly_parts(wp.metadata) or None,
         # FORGE-687: what twin.record_design_files kept, for the previews.
         designFiles=_design_files_view(wp.metadata),
+        systemArchitecture=_system_architecture_view(wp.type, wp.metadata),
         # FORGE-293: a technical_drawing node's own structured dimensions/
         # GD&T/surface-finish/inspection data and approval state, keyed by
         # wp.type rather than a shape-sniff (unlike `assembly` above, there's
@@ -759,6 +760,20 @@ def _entries(meta: dict[str, Any], key: str, kind: type) -> list[Any]:
     return [v for v in value if isinstance(v, kind)]
 
 
+def _system_architecture_view(wp_type: Any, meta: dict[str, Any]) -> dict[str, Any] | None:
+    """A system_architecture node's components and interfaces, for the diagram."""
+    if str(getattr(wp_type, "value", wp_type)) != "system_architecture":
+        return None
+    components = [c for c in meta.get("components") or [] if isinstance(c, dict)]
+    interfaces = [i for i in meta.get("interfaces") or [] if isinstance(i, dict)]
+    return {
+        "systemName": meta.get("system_name") or "",
+        "components": components,
+        "interfaces": interfaces,
+        "boards": [c.get("name") for c in components if c.get("kind") == "board"],
+    }
+
+
 def _design_files_view(meta: dict[str, Any]) -> dict[str, Any] | None:
     """The file list, previews, layers and build output of a design-files node."""
     if not isinstance(meta.get("design_files"), dict):
@@ -768,9 +783,14 @@ def _design_files_view(meta: dict[str, Any]) -> dict[str, Any] | None:
         "files": files or [{"path": p} for p in meta["design_files"]],
         "previews": _entries(meta, "preview_files", str),
         "previewError": meta.get("preview_error"),
+        # Files and previews that were made but could not be stored: without
+        # this a failed store reads as "no preview was made".
+        "storeError": meta.get("store_error"),
         "layers": _entries(meta, "layers", dict),
         "buildOutputs": _entries(meta, "build_outputs", str),
         "sources": _entries(meta, "source_work_product_ids", str),
+        # The board these files belong to (twin.record_design_files' board).
+        "board": meta.get("board") if isinstance(meta.get("board"), str) else None,
     }
 
 

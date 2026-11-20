@@ -123,6 +123,10 @@ class TwinNodeResponse(BaseModel):
     # gerbers, placement, pin map, firmware): its files, previews, gerber
     # layers, build output and sources. None for every other node.
     designFiles: dict[str, Any] | None = None  # noqa: N815
+    # The system schematic: a system_architecture node's components (boards,
+    # bought modules, parts) and interfaces (cables, buses), for the diagram.
+    # None for every other node.
+    systemArchitecture: dict[str, Any] | None = None  # noqa: N815
     # FORGE-527: a record's (simulation_result, design_decision, evidence)
     # revision pins and staleness. None for definitions and other nodes.
     dependsOn: list[RecordPinResponse] | None = None  # noqa: N815
