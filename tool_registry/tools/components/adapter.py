@@ -246,6 +246,17 @@ class ComponentServer(McpToolServer):
                 "component.search_parametric: 'category' is required and must be a non-empty string"
             )
 
+        category = category.strip()
+        if category not in CATEGORY_REGISTRY:
+            import difflib
+
+            near = difflib.get_close_matches(category, list(CATEGORY_REGISTRY), n=5, cutoff=0.4)
+            hint = f" Closest: {', '.join(near)}." if near else ""
+            raise ValueError(
+                f"component.search_parametric: unknown category {category!r}.{hint} "
+                f"Known categories: {', '.join(sorted(CATEGORY_REGISTRY))}."
+            )
+
         filters = _parse_filters(arguments.get("filters"))
 
         limit = arguments.get("limit", 25)
@@ -270,10 +281,27 @@ class ComponentServer(McpToolServer):
                 result_count=len(result.rows),
                 query_time_ms=result.query_time_ms,
             )
-            return {
+            out: dict[str, Any] = {
                 "rows": [_row_to_dict(row) for row in result.rows],
                 "query_time_ms": result.query_time_ms,
             }
+            if not result.rows and filters:
+                # Tell "nothing matches these filters" apart from "nothing is
+                # indexed in this category at all": an empty catalog read as
+                # "no such part" sends an agent off to design one.
+                unfiltered = await self._store.query(
+                    CatalogQuery(category=category, filters=[], limit=1)
+                )
+                out["category_indexed"] = bool(unfiltered.rows)
+            elif not result.rows:
+                out["category_indexed"] = False
+            if out.get("category_indexed") is False:
+                out["note"] = (
+                    f"The parametric catalog has no {category} parts indexed yet, so an empty "
+                    "result says nothing about whether such a part exists. Search the "
+                    "library and distributors with component.find, or library.search."
+                )
+            return out
 
     async def handle_search_intent(self, arguments: dict[str, Any]) -> dict[str, Any]:
         if self._llm is None or self._knowledge_service is None:
