@@ -57,6 +57,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
     && rm -rf /var/lib/apt/lists/*
 
+# Headless Chromium for twin.imagine_look (api_gateway/imagine/look.py), which
+# opens the studio's engine page and takes a picture. It sits above every COPY,
+# so the layer depends only on the base image and this line, and the build
+# cache keeps it across releases. MetaForge-Cloud used to install it on top of
+# this image on every deploy (3 to 5 minutes, and an apt mirror on the deploy
+# path). The browsers live outside site-packages, so the deps COPY below does
+# not touch them.
+ARG PLAYWRIGHT_VERSION=1.64.1
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN pip install --no-cache-dir "playwright==${PLAYWRIGHT_VERSION}" \
+    && playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -c "import playwright.async_api"
+
 # Copy installed packages from deps stage
 COPY --from=deps /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=deps /usr/local/bin /usr/local/bin

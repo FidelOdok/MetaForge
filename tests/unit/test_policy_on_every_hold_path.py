@@ -92,7 +92,11 @@ async def _server(http: httpx.AsyncClient, ran: list[str]) -> UnifiedMcpServer:
     server = UnifiedMcpServer(
         [_adapter(ran)],
         caller=Caller.REMOTE,
-        approval_gate=build_remote_approval_gate("http://gateway.test", client=http),
+        # A held call here is never answered, so the gate's window is short:
+        # the tests check that it is held, not how long a person may take.
+        approval_gate=build_remote_approval_gate(
+            "http://gateway.test", client=http, timeout_seconds=1.0, poll_interval=0.05
+        ),
         approval_ledger=_NonDurableLedger("http://gateway.test", client=http),
     )
     await server.handle_request(

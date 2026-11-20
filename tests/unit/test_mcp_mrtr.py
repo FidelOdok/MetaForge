@@ -320,7 +320,13 @@ class TestTheStateIsChecked:
 
 @pytest.mark.asyncio
 class TestAClientThatCannotBeAsked:
-    async def test_no_form_elicitation_means_no_question(self, gateway: httpx.AsyncClient) -> None:
+    async def test_no_form_elicitation_means_no_question(
+        self, gateway: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The call falls back to the dashboard handoff; nobody answers it here.
+        from metaforge.mcp import server as server_mod
+
+        monkeypatch.setattr(server_mod, "HANDOFF_WAIT_SECONDS", 0.0)
         ran: list[str] = []
         async with gateway as http:
             response = await _call(_server(http, ran), _params(caps={}))
