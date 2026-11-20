@@ -10,6 +10,11 @@ name: commit image tags
 # commit's publishing runs first, and tags nothing if any of them failed, so a
 # commit whose gateway did not build never gets a stack tag pointing at an
 # older gateway.
+#
+# It also waits for CI on this commit and tags nothing unless CI passed. Pull
+# requests may run only the tests their change affects; the full suite runs
+# here on main, and a stack tag is what a deployment locks to. So no commit
+# reaches staging or production without the full suite having passed on it.
 
 on:
   push:
@@ -52,11 +57,23 @@ jobs:
           for i in $(seq 1 220); do
             runs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${SHA}&per_page=100" \
               --jq '[.workflow_runs[] | select(.path == ".github/workflows/release.yml"
-                       or .path == ".github/workflows/adapter-images.yml")
+                       or .path == ".github/workflows/adapter-images.yml"
+                       or .path == ".github/workflows/ci.yml")
                      | select(.event == "push" or .event == "workflow_dispatch")
                      | {path, status, conclusion}]')
             pending=$(jq '[.[] | select(.status != "completed")] | length' <<<"$runs")
+            seen_ci=$(jq '[.[] | select(.path == ".github/workflows/ci.yml")] | length' <<<"$runs")
+            # CI is queued a moment after the push; do not call it done before it exists.
+            if [ "$pending" = "0" ] && [ "$seen_ci" = "0" ] && [ "$i" -lt 10 ]; then
+              sleep 30; continue
+            fi
             if [ "$pending" = "0" ]; then
+              ci_bad=$(jq -r '[.[] | select(.path == ".github/workflows/ci.yml")
+                               | select(.conclusion != "success") | .conclusion] | join(", ")' <<<"$runs")
+              if [ "$seen_ci" = "0" ] || [ -n "$ci_bad" ]; then
+                echo "::error::CI on ${SHA} did not pass (${ci_bad:-no CI run}); no stack tag, so nothing deploys it"
+                exit 1
+              fi
               # release.yml also builds CLI binaries on three OSes; one of those
               # failing says nothing about the images, so release.yml is judged
               # by its gateway image instead (REQUIRE_BUILT below).

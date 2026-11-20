@@ -158,8 +158,9 @@ commit SHA, and pass that SHA as `--ref` so the bundle matches.
 Images are rebuilt only when their inputs change, so most commits build a new
 gateway and nothing else. The `commit image tags` workflow
 (`.github/workflows/commit-image-tags.yml`) runs after every push to `main`. It
-waits for that commit's image builds, then gives every image pulled at
-`latest` a `:<sha>` tag:
+waits for that commit's image builds and for CI on that commit, tags nothing
+unless CI passed on that commit, then gives every image pulled at `latest`
+a `:<sha>` tag:
 
 - an image built at that commit already has it;
 - any other image gets the digest of its nearest tagged ancestor on `main`,

@@ -190,6 +190,21 @@ The bracket diagnoses correctness. The motor-driven mechanism
 and the quadruped will check that the same properties hold as
 complexity grows.
 
+## What CI runs
+
+CI runs every unit test on each pull request and on each push to `main`.
+`commit-image-tags.yml` tags no image for deployment unless CI passed on that
+commit, so nothing reaches staging or production without the full suite.
+
+Running only the tests a change reaches (`pytest-testmon`) was tried and
+dropped: after a one-line change it still selected all 14,744 tests, and
+building its map took longer than the suite itself.
+
+A test that waits on a real timeout makes the whole run that long: give a held
+call a short window (`build_remote_approval_gate(..., timeout_seconds=1.0)`)
+and zero `HANDOFF_WAIT_SECONDS` when nobody will answer it. Two tests that did
+not took 100 s each, a third of the suite.
+
 ## Stubbing Strategy
 
 E2E tests stub **only external solver binaries** — all internal interfaces are real.
