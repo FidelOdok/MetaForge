@@ -57,10 +57,15 @@ export function layoutSystem(components: SystemComponent[]): { placed: Placed[];
   };
 }
 
+/** A cable by its kind, or by the older interface_type agents still use. */
+export function isCable(i: SystemInterface): boolean {
+  return i.kind === 'cable' || (i.interface_type ?? '').toLowerCase() === 'cable';
+}
+
 function wireLabel(i: SystemInterface): string {
   const ends = [i.from_connector, i.to_connector].filter(Boolean).join('→');
   const bits = [ends, i.wires ? `${i.wires} wires` : '', i.length_mm ? `${i.length_mm} mm` : ''].filter(Boolean);
-  return bits.join(' · ') || i.interface_type || i.kind || '';
+  return bits.join(' · ') || (isCable(i) ? 'cable' : i.interface_type || i.kind || '');
 }
 
 export function SystemDiagram({ arch, onOpenBoard }: SystemDiagramProps) {
@@ -121,7 +126,7 @@ export function SystemDiagram({ arch, onOpenBoard }: SystemDiagramProps) {
             ly = Math.min(y1, y2) - 8;
           }
           return (
-            <g key={`${i.from}-${i.to}-${n}`} className={`cv-system-wire${i.kind === 'cable' ? ' is-cable' : ''}`}>
+            <g key={`${i.from}-${i.to}-${n}`} className={`cv-system-wire${isCable(i) ? ' is-cable' : ''}`}>
               <path d={d} />
               {label && (
                 <text x={lx} y={ly} textAnchor={anchor}>

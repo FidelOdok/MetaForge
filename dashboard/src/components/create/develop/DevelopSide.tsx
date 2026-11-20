@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { SystemArchitectureView, TwinNode } from '../../../types/twin';
 import { boardSheetNode } from './BoardSheets';
+import { isCable } from './SystemDiagram';
 
 interface DevelopSideProps {
   arch: SystemArchitectureView | undefined;
@@ -41,7 +42,7 @@ export function developNext(arch: SystemArchitectureView | undefined, nodes: Twi
 export function DevelopSide({ arch, nodes, onAsk, onOpenBoard }: DevelopSideProps) {
   const [open, setOpen] = useState<string | null>(null);
   const next = developNext(arch, nodes);
-  const cables = (arch?.interfaces ?? []).filter((i) => i.kind === 'cable');
+  const cables = (arch?.interfaces ?? []).filter(isCable);
   const boards = arch?.boards ?? [];
   const done = boards.filter((b) => boardSheetNode(nodes, b, 'schematic') && boardSheetNode(nodes, b, 'pcb')).length;
   const rows = [
