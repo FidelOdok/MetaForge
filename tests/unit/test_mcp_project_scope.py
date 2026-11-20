@@ -112,6 +112,7 @@ def _stub_adapter(ran: list[tuple[str, dict[str, Any]]], approvals: list[dict[st
         "made.up_tool": ["anything"],
         "approvals.list": ["project_id"],
         "library.register_material": ["name"],
+        "library.standard_part": ["name"],
         "flow.capabilities": ["template", "version_id"],
     }
 
@@ -350,17 +351,17 @@ async def test_an_argument_that_cannot_be_traced_is_refused(world: World) -> Non
 
 
 @pytest.mark.asyncio
-async def test_library_writes_need_a_tenant_and_an_in_process_library(world: World) -> None:
-    assert _payload(await world.call("library.register_material", {"name": "x"})) == {"ok": True}
-    world.provider.tenant = None
-    world.scoper.forget(ALICE)
-    assert _refusal(await world.call("library.register_material", {"name": "x"}))["code"] == (
-        "library_read_only"
-    )
+async def test_library_writes_need_a_tenant_wherever_the_library_is(world: World) -> None:
+    # A library served by the gateway is admitted like an in-process one: the
+    # account's view travels with each call (remote_library.library_view_headers).
     remote = McpProjectScoper(world.provider, {}, library_in_process=False)
     world.server._project_scoper = remote  # noqa: SLF001
+    assert _payload(await world.call("library.register_material", {"name": "x"})) == {"ok": True}
+    assert _payload(await world.call("library.standard_part", {"name": "x"})) == {"ok": True}
+    world.provider.tenant = None
+    remote.forget(ALICE)
     assert _refusal(await world.call("library.register_material", {"name": "x"}))["code"] == (
-        "library_not_scoped"
+        "library_read_only"
     )
 
 

@@ -31,7 +31,7 @@ from starlette.responses import JSONResponse, Response
 from api_gateway.auth.provider import AuthProvider, AuthUnavailable, InvalidToken
 from api_gateway.auth.scope import decide, supports_project_scope
 from orchestrator.harness.providers.usage import usage_scope
-from twin_core.library.viewer import NO_TENANT, library_viewer
+from twin_core.library.viewer import NO_TENANT, VIEW_HEADER, decode_view, library_viewer
 
 logger = structlog.get_logger(__name__)
 
@@ -131,6 +131,25 @@ class AuthMiddleware(BaseHTTPMiddleware):
             # FORGE-876: every library read and write in this request sees the
             # shared entries and this caller's own, wherever it is made from.
             view = None if scope.unrestricted else (scope.tenant or NO_TENANT)
+            # The deployment's own services (the MCP sidecar) call with the
+            # service credential on behalf of a signed-in account, and say
+            # whose library view applies. Only an unrestricted caller may: a
+            # person's token cannot name another account's view.
+            forwarded = request.headers.get(VIEW_HEADER)
+            if scope.unrestricted and forwarded is not None:
+                view = decode_view(forwarded)
+                request.state.library_view = view
+                # The same rule as a person with no account: read the shared
+                # library, add nothing. A malformed view lands here too.
+                if (
+                    view == NO_TENANT
+                    and request.method not in ("GET", "HEAD", "OPTIONS")
+                    and request.url.path.startswith("/v1/library/")
+                ):
+                    logger.info("gateway_library_write_without_account", path=request.url.path)
+                    return JSONResponse(
+                        {"detail": "This account cannot add to the library."}, status_code=403
+                    )
         else:
             project_id = None
             view = None

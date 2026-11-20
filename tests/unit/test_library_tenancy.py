@@ -23,7 +23,7 @@ from api_gateway.auth.scope import ProjectScope, RouteTenancy, classify_routes
 from api_gateway.library import catalog_routes, routes
 from twin_core.library.catalog import CatalogPermissionError, SqliteCatalog
 from twin_core.library.machines import SqliteMachineLibrary
-from twin_core.library.viewer import library_viewer
+from twin_core.library.viewer import NO_TENANT, library_viewer
 
 SCOPES = {
     "alice": ProjectScope(tenant="acct-alice"),
@@ -256,3 +256,145 @@ def test_a_pre_owner_machine_file_is_migrated(tmp_path: Path) -> None:
     assert lib.owner_of(m.id) == "acct-alice"
     lib.update(m.id, {"location": "bay 3"}, editor="acct-alice")
     assert lib.owner_of(m.id) == "acct-alice"  # an update keeps the owner
+
+
+# The MCP sidecar calls the gateway with the service credential on behalf of a
+# signed-in account, and forwards that account's view (twin_core.library.viewer).
+
+
+def _for(tenant: str | None) -> dict[str, str]:
+    from twin_core.library.viewer import VIEW_HEADER, encode_view
+
+    value = encode_view(tenant)
+    return {**_as("service"), **({VIEW_HEADER: value} if value else {})}
+
+
+def test_a_service_call_for_an_account_sees_what_the_account_sees(client: TestClient) -> None:
+    client.post("/v1/library/materials", json=_material("alice_petg"), headers=_as("alice"))
+    client.post("/v1/library/materials", json=_material("bob_abs"), headers=_as("bob"))
+    assert _names(client.get("/v1/library/materials", headers=_for("acct-alice"))) == {
+        "pla",
+        "alice_petg",
+    }
+    # Without a forwarded view it is the deployment itself: everything.
+    assert _names(client.get("/v1/library/materials", headers=_as("service"))) == {
+        "pla",
+        "alice_petg",
+        "bob_abs",
+    }
+
+
+def test_a_service_write_for_an_account_is_the_accounts_own(client: TestClient) -> None:
+    r = client.post("/v1/library/materials", json=_material("via_mcp"), headers=_for("acct-alice"))
+    assert r.status_code in (200, 201), r.text
+    assert "via_mcp" in _names(client.get("/v1/library/materials", headers=_as("alice")))
+    assert "via_mcp" not in _names(client.get("/v1/library/materials", headers=_as("bob")))
+    # It is the account's entry, not a shared one: the account may change it.
+    shared = {e["name"]: e.get("shared") for e in client.get(
+        "/v1/library/materials", headers=_as("alice")).json()["entries"]}  # fmt: skip
+    assert shared["via_mcp"] is False and shared["pla"] is True
+
+
+def test_a_person_cannot_borrow_another_accounts_view(client: TestClient) -> None:
+    from twin_core.library.viewer import VIEW_HEADER, encode_view
+
+    client.post("/v1/library/materials", json=_material("bob_abs"), headers=_as("bob"))
+    forged = {**_as("alice"), VIEW_HEADER: str(encode_view("acct-bob"))}
+    assert "bob_abs" not in _names(client.get("/v1/library/materials", headers=forged))
+
+
+def test_a_malformed_view_narrows_to_the_shared_layer(client: TestClient) -> None:
+    from twin_core.library.viewer import VIEW_HEADER
+
+    client.post("/v1/library/materials", json=_material("alice_petg"), headers=_as("alice"))
+    bad = {**_as("service"), VIEW_HEADER: "garbage"}
+    assert _names(client.get("/v1/library/materials", headers=bad)) == {"pla"}
+    r = client.post("/v1/library/materials", json=_material("via_garbage"), headers=bad)
+    assert r.status_code == 403, r.text
+    assert "via_garbage" not in _names(client.get("/v1/library/materials", headers=_as("service")))
+
+
+@pytest.mark.parametrize("view", [None, "acct-alice", "tenant with spaces/ü", NO_TENANT])
+def test_the_view_survives_the_header(view: str | None) -> None:
+    from twin_core.library.viewer import decode_view, encode_view
+
+    encoded = encode_view(view)
+    assert decode_view(encoded) == view
+    if encoded is not None:
+        assert encoded.isascii() and "\x00" not in encoded
+
+
+async def test_the_sidecar_forwards_the_callers_view() -> None:
+    import httpx
+
+    from metaforge.mcp.remote_library import RemoteMachineLibrary
+    from twin_core.library.viewer import VIEW_HEADER, decode_view, library_viewer
+
+    seen: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get(VIEW_HEADER))
+        return httpx.Response(200, json={"entries": []})
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    lib = RemoteMachineLibrary("http://gateway.test", client=http)
+    with library_viewer("acct-alice"):
+        await lib.list_entries("material", None)
+    with library_viewer(None):
+        await lib.list_entries("material", None)
+    await http.aclose()
+    assert [decode_view(v) for v in seen] == ["acct-alice", None]
+
+
+# The operator fills the shared (global) library by publishing an account's
+# entry, keeping its id so the account's projects still point at it.
+
+
+def _id_of(client: TestClient, who: str, name: str) -> str:
+    rows = client.get("/v1/library/materials", headers=_as(who)).json()["entries"]
+    return next(e["id"] for e in rows if e["name"] == name)
+
+
+def test_the_deployment_publishes_an_accounts_entry_for_everyone(client: TestClient) -> None:
+    client.post("/v1/library/materials", json=_material("alice_petg"), headers=_as("alice"))
+    entry_id = _id_of(client, "alice", "alice_petg")
+    r = client.post(f"/v1/library/materials/{entry_id}/publish", headers=_as("service"))
+    assert r.status_code == 200, r.text
+    assert r.json()["entry"]["shared"] is True and r.json()["entry"]["id"] == entry_id
+    # Every account now sees it, as shared; the old owner can no longer change it.
+    assert "alice_petg" in _names(client.get("/v1/library/materials", headers=_as("bob")))
+    assert _id_of(client, "bob", "alice_petg") == entry_id
+    change = {"changes": {"title": "mine again"}}
+    r = client.patch(f"/v1/library/materials/{entry_id}", json=change, headers=_as("alice"))
+    assert r.status_code == 403
+
+
+def test_an_account_cannot_publish(client: TestClient) -> None:
+    client.post("/v1/library/materials", json=_material("alice_petg"), headers=_as("alice"))
+    entry_id = _id_of(client, "alice", "alice_petg")
+    direct = client.post(f"/v1/library/materials/{entry_id}/publish", headers=_as("alice"))
+    assert direct.status_code == 403
+    # Nor through the MCP sidecar, which calls as the service with the account's view.
+    via_mcp = client.post(f"/v1/library/materials/{entry_id}/publish", headers=_for("acct-alice"))
+    assert via_mcp.status_code == 403
+    assert "alice_petg" not in _names(client.get("/v1/library/materials", headers=_as("bob")))
+
+
+def test_publishing_over_a_shared_name_is_refused(client: TestClient) -> None:
+    # "pla" is already shared; an account may not even register that name, so
+    # make the clash by publishing one account's entry and then another's.
+    client.post("/v1/library/materials", json=_material("petg"), headers=_as("alice"))
+    client.post("/v1/library/materials", json=_material("petg"), headers=_as("bob"))
+    first = _id_of(client, "alice", "petg")
+    second = _id_of(client, "bob", "petg")
+    ok = client.post(f"/v1/library/materials/{first}/publish", headers=_as("service"))
+    assert ok.status_code == 200
+    clash = client.post(f"/v1/library/materials/{second}/publish", headers=_as("service"))
+    assert clash.status_code == 409 and "already has" in clash.json()["detail"]
+    again = client.post(f"/v1/library/materials/{first}/publish", headers=_as("service"))
+    assert again.status_code == 409 and "already in the shared library" in again.json()["detail"]
+
+
+def test_publish_names_only_catalog_kinds(client: TestClient) -> None:
+    r = client.post("/v1/library/jobs/x/publish", headers=_as("service"))
+    assert r.status_code == 404

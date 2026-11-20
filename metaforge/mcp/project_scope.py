@@ -760,16 +760,10 @@ class McpProjectScoper:
                 code="tool_not_scoped",
                 tenancy=tenancy,
             )
-        if tenancy in (ToolTenancy.SHARED_READ, ToolTenancy.TENANT_LIBRARY) and (
-            tool_id.startswith("library.") and not self._library_in_process
-        ):
-            raise self._refuse(
-                tool_id,
-                "the library is served by the gateway here, and your account's view of "
-                "it cannot be applied from this server",
-                code="library_not_scoped",
-                tenancy=tenancy,
-            )
+        # A library served by the gateway gets the account's view forwarded with
+        # each call (remote_library.library_view_headers), so it is admitted on
+        # the same terms as an in-process one: the shared entries and the
+        # account's own to read, the account's own to write.
         if tenancy is ToolTenancy.TENANT_LIBRARY and not scope.tenant:
             raise self._refuse(
                 tool_id,

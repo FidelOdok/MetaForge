@@ -113,6 +113,50 @@ def _update(kind: str, ref: str, body: UpdateEntryRequest, request: Request) -> 
     return {"entry": _shown(entry)}
 
 
+@router.post("/{kind_path}/{ref}/publish")
+async def publish_entry(kind_path: str, ref: str, request: Request) -> dict[str, Any]:
+    """Move an account's entry into the shared library (the deployment only).
+
+    Accounts are refused twice: the auth middleware blocks writes under
+    ``/v1/library/`` that are not their own entries, and this route refuses a
+    service call that carries an account's library view (the MCP sidecar), so
+    an account cannot publish through a tool either.
+    """
+    kind = _PUBLISHABLE.get(kind_path)
+    if kind is None:
+        raise HTTPException(status_code=404, detail=f"no library kind '{kind_path}'")
+    if library_tenant(request) is not None:
+        raise HTTPException(
+            status_code=403, detail="Only the deployment can publish to the shared library."
+        )
+    catalog = get_catalog()
+    by = _by(request, "")
+    with tracer.start_as_current_span("library.publish") as span:
+        span.set_attribute("entry.kind", kind)
+        try:
+            current = catalog.get(ref, kind, viewer=None)
+            entry = catalog.publish(current.id, by=by, editor=None)
+        except CatalogNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=f"no {kind} '{ref}'") from exc
+        except CatalogPermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except CatalogError as exc:
+            span.record_exception(exc)
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"entry": with_ownership(entry.as_dict(), None)}
+
+
+#: URL segment -> catalog kind, for the kinds an entry can be published from.
+_PUBLISHABLE = {
+    "processes": "process",
+    "materials": "material",
+    "components": "component",
+    "appearances": "appearance",
+    "ergonomic-limits": "ergonomic_limit",
+    "organisations": "organisation",
+}
+
+
 @router.get("/processes")
 async def list_processes(family: str | None = None, *, request: Request) -> dict[str, Any]:
     return _list("process", family, request)

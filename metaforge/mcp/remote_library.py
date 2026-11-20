@@ -16,8 +16,33 @@ import httpx
 
 from metaforge.mcp.gateway_auth import gateway_auth_headers
 from metaforge.mcp.remote_flows import _Gateway
+from twin_core.library.viewer import VIEW_HEADER, current_viewer, encode_view
 
-__all__ = ["GatewayMachineView", "RemoteMachineLibrary"]
+__all__ = ["GatewayMachineView", "RemoteMachineLibrary", "library_view_headers"]
+
+
+def library_view_headers() -> dict[str, str]:
+    """Whose library view the gateway should apply to this call.
+
+    The sidecar calls the gateway with the deployment's service credential,
+    which on its own sees every entry and writes the shared layer. During a
+    signed-in account's tool call the project scope sets the account's view
+    (``library_viewer``); forwarding it gives the account the shared entries
+    plus its own, and puts its writes in its own. No view, no header.
+    """
+    value = encode_view(current_viewer())
+    return {VIEW_HEADER: value} if value is not None else {}
+
+
+class _LibraryGateway(_Gateway):
+    """The gateway requests, each carrying the caller's library view."""
+
+    async def request(
+        self, method: str, path: str, *, json: Any = None, headers: dict[str, str] | None = None
+    ) -> Any:
+        merged = {**library_view_headers(), **(headers or {})}
+        return await super().request(method, path, json=json, headers=merged or None)
+
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
 
@@ -32,7 +57,7 @@ class RemoteMachineLibrary:
         client: httpx.AsyncClient | None = None,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
-        self._gateway = _Gateway(gateway_url, client, timeout_seconds)
+        self._gateway = _LibraryGateway(gateway_url, client, timeout_seconds)
 
     async def list_machines(self, layer: str | None, kind: str | None) -> dict[str, Any]:
         query = urlencode({k: v for k, v in (("layer", layer), ("kind", kind)) if v})
@@ -190,11 +215,12 @@ class GatewayMachineView:
 
     def _get(self, path: str) -> Any:
         url = f"{self._base}{path}"
+        view = library_view_headers()
         if self._client is not None:
-            response = self._client.get(url)
+            response = self._client.get(url, headers=view)
         else:
             with httpx.Client(timeout=self._timeout, headers=gateway_auth_headers()) as http:
-                response = http.get(url)
+                response = http.get(url, headers=view)
         if response.status_code == 404:
             raise KeyError(path)
         response.raise_for_status()
@@ -234,7 +260,11 @@ def remote_material_source(gateway_url: str, *, client: httpx.AsyncClient | None
             timeout=DEFAULT_TIMEOUT_SECONDS, headers=gateway_auth_headers()
         )
         try:
-            response = await http.get(f"{base}/v1/library/materials/resolve", params={"name": name})
+            response = await http.get(
+                f"{base}/v1/library/materials/resolve",
+                params={"name": name},
+                headers=library_view_headers(),
+            )
         finally:
             if owned:
                 await http.aclose()

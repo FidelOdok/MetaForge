@@ -27,7 +27,11 @@ def library_tenant(request: Request) -> str | None:
     """``None`` for an unscoped caller (local gateway, the deployment's own
     services): every entry, writes are shared. Otherwise the caller's tenant."""
     scope = getattr(request.state, "project_scope", None)
-    if scope is None or getattr(scope, "unrestricted", False):
+    if scope is not None and getattr(scope, "unrestricted", False):
+        # A trusted service acting for an account forwards that account's view
+        # (auth middleware); without one it is the deployment itself.
+        return getattr(request.state, "library_view", None)
+    if scope is None:
         return None
     return getattr(scope, "tenant", None) or NO_TENANT
 
