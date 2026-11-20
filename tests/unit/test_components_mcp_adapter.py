@@ -287,3 +287,55 @@ class TestSearchIntent:
     async def test_top_k_out_of_range_raises(self, server: ComponentServer) -> None:
         with pytest.raises(ValueError, match="top_k_per_role"):
             await server.handle_search_intent({"intent_text": "anything", "top_k_per_role": 0})
+
+
+class TestHonestEmptyResults:
+    """A claude.ai test on staging got 0 rows for buck converters and for a
+    made-up category alike, with no error: nothing fills the catalog yet, and
+    an unknown category was not refused despite the description."""
+
+    async def test_an_unknown_category_is_refused_with_the_closest_names(
+        self, server: ComponentServer
+    ) -> None:
+        with pytest.raises(ValueError, match="unknown category 'buck_convertor'") as exc:
+            await server.handle_search_parametric({"category": "buck_convertor"})
+        assert "Closest: buck_converter" in str(exc.value)
+        with pytest.raises(ValueError, match="Known categories: "):
+            await server.handle_search_parametric({"category": "vibration_damper"})
+
+    async def test_an_empty_category_says_nothing_is_indexed(self, server: ComponentServer) -> None:
+        got = await server.handle_search_parametric({"category": "buck_converter"})
+        assert got["rows"] == [] and got["category_indexed"] is False
+        assert "no buck_converter parts indexed" in got["note"]
+        assert "component.find" in got["note"]
+
+    async def test_filters_that_exclude_every_part_are_not_called_unindexed(
+        self, store: _FakeStore
+    ) -> None:
+        class _Filtering(_FakeStore):
+            async def query(self, catalog_query: CatalogQuery) -> CatalogQueryResult:
+                result = await super().query(catalog_query)
+                return (
+                    result
+                    if not catalog_query.filters
+                    else CatalogQueryResult(rows=[], query_time_ms=1.0)
+                )
+
+        filtering = _Filtering()
+        filtering.stub("buck_converter", [_row("TPS62133", "buck_converter")])
+        srv = ComponentServer(
+            search_store=filtering,  # type: ignore[arg-type]
+            knowledge_service=_FakeKnowledgeService(),  # type: ignore[arg-type]
+        )
+        got = await srv.handle_search_parametric(
+            {
+                "category": "buck_converter",
+                "filters": [{"property": "v_out", "op": "==", "value": 12}],
+            }
+        )
+        assert got["rows"] == [] and got["category_indexed"] is True and "note" not in got
+
+    async def test_a_hit_carries_no_note(self, server: ComponentServer, store: _FakeStore) -> None:
+        store.stub("buck_converter", [_row("TPS62133", "buck_converter")])
+        got = await server.handle_search_parametric({"category": "buck_converter"})
+        assert len(got["rows"]) == 1 and "note" not in got and "category_indexed" not in got
