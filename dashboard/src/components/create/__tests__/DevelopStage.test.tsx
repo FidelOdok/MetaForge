@@ -279,3 +279,12 @@ describe('System and boards', () => {
     expect(screen.getByTestId('develop-next')).toHaveTextContent('Controller board has no layout');
   });
 });
+
+it('draws a link marked only by its older interface_type as a cable', async () => {
+  const arch = structuredClone(ARCH) as TwinNode;
+  arch.systemArchitecture!.interfaces = arch.systemArchitecture!.interfaces.map((i) => ({ ...i, kind: undefined, interface_type: 'cable' }));
+  develop([CAD, arch]);
+  expect(screen.getByRole('button', { name: /Cables/ })).toHaveTextContent('2 between boards');
+  await userEvent.click(screen.getByRole('tab', { name: 'System' }));
+  expect(document.querySelectorAll('.cv-system-wire.is-cable')).toHaveLength(2);
+});

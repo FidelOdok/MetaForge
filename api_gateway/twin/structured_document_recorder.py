@@ -300,6 +300,11 @@ _COMPONENT_KINDS = frozenset({"board", "module", "part", "subsystem", "other"})
 _INTERFACE_KINDS = frozenset({"cable", "connector", "bus", "mechanical", "other"})
 
 
+def _is_cable(i: dict[str, Any]) -> bool:
+    """A cable by ``kind``, or by the older ``interface_type`` agents still use."""
+    return i.get("kind") == "cable" or str(i.get("interface_type") or "").lower() == "cable"
+
+
 def _validate_boards_and_cables(
     components: list[dict[str, Any]], interfaces: list[dict[str, Any]]
 ) -> None:
@@ -384,7 +389,7 @@ def render_system_architecture_markdown(
 
     boards = [c for c in components if c.get("kind") == "board"]
     modules = [c for c in components if c.get("kind") == "module"]
-    cables = [i for i in interfaces if i.get("kind") == "cable"]
+    cables = [i for i in interfaces if _is_cable(i)]
     hardware: list[str] = []
     if boards or modules:
         hardware += [

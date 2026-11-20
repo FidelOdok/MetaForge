@@ -62,6 +62,15 @@ def test_each_board_has_its_own_reference_designators() -> None:
     assert meta["boards"] == ["Controller board", "LED board", "Touch board"]
 
 
+def test_a_cable_by_its_older_interface_type_counts_as_a_cable() -> None:
+    components, interfaces = _lamp()
+    for i in interfaces:
+        i.pop("kind")
+        i["interface_type"] = "Cable"
+    md, meta = render_system_architecture_markdown("Lamp", "Lamp", components, interfaces)
+    assert meta["cables"] == 3 and "## Cables" in md
+
+
 def test_a_record_without_boards_is_unchanged() -> None:
     md, meta = render_system_architecture_markdown(
         "Plain", "Plain", [{"name": "A"}, {"name": "B"}], [{"from": "A", "to": "B"}]
