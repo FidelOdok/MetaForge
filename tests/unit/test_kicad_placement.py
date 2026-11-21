@@ -233,6 +233,13 @@ class Board:
         self.fps[fp.ref] = fp
 
     def Remove(self, item: Any) -> None:  # noqa: N802
+        # On KiCad 9, BOARD.Remove leaves the item unowned while Python still
+        # wraps it; the board's memory is corrupted and the next call fails
+        # ("'SwigPyObject' object has no attribute 'GetReference'") or
+        # segfaults. The worker must use Delete.
+        raise AssertionError("pcb_worker must use board.Delete, never board.Remove")
+
+    def Delete(self, item: Any) -> None:  # noqa: N802
         if isinstance(item, Footprint):
             self.fps.pop(item.ref)
         elif item in self.tracks:
