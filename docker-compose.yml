@@ -897,7 +897,7 @@ services:
     # build: stays as the contributor fallback.
     image: ghcr.io/fidelodok/metaforge-spice-adapter:${METAFORGE_ADAPTER_TAG:-latest}
     ports:
-      - "8104:8104"
+      - "${SPICE_PORT:-8104}:8104"
     volumes:
       - adapter-workspace:/workspace
     environment:
@@ -1117,7 +1117,7 @@ services:
     # build: stays as the contributor fallback.
     image: ghcr.io/fidelodok/metaforge-kicad-adapter:${METAFORGE_ADAPTER_TAG:-latest}
     ports:
-      - "8103:8103"
+      - "${KICAD_PORT:-8103}:8103"
     volumes:
       - adapter-workspace:/workspace
     environment:
@@ -1261,7 +1261,7 @@ services:
     # only builds when no local image matches the tag.
     image: ghcr.io/fidelodok/metaforge-freecad-adapter:${METAFORGE_ADAPTER_TAG:-latest}
     ports:
-      - "8102:8102"
+      - "${FREECAD_PORT:-8102}:8102"
     volumes:
       - adapter-workspace:/workspace
     environment:
