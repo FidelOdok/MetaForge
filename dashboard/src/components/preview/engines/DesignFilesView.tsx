@@ -112,8 +112,10 @@ function Sheets({ node, files, mode }: { node: TwinNode; files: DesignFiles; mod
   // the url is built from the new node's id with that old path, which 404s
   // and leaves the browser showing the alt text.
   const [picked, setPicked] = useState<string | null>(null);
-  const active = picked !== null && files.previews.includes(picked) ? picked : (files.previews[0] ?? '');
-  if (!files.previews.length) {
+  // A board's GLB (its populated 3D model) is shown in Develop's PCB view, not here.
+  const sheets = files.previews.filter((p) => !p.toLowerCase().endsWith('.glb'));
+  const active = picked !== null && sheets.includes(picked) ? picked : (sheets[0] ?? '');
+  if (!sheets.length) {
     return (
       <Note>
         No preview was made when this was recorded
@@ -124,7 +126,7 @@ function Sheets({ node, files, mode }: { node: TwinNode; files: DesignFiles; mod
   const url = nodeNamedFileUrl(node.id, active);
   return (
     <div data-testid="design-sheets">
-      <Tabs items={files.previews} active={active} onPick={setPicked} />
+      <Tabs items={sheets} active={active} onPick={setPicked} />
       <AuthedFileLink src={url} title="Open full size">
         <AuthedImg
           src={url}

@@ -39,6 +39,15 @@ import { DevelopStage } from '../DevelopStage';
 import { definition } from '../../../lib/preview/__tests__/fixtures';
 import { useOperationsStore } from '../../../store/operations-store';
 
+// No WebGL in jsdom: the 3D board stands in as a labelled box.
+vi.mock('../develop/BoardModel3D', () => ({
+  BoardModel3D: ({ src, label }: { src: string; label: string }) => (
+    <div data-testid="board-3d" data-src={src}>
+      {label} in 3D
+    </div>
+  ),
+}));
+
 // AuthedImg has its own tests (it loads the file with the token); here it is
 // a plain <img> so these tests can check which file each view asks for.
 vi.mock('../../shared/AuthedImg', () => ({
@@ -284,6 +293,30 @@ describe('System and boards', () => {
     expect(screen.getByTestId('board-schematic-empty')).toHaveTextContent('No schematic for LED board yet');
     await userEvent.click(screen.getByRole('button', { name: 'Generate schematic' }));
     expect(props.onAsk).toHaveBeenCalledWith('Generate the schematic for LED board and run ERC.');
+  });
+
+  it("shows a board's layout or, when the layout was recorded with one, its populated 3D model", async () => {
+    const pcb = {
+      ...node('Controller layout', { wp_type: 'pcb_layout' }),
+      designFiles: {
+        files: [{ path: 'ctl.kicad_pcb' }],
+        previews: ['preview/ctl-pcb.svg', 'preview/ctl-3d.glb'],
+        layers: [],
+        buildOutputs: [],
+        sources: [],
+        board: 'Controller board',
+      },
+    } as TwinNode;
+    develop([CAD, ARCH, CTL_SCH, pcb]);
+    await userEvent.click(screen.getByRole('tab', { name: 'PCB' }));
+    const sheets = screen.getByTestId('board-pcb');
+    // The GLB is a model, never drawn as an image.
+    expect(within(sheets).getAllByRole('img').map((i) => i.getAttribute('src'))).toEqual([
+      expect.stringContaining('ctl-pcb.svg'),
+    ]);
+    await userEvent.click(within(sheets).getByRole('tab', { name: '3D' }));
+    expect(screen.getByTestId('board-3d')).toHaveTextContent('Controller board in 3D');
+    expect(screen.getByTestId('board-3d').getAttribute('data-src')).toContain('ctl-3d.glb');
   });
 
   it('puts the nearest missing board sheet in the next step', () => {

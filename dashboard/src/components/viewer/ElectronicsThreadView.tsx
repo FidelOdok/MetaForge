@@ -145,7 +145,7 @@ function StageCard({
     <div className="tw-thread-card is-present" data-testid={`thread-${stage.type}`}>
       <strong>{stage.label}</strong>
       {nodes.map((n) => {
-        const preview = n.designFiles?.previews[0];
+        const preview = n.designFiles?.previews.find((p) => !p.toLowerCase().endsWith('.glb'));
         const ref = n.properties.item_key ? `${n.properties.item_key}@${n.properties.item_revision ?? '?'}` : '';
         return (
           <button key={n.id} type="button" onClick={() => onSelect(n.id)} className="tw-thread-node">
