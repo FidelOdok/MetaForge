@@ -606,6 +606,8 @@ model's height, so the buttons under it never move.
   design files whose `board` is that board, as their SVG previews; one sheet
   fits the view, several scroll. A board with none says so and offers to
   generate it. A preview that was made but could not be stored says why.
+  Previews load through the gateway with the person's sign-in, as every file
+  image in the dashboard does; one that cannot be loaded says why.
 
 Beside the views, as in Imagine's studio, a **Next step** card names the
 nearest missing piece (no system schematic, then each board's schematic,
@@ -643,8 +645,10 @@ sizes estimated · from SKT-LAMP@2* or *L3 · from the validated exact model ·
 from CAD-BASE@4*. Manufacturing results are not repeated on the label: they
 are in [Check](#check).
 
-**Which model.** Develop shows the best real representation of each item's
-current revision: validated exact geometry (L3) first, then an exact model
+**Which model.** One board's layout (design files that name their board) is
+never the product model: it is in the PCB view. A layout that names no board,
+as in an electronics-only product, still is. Otherwise Develop shows the best
+real representation of each item's current revision: validated exact geometry (L3) first, then an exact model
 not yet validated (L2), simple 3D parts (L1), an AI 3D concept (L0), then a
 picture; the newest of a level. An older revision of an item is never
 preferred over its current one, and an out of date revision ranks last. The

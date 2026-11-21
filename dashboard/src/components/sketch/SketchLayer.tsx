@@ -19,6 +19,7 @@ import {
 import { getCurrentSketch, saveSketch } from '../../api/endpoints/sketches';
 import { refusalOf } from '../../api/endpoints/create';
 import { nodeFileUrl } from '../../api/endpoints/twin';
+import { AuthedImg } from '../shared/AuthedImg';
 import { twinKeys } from '../../hooks/use-twin';
 import { isDrawingTool, useSketchStore, type SketchStroke, type SketchTool, type StrokeTool } from '../../store/sketch-store';
 import type { TwinNode } from '../../types/twin';
@@ -412,7 +413,7 @@ export function SketchLayer({ projectId, referenceNodes = [], onRequestPanel, ed
     >
       {reference && (
         <figure className="sk-reference" style={{ opacity: doc.referenceOpacity }}>
-          <img src={nodeFileUrl(reference.id)} alt="" draggable={false} />
+          <AuthedImg src={nodeFileUrl(reference.id)} alt="" draggable={false} />
         </figure>
       )}
       {reference && <span className="sk-reference-label">Reference · illustrative</span>}

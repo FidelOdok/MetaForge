@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { fetchNodeNamedFileText, nodeNamedFileUrl } from '../../../api/endpoints/twin';
+import { AuthedFileLink, AuthedImg } from '../../shared/AuthedImg';
 import type { DesignFilesView as DesignFiles, TwinNode } from '../../../types/twin';
 import { gerberToSvg, unionViewBox, withViewBox } from '../parsers/gerberToSvg';
 import { PC, type PreviewMode } from '../tokens';
@@ -124,8 +125,8 @@ function Sheets({ node, files, mode }: { node: TwinNode; files: DesignFiles; mod
   return (
     <div data-testid="design-sheets">
       <Tabs items={files.previews} active={active} onPick={setPicked} />
-      <a href={url} target="_blank" rel="noreferrer" title="Open full size">
-        <img
+      <AuthedFileLink src={url} title="Open full size">
+        <AuthedImg
           src={url}
           alt={`${node.name}: ${active.split('/').pop()}`}
           style={{
@@ -137,7 +138,7 @@ function Sheets({ node, files, mode }: { node: TwinNode; files: DesignFiles; mod
             border: `1px solid ${PC.border}`,
           }}
         />
-      </a>
+      </AuthedFileLink>
     </div>
   );
 }
@@ -283,9 +284,9 @@ function FirmwareProject({ node, files, mode }: { node: TwinNode; files: DesignF
           <li style={{ marginTop: 8, color: PC.onSurfaceVariant }}>
             Build output
             {files.buildOutputs.map((p) => (
-              <a key={p} href={nodeNamedFileUrl(node.id, p)} download style={{ display: 'block', color: PC.teal }}>
+              <AuthedFileLink key={p} src={nodeNamedFileUrl(node.id, p)} download={p.split('/').pop()} style={{ display: 'block', color: PC.teal }}>
                 {p.split('/').pop()}
-              </a>
+              </AuthedFileLink>
             ))}
           </li>
         )}
@@ -324,9 +325,9 @@ function FileList({ node, files }: { node: TwinNode; files: DesignFiles }) {
       <ul className="font-mono" style={{ fontSize: 11, listStyle: 'none', padding: '4px 0 0', margin: 0 }}>
         {files.files.map((f) => (
           <li key={f.path} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-            <a href={nodeNamedFileUrl(node.id, f.path)} download style={{ color: PC.teal }}>
+            <AuthedFileLink src={nodeNamedFileUrl(node.id, f.path)} download={f.path.split('/').pop()} style={{ color: PC.teal }}>
               {f.path}
-            </a>
+            </AuthedFileLink>
             <span style={{ color: PC.onSurfaceVariant }}>{fmtBytes(f.bytes)}</span>
           </li>
         ))}

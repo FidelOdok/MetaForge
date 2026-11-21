@@ -19,6 +19,18 @@ vi.mock('../parsers/gerberToSvg', () => ({
 import { fetchNodeNamedFileText } from '../../../api/endpoints/twin';
 import { DesignFilesView } from '../engines/DesignFilesView';
 
+// AuthedImg has its own tests (it loads the file with the token); here it is
+// a plain <img> so these tests can check which file each view asks for.
+vi.mock('../../shared/AuthedImg', () => ({
+  AuthedImg: (props: Record<string, unknown>) => <img {...props} />,
+  AuthedFileLink: ({ src, children, ...rest }: { src: string; children: import('react').ReactNode } & Record<string, unknown>) => (
+    <a href={src} {...rest}>
+      {children}
+    </a>
+  ),
+}));
+
+
 const mockFetch = vi.mocked(fetchNodeNamedFileText);
 
 function node(wp_type: string, designFiles: Partial<DesignFiles>, id = 'wp-1'): TwinNode {

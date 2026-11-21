@@ -39,6 +39,18 @@ import { DevelopStage } from '../DevelopStage';
 import { definition } from '../../../lib/preview/__tests__/fixtures';
 import { useOperationsStore } from '../../../store/operations-store';
 
+// AuthedImg has its own tests (it loads the file with the token); here it is
+// a plain <img> so these tests can check which file each view asks for.
+vi.mock('../../shared/AuthedImg', () => ({
+  AuthedImg: (props: Record<string, unknown>) => <img {...props} />,
+  AuthedFileLink: ({ src, children, ...rest }: { src: string; children: import('react').ReactNode } & Record<string, unknown>) => (
+    <a href={src} {...rest}>
+      {children}
+    </a>
+  ),
+}));
+
+
 const P = 'proj-develop';
 
 function node(id: string, props: Record<string, string | number | boolean>, updatedAt = '2026-11-05T10:00:00Z'): TwinNode {

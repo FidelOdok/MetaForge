@@ -19,6 +19,7 @@ import {
 } from '../../api/endpoints/sketchGeneration';
 import { referenceRecord, refusalOf } from '../../api/endpoints/create';
 import { nodeFileUrl } from '../../api/endpoints/twin';
+import { AuthedImg } from '../shared/AuthedImg';
 import { useCreation } from '../../hooks/use-creation';
 import { useCreateStore } from '../../store/create-store';
 import { useProjectOperations } from '../../store/operations-store';
@@ -272,7 +273,7 @@ export function GeneratePanel({ projectId, sketchKey, sketchRevision, sketchUnsa
         <div className="sk-variants" role="list" aria-label="Generated concepts" data-testid="variants-strip">
           {baseline && (
             <figure className="sk-variant is-accepted" role="listitem">
-              <img src={nodeFileUrl(baseline.node_id)} alt="Accepted concept" />
+              <AuthedImg src={nodeFileUrl(baseline.node_id)} alt="Accepted concept" />
               <figcaption>Accepted · {line?.head_ref}</figcaption>
               <span className="sk-variant-note" data-testid="variant-note">
                 {manufacturingNote(baseline.manufacturing_note)}
@@ -281,7 +282,7 @@ export function GeneratePanel({ projectId, sketchKey, sketchRevision, sketchUnsa
           )}
           {proposals.map((p) => (
             <figure key={p.node_id} className={`sk-variant ${p.review_required ? 'is-flagged' : ''}`} role="listitem">
-              <img src={nodeFileUrl(p.node_id)} alt={`Proposal: ${p.intent ?? p.name}`} />
+              <AuthedImg src={nodeFileUrl(p.node_id)} alt={`Proposal: ${p.intent ?? p.name}`} />
               <figcaption>
                 {p.review_required ? 'Check it: ' + (p.preservation?.failures[0] ?? 'it changed what it had to keep') : 'Proposal'}
               </figcaption>
@@ -317,8 +318,8 @@ export function GeneratePanel({ projectId, sketchKey, sketchRevision, sketchUnsa
 
       {a && b && (
         <div className="sk-compare" role="group" aria-label="Compare two concepts" data-testid="compare-view">
-          <img src={nodeFileUrl(a)} alt="Concept A" />
-          <img src={nodeFileUrl(b)} alt="Concept B" />
+          <AuthedImg src={nodeFileUrl(a)} alt="Concept A" />
+          <AuthedImg src={nodeFileUrl(b)} alt="Concept B" />
           <p>
             {comparison.data
               ? `${Math.round((comparison.data.pixel_difference ?? 0) * 100)}% of the image differs` +
