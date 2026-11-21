@@ -603,7 +603,7 @@ services:
       # pair in a connection string as a credential leak even for dev defaults.
       - NEO4J_USER=${NEO4J_USER}
       - NEO4J_PASSWORD=${NEO4J_PASSWORD}
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-metaforge}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is unset. Run scripts/install.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}@postgres:5432/${POSTGRES_DB:-metaforge}
       - OPEN_ROUTER_API_KEY=${OPEN_ROUTER_API_KEY:-}
       # FORGE-769: AI concept images (twin.render_concept_image); opt-in, paid.
       - METAFORGE_IMAGE_PROVIDER=${METAFORGE_IMAGE_PROVIDER:-}
