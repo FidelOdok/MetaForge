@@ -1911,6 +1911,16 @@ class TwinServer(McpToolServer):
                         },
                         "project_id": {"type": "string", "description": "Project UUID to link."},
                         "session_id": {"type": "string", "description": "Originating session id."},
+                        "studio_parts": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "The Imagine studio part ids this part fills, e.g. "
+                                "['al8862-warm', 'al8862-cool'] (FORGE-903). Omit to let "
+                                "MetaForge link it by order code, then by role; the link is "
+                                "stored on the selection and shown in every Create stage."
+                            ),
+                        },
                     },
                     "required": ["mpn", "manufacturer", "category", "purchase_unit"],
                 },
@@ -2058,6 +2068,11 @@ class TwinServer(McpToolServer):
             project_id=project_id if isinstance(project_id, str) else None,
             session_id=session_id if isinstance(session_id, str) else None,
             selection=selection,
+            studio_parts=(
+                [str(p) for p in arguments["studio_parts"] if isinstance(p, str) and p.strip()]
+                if isinstance(arguments.get("studio_parts"), list)
+                else None
+            ),
             **_item_kwargs(arguments),
         )
 
@@ -9596,6 +9611,71 @@ class TwinServer(McpToolServer):
             ),
             handler=self.imagine_patch_studio,
         )
+        # FORGE-903: one component followed through all four Create stages.
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.component_thread",
+                adapter_id="twin",
+                name="Component Thread",
+                description=(
+                    "Every component of the project followed through Imagine, Develop, "
+                    "Check and Make: the studio part, the component selection and library "
+                    "entry Develop chose for it (with how they were linked: stored, order "
+                    "code or role), the boards and reference designators it sits on, its "
+                    "requirement margins, and the BOM and purchase order lines that make it. "
+                    "relation says how Imagine and Develop compare: same, refined (Develop "
+                    "has a more exact order code or a library entry), replaced (a different "
+                    "part fills the role), develop_only or imagine_only. adopt, when present, "
+                    "is what twin.imagine_adopt would take into the studio. Reads only."
+                ),
+                capability="twin_imagine",
+                input_schema={"type": "object", "properties": {**project}},
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {"type": "string"},
+                        "studio": {"type": ["object", "null"]},
+                        "threads": {"type": "array", "items": {"type": "object"}},
+                        "summary": {"type": "object"},
+                        "warnings": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=60),
+            ),
+            handler=self.component_thread,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.imagine_adopt",
+                adapter_id="twin",
+                name="Imagine: Adopt From Develop",
+                description=(
+                    "Take what Develop decided for one component into the Imagine studio, "
+                    "so the concept stays true to the design: the studio part gets "
+                    "Develop's order code, maker and library entry (and is then drawn from "
+                    "the entry's model), or a part only Develop has is added. key is a "
+                    "thread key from twin.component_thread; base_revision is the studio "
+                    "revision that read returned. Refused when the studio moved on, is "
+                    "handed over (reopen it first) or the thread has nothing to adopt; a "
+                    "board is never adopted, since the studio's parts are bought parts."
+                ),
+                capability="twin_imagine",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        **project,
+                        "base_revision": {"type": "integer", "minimum": 1},
+                        "key": {"type": "string", "minLength": 1},
+                    },
+                    "required": ["base_revision", "key"],
+                },
+                output_schema=studio_out,
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=60),
+            ),
+            handler=self.imagine_adopt,
+        )
         self.register_tool(
             manifest=ToolManifest(
                 tool_id="twin.imagine_add_mesh_reference",
@@ -10203,6 +10283,47 @@ class TwinServer(McpToolServer):
                 "warnings": list(studio.warnings or []),
             },
         )
+
+    async def component_thread(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from api_gateway.twin.component_thread import gather_threads
+
+        pid = self._imagine_project(arguments, "twin.component_thread")
+        return await gather_threads(self._twin, pid, studio_service=self._imagine_studio)
+
+    async def imagine_adopt(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from api_gateway.twin.component_thread import count, gather_threads
+
+        tool = "twin.imagine_adopt"
+        pid = self._imagine_project(arguments, tool)
+        base = arguments.get("base_revision")
+        key = str(arguments.get("key") or "").strip()
+        if isinstance(base, bool) or not isinstance(base, int) or not key:
+            raise ValueError(f"{tool}: 'base_revision' (an integer) and 'key' are required")
+        data = await gather_threads(self._twin, pid, studio_service=self._imagine_studio)
+        thread = next((t for t in data["threads"] if t["key"] == key), None)
+        if thread is None:
+            count("adopt", "refused")
+            raise ValueError(f"{tool}: no component thread {key}")
+        if not thread.get("adopt"):
+            count("adopt", "refused")
+            raise ValueError(f"{tool}: {thread['name']} has nothing to adopt")
+        payload = {
+            **thread["adopt"],
+            "part_id": (thread.get("imagine") or {}).get("part_id"),
+            "role": thread.get("role"),
+            "name": thread.get("name"),
+        }
+        actor = str(current_context().actor_id or "agent")
+        try:
+            studio = await self._imagine_studio.adopt_component(pid, base, payload, actor=actor)
+        except Exception as exc:
+            count("adopt", "refused" if getattr(exc, "status", 500) < 500 else "failed")
+            message = getattr(exc, "message", None)
+            if message:
+                raise ValueError(f"{tool}: {message}") from exc
+            raise
+        count("adopt", "ok")
+        return dict(studio.model_dump(mode="json"))
 
     async def imagine_patch_studio(self, arguments: dict[str, Any]) -> dict[str, Any]:
         tool = "twin.imagine_patch_studio"

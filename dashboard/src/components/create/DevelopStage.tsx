@@ -12,6 +12,7 @@ import { MakeEditablePanel } from './MakeEditablePanel';
 import { ProductStage, defaultStageNode, isEngineering, isVisual } from './ProductStage';
 import { StageActions, type StageAction } from './StageActions';
 import { StageDisclosures } from './StageDisclosures';
+import { ComponentThreadPanel } from './ComponentThread';
 import { DEVELOP_LABEL, developPrimary, latestParametricSketch } from './stage-logic';
 import { BoardSheets } from './develop/BoardSheets';
 import { DevelopSide } from './develop/DevelopSide';
@@ -228,6 +229,7 @@ export function DevelopStage({
           },
         ]}
       />
+      <ComponentThreadPanel projectId={projectId} stage="develop" />
 
       {exact.state.phase !== 'idle' && (
         <BuildExactNotice

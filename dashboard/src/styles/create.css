@@ -999,6 +999,86 @@ p.cv-muted {
   }
 }
 
+/* The component thread (FORGE-903): one component across the four stages. */
+.cv-thread summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+.cv-thread-scroll {
+  margin-top: 10px;
+  overflow-x: auto;
+}
+.cv-thread-table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.cv-thread-table th,
+.cv-thread-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--cv-line);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.cv-thread-table thead th {
+  color: var(--cv-muted);
+  font-weight: 500;
+}
+.cv-thread-table thead th.is-current {
+  color: var(--cv-accent);
+}
+.cv-thread-table td.is-current {
+  background: var(--cv-raised);
+}
+.cv-thread-table td.is-absent {
+  color: var(--cv-muted);
+}
+.cv-thread-table td.is-bad {
+  color: var(--cv-bad);
+}
+.cv-thread-table td.is-behind {
+  color: var(--cv-warn);
+}
+.cv-thread-table tbody th {
+  font-weight: 500;
+  min-width: 150px;
+}
+.cv-thread-name {
+  display: block;
+}
+.cv-thread-rel {
+  display: inline-block;
+  margin: 4px 6px 0 0;
+  padding: 0 6px;
+  border: 1px solid var(--cv-line);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 400;
+}
+.cv-thread-rel.is-ok {
+  border-color: var(--cv-ok);
+  color: var(--cv-ok);
+}
+.cv-thread-rel.is-warn {
+  border-color: var(--cv-warn);
+  color: var(--cv-warn);
+}
+.cv-thread-rel.is-info {
+  border-color: var(--cv-info);
+  color: var(--cv-info);
+}
+.cv-thread-adopt {
+  font-size: 11px;
+}
+.cv-thread-note {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+}
+
 /* Where the studio's values come from: library, typed in, or an estimate. */
 .cv-sources summary {
   cursor: pointer;

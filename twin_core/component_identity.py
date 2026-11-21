@@ -345,6 +345,9 @@ async def project_identity(twin: Any, project_id: UUID | str | None) -> dict[str
                     "quantity": p.get("quantity", 1),
                     "decision_node_id": str(getattr(decision, "id", "")),
                 }
+                if p.get("studio_part"):
+                    # FORGE-903: the Imagine studio part it was handed over from.
+                    components[cid]["studio_part"] = str(p["studio_part"])
             current_id = str(getattr(decision, "id", ""))
         for cid, comp in components.items():
             comp["in_current"] = cid in current

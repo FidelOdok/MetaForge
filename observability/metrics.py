@@ -1192,6 +1192,21 @@ class MetricsRegistry:
         labels=["verdict"],
     )
 
+    # ── Component thread (FORGE-903) ───────────────────────────────────
+
+    COMPONENT_THREAD_TOTAL = MetricDefinition(
+        name="metaforge_component_thread_total",
+        type="counter",
+        description=(
+            "Component thread operations, by operation: read (a project's threads "
+            "gathered across Imagine, Develop, Check and Make), adopt (a Develop part "
+            "or board taken into the Imagine studio) or link (a component selection "
+            "stamped with the studio parts it fills), and by outcome: ok, warned (a "
+            "source could not be read), refused or failed (FORGE-903)"
+        ),
+        labels=["operation", "outcome"],
+    )
+
     # ── Imagine stage (FORGE-821) ──────────────────────────────────────
 
     IMAGINE_STUDIO_TOTAL = MetricDefinition(
@@ -1910,6 +1925,7 @@ class MetricsRegistry:
             cls.CONCEPT_IMAGE_CRITIQUE_TOTAL,
             cls.CONCEPT_MESH_TOTAL,
             cls.IMAGINE_STUDIO_TOTAL,
+            cls.COMPONENT_THREAD_TOTAL,
             cls.MANUFACTURING_CONTEXT_WRITE_TOTAL,
             cls.MANUFACTURING_CONTEXT_INJECTION_TOTAL,
             cls.CHANGE_CLASSIFICATION_TOTAL,
@@ -2864,6 +2880,12 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.CONCEPT_IMAGE_CRITIQUE_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"verdict": verdict})
+
+    def record_component_thread(self, operation: str, outcome: str) -> None:
+        """Record one component thread operation by operation and outcome (FORGE-903)."""
+        counter = self._instruments.get(MetricsRegistry.COMPONENT_THREAD_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"operation": operation, "outcome": outcome})
 
     def record_imagine_studio(self, operation: str, outcome: str) -> None:
         """Record one Imagine stage operation by operation and outcome (FORGE-821)."""

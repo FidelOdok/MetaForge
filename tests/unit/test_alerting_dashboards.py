@@ -147,7 +147,8 @@ class TestAlertingRules:
         # + 1 stray boards or schematics left out of releases (info).
         # + 1 MCP project scope unavailable (McpProjectScopeUnavailable, FORGE-859).
         # + 1 MCP approval prompt answers not recorded (McpApprovalPromptAnswerNotRecorded).
-        assert len(rules) == 97
+        # + 1 component thread reads or adoptions failing (ComponentThreadFailing, FORGE-903).
+        assert len(rules) == 98
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -235,7 +236,8 @@ class TestAlertingRules:
         # + 1 assembly fit checks failing (FORGE-841).
         # + 1 MCP project scope unavailable (FORGE-859).
         # + 1 answers to MCP approval prompts not recorded.
-        assert len(warnings) == 79
+        # + 1 component thread reads or adoptions failing (FORGE-903).
+        assert len(warnings) == 80
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -363,6 +365,7 @@ class TestAlertingRules:
                 # FORGE-734: run supervisor.
                 "RunSupervisorFoundPlatformIssue",
                 # FORGE-761: concept images cannot be generated.
+                "ComponentThreadFailing",
                 "ConceptImageGenerationUnavailable",
                 # FORGE-762: uploaded sketches cannot be read.
                 "SketchReadingUnavailable",

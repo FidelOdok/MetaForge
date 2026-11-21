@@ -741,6 +741,120 @@ class ImagineService:
             )
             return out
 
+    async def adopt_component(
+        self,
+        project_id: str,
+        base_revision: int,
+        adopt: dict[str, Any],
+        *,
+        actor: str,
+    ) -> StudioResponse:
+        """Take what Develop decided for one component into the studio (FORGE-903).
+
+        ``adopt`` is a component thread's ``adopt``: ``{kind: "part", part_id?, node_id,
+        mpn, manufacturer, library?, datasheet?}``. A part the studio already has takes
+        Develop's order code, maker and library entry; when it gains a library entry its
+        old datasheet and size are dropped, so the entry's own are derived again on this
+        write. A part Develop added is added to the studio's parts. A board is refused:
+        the studio's parts are bought parts with a source. The next revision is written
+        as any change is: checked, and refused (409) when the studio moved past
+        ``base_revision`` or is handed over.
+        """
+        with tracer.start_as_current_span("imagine.adopt_component") as span:
+            span.set_attribute("project_id", project_id)
+            span.set_attribute("studio.base_revision", base_revision)
+            head = await self._head(project_id)
+            if head is None or not isinstance(head.state.get("config"), dict):
+                _count("adopt", "refused")
+                raise ImagineError("There is no studio to adopt into yet.", 404)
+            if head.state.get("status") == "handed_over":
+                _count("adopt", "refused")
+                raise ImagineError(
+                    f"{head.ref} is handed over and read-only; reopen Imagine to adopt "
+                    "what Develop decided.",
+                    409,
+                )
+            if head.revision != base_revision:
+                _count("adopt", "refused")
+                raise ImagineError(
+                    f"The studio is at revision {head.revision}, not {base_revision}; "
+                    "read the components again and adopt against the current revision.",
+                    409,
+                )
+            config = copy.deepcopy(head.state["config"])
+            context = config.setdefault("context", {})
+            comps = context.setdefault("components", {"schemaVersion": 1, "parts": []})
+            parts = comps.setdefault("parts", [])
+            stamp = {"from": "develop", "at": _now(), "by": actor}
+            if str(adopt.get("kind") or "part") != "part":
+                _count("adopt", "refused")
+                raise ImagineError(
+                    "Only a bought part can be adopted: the studio's parts are real parts "
+                    "with a source, and a board is designed in Develop.",
+                    400,
+                )
+            mpn = str(adopt.get("mpn") or "").strip()
+            if not mpn:
+                raise ImagineError("A part to adopt needs its order code.", 400)
+            library = str(adopt.get("library") or "").strip()
+            fields: dict[str, Any] = {
+                "mpn": mpn,
+                "manufacturer": str(adopt.get("manufacturer") or "").strip(),
+                "adopted": {**stamp, "node_id": adopt.get("node_id"), "mpn": mpn},
+            }
+            if library:
+                fields["library"] = library
+            elif adopt.get("datasheet"):
+                fields["datasheet"] = str(adopt["datasheet"])
+                fields["retrieved"] = str(adopt.get("recorded_at") or _now())[:10]
+            part_id = str(adopt.get("part_id") or "").strip()
+            if part_id:
+                target = next(
+                    (p for p in parts if isinstance(p, dict) and str(p.get("id")) == part_id),
+                    None,
+                )
+                if target is None:
+                    raise ImagineError(f"The studio has no part {part_id}.", 404)
+                if library and target.get("library") != library:
+                    # The entry's own datasheet and size replace the concept's.
+                    for stale in ("datasheet", "retrieved", "geometry"):
+                        target.pop(stale, None)
+                target.update({k: v for k, v in fields.items() if v})
+                what = f"{part_id} as {mpn}"
+            else:
+                pid = _slug(mpn, 40)
+                if any(str(p.get("id")) == pid for p in parts if isinstance(p, dict)):
+                    raise ImagineError(f"The studio already has a part {pid}.", 409)
+                role = str(adopt.get("role") or "").strip()
+                if not role.startswith("fn:") and role not in _PART_ROLES_FIXED:
+                    role = "other"
+                parts.append(
+                    {
+                        "id": pid,
+                        "role": role,
+                        "name": str(adopt.get("name") or f"{fields['manufacturer']} {mpn}").strip(),
+                        **{k: v for k, v in fields.items() if v},
+                    }
+                )
+                what = f"part {mpn}"
+            out = await self._put(
+                project_id,
+                config,
+                actor=actor,
+                span=span,
+                expect_revision=base_revision,
+                reason=f"adopted from Develop: {what}",
+                metric="adopt",
+            )
+            logger.info(
+                "imagine_component_adopted",
+                project_id=project_id,
+                base_revision=base_revision,
+                revision=out.revision,
+                what=what,
+            )
+            return out
+
     async def add_mesh_reference(
         self,
         project_id: str,
@@ -2049,6 +2163,11 @@ class ImagineService:
                     "process": "",
                     "quantity": 1,
                     "provenance": "intended",
+                    # FORGE-903: the thread back to the studio part.
+                    "studio_part": str(p.get("id") or ""),
+                    "role": role,
+                    "mpn": str(p.get("mpn") or ""),
+                    "library": str(p.get("library") or ""),
                 }
             )
             envelopes[name] = {

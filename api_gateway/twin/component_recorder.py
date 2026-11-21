@@ -190,6 +190,7 @@ def make_component_recorder(
         change_reason: str | None = None,
         run_id: str | None = None,
         selection: str = "selected",
+        studio_parts: list[str] | None = None,
     ) -> dict[str, Any]:
         from twin_core.models.bom_item import BOMItem
 
@@ -271,6 +272,23 @@ def make_component_recorder(
             if session_id:
                 specifications["session_id"] = session_id
             specifications["selection"] = selection
+            # FORGE-903: the component thread. Which studio parts this fills and which
+            # library entry it is, decided now and stored, so every stage finds the
+            # same component by a link rather than by matching names.
+            specifications["recorded_at"] = datetime.now(UTC).isoformat()
+            from api_gateway.twin.component_thread import link_for_selection
+
+            link = await link_for_selection(
+                twin, project_id, mpn=mpn, role=role, studio_parts=studio_parts
+            )
+            if link.get("studio_parts"):
+                specifications["thread"] = {
+                    "studio_parts": link["studio_parts"],
+                    "linked_by": link["linked_by"],
+                    "studio_revision": link.get("studio_revision"),
+                }
+            if link.get("library"):
+                specifications["library_entry"] = link["library"]
 
             maker = seller = None
             if organisations is not None:
@@ -371,6 +389,8 @@ def make_component_recorder(
                 "project_linked": linked,
                 "bom_work_product_id": bom_wp_id,
             }
+            if link.get("studio_parts") or link.get("library"):
+                result["thread"] = link
             if maker or seller:
                 result["organisations"] = {
                     k: v for k, v in (("manufacturer", maker), ("supplier", seller)) if v

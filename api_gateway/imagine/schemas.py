@@ -83,6 +83,17 @@ class StudioPut(BaseModel):
     config: dict[str, Any]
 
 
+class AdoptPost(BaseModel):
+    """Adopt what Develop decided for one component into the studio (FORGE-903)."""
+
+    base_revision: int = Field(ge=1, description="The studio revision the thread was read at.")
+    key: str = Field(
+        min_length=1,
+        max_length=300,
+        description="The component thread's key, from GET .../components/thread.",
+    )
+
+
 class StudioPatch(BaseModel):
     """``PATCH /studio``: changes to the revision they were made against (studio_patch)."""
 

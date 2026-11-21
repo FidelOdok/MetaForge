@@ -994,6 +994,46 @@ Engineering's **DFM** tab, which also has the rule profile and version,
 measured against limit, anchors, evidence, the verification items and the
 generated DFM report.
 
+## Components across the stages
+
+The same physical part is a different record in each stage: a part in the Imagine
+studio, a component selection (a BOM item) and a library entry in Develop, a part on
+a board in the system schematic, a requirement margin in Check, and a BOM file line
+and a purchase order line in Make. **Components across the stages** joins them into
+one row per component, and shows in all four stages: under the studio in
+Imagine, under the details in Develop and Make, and open at the end of Check. The
+column of the stage on screen is marked.
+
+| Column | Shows |
+|---|---|
+| Imagine | The studio part's order code and library entry, or *Not in the studio* |
+| Develop | The selected part, its library entry (yours or shared), and the boards and references it sits on |
+| Check | The requirements the selected part meets or misses, from its specs |
+| Make | The BOM lines (with references) and how many are ordered |
+
+Each row says how Imagine and Develop compare: **Same**, **Refined** (Develop has a
+more exact order code, such as AL8862SP-13 for AL8862, or a library entry), **Replaced**
+(a different part fills the role), **Develop only** or **Imagine only**. A board
+designed in Develop has its own row.
+
+The joins are stored, not guessed each time. A component selection records the studio
+parts it fills when it is written (`specifications.thread`, decided by the caller's
+`studio_parts`, else by order code family, else by a role exactly one chosen studio part
+has), and its library entry (`specifications.library_entry`). A concept assembly part
+handed over from Imagine keeps its `studio_part`, so a concept component id leads back to
+the studio part. Board parts, BOM lines and order lines are joined by order code and, on
+a board, by reference designator.
+
+**Use in Imagine**, on a Refined, Replaced or Develop only row, takes Develop's part
+into the studio at the revision the row was read at: the studio part gets the order
+code, maker and library entry (and is drawn from the entry's model), or a part only
+Develop has is added. It is refused when the studio has moved on, and on a handed-over
+studio the row says to reopen Imagine first. A board is never taken into the studio:
+the studio's parts are bought parts with a source, and a board is designed in Develop.
+
+Code: `twin_core/component_thread.py` (the joins), `api_gateway/twin/component_thread.py`
+(reading the records), `dashboard/src/components/create/ComponentThread.tsx`.
+
 ## Decisions
 
 **Decisions** in the header lists the project's pending approvals in plain words, each
@@ -1118,7 +1158,11 @@ loop can be shown without a gateway.
 
 ## Gateway API
 
-All under `/v1/create/{project_id}`. Every write accepts `expected_version`
+The component thread is under the twin: `GET /v1/twin/projects/{project_id}/components/thread`
+returns `{project_id, studio, threads, summary, warnings}`, and
+`POST /v1/twin/projects/{project_id}/imagine/adopt {base_revision, key}` takes one
+thread's part into the studio (see [Components across the stages](#components-across-the-stages)).
+Everything else is under `/v1/create/{project_id}`. Every write accepts `expected_version`
 and answers `409` with the current record when it is stale. Writes return the
 creation and its readiness.
 

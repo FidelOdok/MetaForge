@@ -705,9 +705,16 @@ class AssemblyPart:
     process: str = ""
     quantity: int = 1
     provenance: str = "intended"
+    # FORGE-903: the component thread. A part handed over from the Imagine studio
+    # keeps the studio part it came from, its role, order code and library entry,
+    # so Develop, Check and Make can find the same component again.
+    studio_part: str = ""
+    role: str = ""
+    mpn: str = ""
+    library: str = ""
 
     def as_metadata(self) -> dict[str, object]:
-        return {
+        out: dict[str, object] = {
             "name": self.name,
             "source": self.source,
             "material": self.material,
@@ -715,6 +722,11 @@ class AssemblyPart:
             "quantity": self.quantity,
             "provenance": self.provenance,
         }
+        for key in ("studio_part", "role", "mpn", "library"):
+            value = getattr(self, key)
+            if value:
+                out[key] = value
+        return out
 
 
 @dataclass(frozen=True)
@@ -796,6 +808,10 @@ def _assembly_part(raw: object, where: str) -> AssemblyPart:
         process=_text(raw.get("process")),
         quantity=quantity,
         provenance=_provenance(raw.get("provenance"), where),
+        studio_part=_text(raw.get("studio_part")),
+        role=_text(raw.get("role")),
+        mpn=_text(raw.get("mpn")),
+        library=_text(raw.get("library")),
     )
 
 

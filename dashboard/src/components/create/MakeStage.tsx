@@ -10,6 +10,7 @@ import { MakePanel } from './MakePanel';
 import { ProductStage } from './ProductStage';
 import { StageActions, type StageAction } from './StageActions';
 import { StageDisclosures, useRevealOnOpen } from './StageDisclosures';
+import { ComponentThreadPanel } from './ComponentThread';
 
 /**
  * The words Create may show for making the product (section 16.2 item 7).
@@ -171,6 +172,7 @@ export function MakeStage({ projectId, view, model, modelRevision, onAsk, nodes 
           },
         ]}
       />
+      <ComponentThreadPanel projectId={projectId} stage="make" />
 
       {actionOpen && view && (
         <section ref={actionPanel} className="cv-card" aria-label={detail === 'plan' ? 'Plan the making' : 'Inspect the result'}>
