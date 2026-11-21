@@ -52,6 +52,8 @@ describe('ApprovalPolicyPanel (FORGE-726)', () => {
         mode: 'advise',
         reviewer: 'server',
         reviewer_model: 'anthropic:opus',
+        allow_human_authority: null,
+        allow_release: null,
       }),
     );
     expect(await screen.findByTestId('policy-in-force')).toHaveTextContent('advise');

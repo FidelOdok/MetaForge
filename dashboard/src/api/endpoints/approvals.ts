@@ -48,28 +48,97 @@ export async function decideApproval(
 }
 
 /** FORGE-726: who decides a project's gates. */
+export type ApprovalMode = 'off' | 'advise' | 'auto_clean' | 'auto';
+
 export interface ApprovalPolicy {
   project_id: string;
-  mode: 'off' | 'advise' | 'auto_clean' | 'auto';
+  mode: ApprovalMode;
   reviewer: 'server' | 'client' | 'client_then_server';
   reviewer_model: string;
   expires_at: string | null;
   updated_by: string;
   updated_at: string | null;
+  /** FORGE-904: `null` follows the account; `false` turns it off for this project. */
+  allow_human_authority?: boolean | null;
+  allow_release?: boolean | null;
+}
+
+/** What the people who run this MetaForge allow (its environment); read only. */
+export interface DeploymentLimits {
+  max_mode: ApprovalMode;
+  allow_human_authority: boolean;
+  allow_release: boolean;
+  hourly_caps: Array<{ tool: string; per_hour: number | null; set_by: string }>;
+  approval_ttl_seconds: number;
+  set_in: string;
+}
+
+export type DelegationKind = 'human_authority' | 'release';
+
+export interface Delegation {
+  allowed: boolean;
+  decided_by: 'deployment' | 'account' | 'project';
+  reason: string;
 }
 
 export interface ApprovalPolicyView {
   policy: ApprovalPolicy;
-  effective_mode: ApprovalPolicy['mode'];
-  max_mode: ApprovalPolicy['mode'];
-  modes: ApprovalPolicy['mode'][];
+  effective_mode: ApprovalMode;
+  /** The highest mode this project may choose: the account's and the deployment's lower. */
+  max_mode: ApprovalMode;
+  modes: ApprovalMode[];
+  account_max_mode?: ApprovalMode | null;
+  /** Which layer holds the mode below the project's choice. */
+  limited_by?: 'expired' | 'account' | 'deployment' | null;
+  delegation?: Partial<Record<DelegationKind, Delegation>>;
+  deployment?: DeploymentLimits | null;
 }
 
 export interface ApprovalPolicyUpdate {
-  mode: ApprovalPolicy['mode'];
+  mode: ApprovalMode;
   reviewer: ApprovalPolicy['reviewer'];
   reviewer_model: string;
   expires_in_hours?: number;
+  allow_human_authority?: boolean | null;
+  allow_release?: boolean | null;
+}
+
+export interface AccountPolicy {
+  account: string;
+  max_mode: ApprovalMode | null;
+  allow_human_authority: boolean | null;
+  allow_release: boolean | null;
+  updated_by: string;
+  updated_at: string | null;
+}
+
+export interface AccountPolicyView {
+  policy: AccountPolicy;
+  max_mode: ApprovalMode;
+  modes: ApprovalMode[];
+  allow_human_authority: boolean;
+  allow_release: boolean;
+  deployment: DeploymentLimits;
+}
+
+export interface AccountPolicyUpdate {
+  max_mode: ApprovalMode | null;
+  allow_human_authority: boolean | null;
+  allow_release: boolean | null;
+}
+
+/** `GET /v1/account/approval-policy` (FORGE-904): your account's approval settings. */
+export async function getAccountApprovalPolicy(): Promise<AccountPolicyView> {
+  const { data } = await apiClient.get<AccountPolicyView>('/account/approval-policy');
+  return data;
+}
+
+/** `PUT /v1/account/approval-policy`. A person's decision: sent as the dashboard. */
+export async function putAccountApprovalPolicy(body: AccountPolicyUpdate): Promise<AccountPolicyView> {
+  const { data } = await apiClient.put<AccountPolicyView>('/account/approval-policy', body, {
+    headers: SURFACE_HEADERS,
+  });
+  return data;
 }
 
 /** `GET /v1/projects/{id}/approval-policy`. */

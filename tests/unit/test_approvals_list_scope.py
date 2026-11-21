@@ -56,7 +56,11 @@ def _items(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         return list(ITEMS)
 
     monkeypatch.setattr(service, "list_items", list_items)
-    monkeypatch.setattr(service, "for_caller", lambda item, surface: item)
+
+    async def _as_is(item: Any, surface: str) -> Any:
+        return item
+
+    monkeypatch.setattr(service, "for_caller", _as_is)
     yield
 
 

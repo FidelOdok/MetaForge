@@ -47,6 +47,160 @@
         "title": "AcceptRequest",
         "type": "object"
       },
+      "AccountPolicy": {
+        "description": "One account's approval settings: every project of the account.\n\n``max_mode`` is the highest mode the account's projects may use, at most the\ndeployment's; ``None`` follows the deployment. The ``allow_*`` switches turn\nagent delegation off for every project (``False``) or follow the deployment\n(``None``/``True``); an account cannot turn on what the deployment has off.",
+        "properties": {
+          "account": {
+            "title": "Account",
+            "type": "string"
+          },
+          "allow_human_authority": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allow Human Authority"
+          },
+          "allow_release": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allow Release"
+          },
+          "max_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "off",
+                  "advise",
+                  "auto_clean",
+                  "auto"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Mode"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "updated_by": {
+            "default": "",
+            "title": "Updated By",
+            "type": "string"
+          }
+        },
+        "required": [
+          "account"
+        ],
+        "title": "AccountPolicy",
+        "type": "object"
+      },
+      "AccountPolicyUpdate": {
+        "properties": {
+          "allow_human_authority": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allow Human Authority"
+          },
+          "allow_release": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allow Release"
+          },
+          "max_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "off",
+                  "advise",
+                  "auto_clean",
+                  "auto"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Mode"
+          }
+        },
+        "title": "AccountPolicyUpdate",
+        "type": "object"
+      },
+      "AccountPolicyView": {
+        "description": "The account's settings, the deployment's limits, and what follows for its projects.",
+        "properties": {
+          "allow_human_authority": {
+            "title": "Allow Human Authority",
+            "type": "boolean"
+          },
+          "allow_release": {
+            "title": "Allow Release",
+            "type": "boolean"
+          },
+          "deployment": {
+            "$ref": "#/components/schemas/DeploymentLimits"
+          },
+          "max_mode": {
+            "title": "Max Mode",
+            "type": "string"
+          },
+          "modes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Modes",
+            "type": "array"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/AccountPolicy"
+          }
+        },
+        "required": [
+          "policy",
+          "max_mode",
+          "modes",
+          "allow_human_authority",
+          "allow_release",
+          "deployment"
+        ],
+        "title": "AccountPolicyView",
+        "type": "object"
+      },
       "ActionRef": {
         "description": "Something a person can do about an operation.",
         "properties": {
@@ -791,6 +945,39 @@
       "ApprovalPolicy": {
         "description": "One project's policy, as stored.",
         "properties": {
+          "account": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account"
+          },
+          "allow_human_authority": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allow Human Authority"
+          },
+          "allow_release": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allow Release"
+          },
           "expires_at": {
             "anyOf": [
               {
@@ -862,6 +1049,28 @@
       },
       "ApprovalPolicyUpdate": {
         "properties": {
+          "allow_human_authority": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allow Human Authority"
+          },
+          "allow_release": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allow Release"
+          },
           "expires_in_hours": {
             "anyOf": [
               {
@@ -909,11 +1118,51 @@
         "type": "object"
       },
       "ApprovalPolicyView": {
-        "description": "The stored policy, what is in force now, and the operator cap.",
+        "description": "The stored policy, what is in force now, and every layer above it.",
         "properties": {
+          "account_max_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Max Mode"
+          },
+          "delegation": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Delegation",
+            "type": "object"
+          },
+          "deployment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeploymentLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "effective_mode": {
             "title": "Effective Mode",
             "type": "string"
+          },
+          "limited_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limited By"
           },
           "max_mode": {
             "title": "Max Mode",
@@ -6822,6 +7071,49 @@
         ],
         "title": "DependencyStatus",
         "type": "string"
+      },
+      "DeploymentLimits": {
+        "description": "What the people who run this MetaForge allow; set in its environment, read only here.",
+        "properties": {
+          "allow_human_authority": {
+            "title": "Allow Human Authority",
+            "type": "boolean"
+          },
+          "allow_release": {
+            "title": "Allow Release",
+            "type": "boolean"
+          },
+          "approval_ttl_seconds": {
+            "title": "Approval Ttl Seconds",
+            "type": "number"
+          },
+          "hourly_caps": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Hourly Caps",
+            "type": "array"
+          },
+          "max_mode": {
+            "title": "Max Mode",
+            "type": "string"
+          },
+          "set_in": {
+            "default": "the deployment's environment (METAFORGE_AUTO_APPROVE_MAX, ...)",
+            "title": "Set In",
+            "type": "string"
+          }
+        },
+        "required": [
+          "max_mode",
+          "allow_human_authority",
+          "allow_release",
+          "hourly_caps",
+          "approval_ttl_seconds"
+        ],
+        "title": "DeploymentLimits",
+        "type": "object"
       },
       "DerivedPrdResponse": {
         "properties": {
@@ -28832,6 +29124,68 @@
         ]
       }
     },
+    "/v1/account/approval-policy": {
+      "get": {
+        "description": "Your account's approval settings, and the deployment's limits above them.",
+        "operationId": "get_account_approval_policy_v1_account_approval_policy_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountPolicyView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Account Approval Policy",
+        "tags": [
+          "approvals"
+        ]
+      },
+      "put": {
+        "description": "Set your account's approval settings. A person's decision only.\n\nThe ceiling cannot be above the deployment's; turning delegation on where the\ndeployment has it off is refused, so the person sees why.",
+        "operationId": "put_account_approval_policy_v1_account_approval_policy_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountPolicyUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountPolicyView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Account Approval Policy",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
     "/v1/approvals": {
       "get": {
         "description": "Every approval, normalized. ``status=decided`` and ``all`` are the audit views.",
@@ -37586,7 +37940,7 @@
     },
     "/v1/projects/{project_id}/approval-policy": {
       "get": {
-        "description": "Who decides this project's gates right now.",
+        "description": "Who decides this project's gates and held writes right now, and why.",
         "operationId": "get_approval_policy_v1_projects__project_id__approval_policy_get",
         "parameters": [
           {

@@ -99,7 +99,9 @@ def _require_person(request: Request, what: str) -> None:
         )
 
 
-def _person_or_delegate(request: Request, what: str) -> tuple[str, str | None, str | None]:
+async def _person_or_delegate(
+    request: Request, what: str, project_id: str | None = None
+) -> tuple[str, str | None, str | None]:
     """(actor, agent, on_behalf_of) for a person's step (FORGE-824).
 
     A person's call is theirs. The agent surface is refused (403) unless the
@@ -110,16 +112,22 @@ def _person_or_delegate(request: Request, what: str) -> tuple[str, str | None, s
     """
     if not _is_agent(request):
         return _actor(request), None, None
+    from api_gateway.approvals.delegation import delegation_allowed
     from api_gateway.approvals.routes import (
         AGENT_HEADER,
         ON_BEHALF_OF_HEADER,
         resolve_agent_identity,
     )
-    from api_gateway.approvals.service import agent_may_decide_human_authority
     from api_gateway.auth.approver import approver_from_request
 
-    if not agent_may_decide_human_authority():
-        _require_person(request, what)
+    # FORGE-904: the deployment, the account and the project must all allow it.
+    verdict = await delegation_allowed("human_authority", project_id)
+    if not verdict.allowed:
+        # Names the layer that refused, so the person knows where to change it.
+        raise HTTPException(
+            status_code=403,
+            detail=f"{what} is a person's decision, not an agent's: {verdict.reason}",
+        )
     agent = (request.headers.get(AGENT_HEADER) or "").strip()[:100]
     if not agent:
         raise HTTPException(
@@ -257,7 +265,7 @@ async def post_event(project_id: str, body: ImagineEvent, request: Request) -> E
     delegated: dict[str, Any] | None = None
     if confirms and _is_agent(request):
         what = "Confirming an assumption" if body.kind != "scenario" else "Confirming a scenario"
-        actor, agent, on_behalf_of = _person_or_delegate(request, what)
+        actor, agent, on_behalf_of = await _person_or_delegate(request, what, project_id)
         delegated = {"by": actor, "agent": agent, "on_behalf_of": on_behalf_of}
     else:
         actor = _actor(request)
@@ -282,7 +290,9 @@ async def get_handover(project_id: str) -> HandoverChecklist:
     responses={409: {"description": "Not ready: the missing checklist items"}},
 )
 async def post_handover(project_id: str, body: HandoverPost, request: Request) -> HandoverResult:
-    actor, agent, on_behalf_of = _person_or_delegate(request, "Handing Imagine over to Develop")
+    actor, agent, on_behalf_of = await _person_or_delegate(
+        request, "Handing Imagine over to Develop", project_id
+    )
     return await _call(
         "handover",
         project_id,
@@ -317,7 +327,7 @@ async def get_validation(project_id: str) -> ValidationReport:
 
 @router.post(f"{_BASE}/rework", response_model=StudioResponse)
 async def post_rework(project_id: str, body: ReworkPost, request: Request) -> StudioResponse:
-    actor, agent, on_behalf_of = _person_or_delegate(request, "Reworking Imagine")
+    actor, agent, on_behalf_of = await _person_or_delegate(request, "Reworking Imagine", project_id)
     return await _call(
         "rework",
         project_id,

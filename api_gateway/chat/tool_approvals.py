@@ -846,7 +846,7 @@ DELEGATED_RELEASE_REASON = (
 )
 
 
-def approve_delegated(
+async def approve_delegated(
     body: DelegatedApprovalRequest,
     *,
     verified: bool,
@@ -873,40 +873,16 @@ def approve_delegated(
     surface ``agent``, the agent, the person, unverified unless a verified
     principal is that person; on route ``delegated``.
     """
+    from api_gateway.approvals.delegation import delegation_allowed
     from api_gateway.approvals.schemas import DecisionRecord
-    from mcp_core.guardrails import (
-        human_authority_delegated,
-        owner_delegable,
-        release_delegated,
-        requires_release_delegation,
-    )
+    from mcp_core.guardrails import owner_delegable, requires_release_delegation
 
-    # FORGE-834: a release step is delegated by its own flag, and only by it.
+    # FORGE-834: a release step is delegated by its own switch, and only by it.
+    # FORGE-904: the deployment, the project's account and the project must all
+    # allow it; the refusal names the layer that did not.
     release = requires_release_delegation(body.tool)
-    if release:
-        if not release_delegated():
-            logger.info(
-                "tool_approval_release_not_delegated",
-                tool=body.tool,
-                agent=body.agent,
-                on_behalf_of=body.on_behalf_of,
-            )
-            raise HTTPException(
-                status_code=403,
-                detail=(
-                    "this gateway does not delegate the release baseline and approval "
-                    "to agents (METAFORGE_ALLOW_AGENT_RELEASE is off)"
-                ),
-            )
-    elif not human_authority_delegated():
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "this gateway does not delegate human-authority decisions to agents "
-                "(METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY is off)"
-            ),
-        )
-    elif not owner_delegable(body.tool):
+    project = project_for_hold(body.project, body.arguments)
+    if not release and not owner_delegable(body.tool):
         raise HTTPException(
             status_code=422,
             detail=(
@@ -914,8 +890,17 @@ def approve_delegated(
                 "library register or update, or an agent's decision on its own upload)"
             ),
         )
+    verdict = await delegation_allowed("release" if release else "human_authority", project)
+    if not verdict.allowed:
+        logger.info(
+            "tool_approval_release_not_delegated" if release else "tool_approval_not_delegated",
+            tool=body.tool,
+            agent=body.agent,
+            on_behalf_of=body.on_behalf_of,
+            decided_by=verdict.decided_by,
+        )
+        raise HTTPException(status_code=403, detail=verdict.reason)
     reason = DELEGATED_RELEASE_REASON if release else DELEGATED_REASON
-    project = project_for_hold(body.project, body.arguments)
     request: dict[str, Any] = {
         "tool": body.tool,
         "arguments": body.arguments,
@@ -982,7 +967,9 @@ def approve_delegated(
 
 
 @router.post("/delegated", response_model=RunResponse)
-def record_delegated_approval(body: DelegatedApprovalRequest, request: Request) -> RunResponse:
+async def record_delegated_approval(
+    body: DelegatedApprovalRequest, request: Request
+) -> RunResponse:
     """Record a human-authority call an agent decided for a person (FORGE-827).
 
     The MCP server calls this instead of holding the call on a client prompt
@@ -995,7 +982,7 @@ def record_delegated_approval(body: DelegatedApprovalRequest, request: Request) 
     verified = body.approver_verified and current_principal(request) is not None
     requested_by, requester_verified = requester_from_request(request, body.requested_by)
     return RunResponse.from_run(
-        approve_delegated(
+        await approve_delegated(
             body,
             verified=verified,
             requested_by=requested_by,

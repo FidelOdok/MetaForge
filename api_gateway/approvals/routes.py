@@ -124,7 +124,7 @@ async def list_approvals(
 ) -> ApprovalListResponse:
     """Every approval, normalized. ``status=decided`` and ``all`` are the audit views."""
     surface, _ = surface_from_request(request)
-    items = [service.for_caller(i, surface) for i in await service.list_items(request.app)]
+    items = [await service.for_caller(i, surface) for i in await service.list_items(request.app)]
     if status == "pending":
         items = [i for i in items if i.status == "pending"]
     elif status == "decided":
@@ -161,7 +161,7 @@ async def list_approvals(
 @router.get("/{approval_id}", response_model=ApprovalItem)
 async def get_approval(approval_id: str, request: Request) -> ApprovalItem:
     surface, _ = surface_from_request(request)
-    return service.for_caller(await service.get_item(request.app, approval_id), surface)
+    return await service.for_caller(await service.get_item(request.app, approval_id), surface)
 
 
 @router.post("/{approval_id}/decision", response_model=ApprovalItem)

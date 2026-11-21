@@ -335,10 +335,15 @@ class RemoteApprovalLedger:
         self._timeout = timeout
 
     async def _post(self, url: str, body: dict[str, Any]) -> httpx.Response:
+        # FORGE-904: whose account this call is for, so the gateway applies that
+        # account's approval settings (its ceiling and its delegation switches).
+        from metaforge.mcp.remote_library import library_view_headers
+
+        view = library_view_headers()
         if self._client is not None:
-            return await self._client.post(url, json=body, timeout=self._timeout)
+            return await self._client.post(url, json=body, timeout=self._timeout, headers=view)
         async with httpx.AsyncClient(timeout=self._timeout, headers=gateway_auth_headers()) as http:
-            return await http.post(url, json=body)
+            return await http.post(url, json=body, headers=view)
 
     async def policy_approval(self, ask: ApprovalAsk) -> ApprovalResolution | None:
         """The project's policy's approval of ``ask``, or ``None`` to hold it (FORGE-745).

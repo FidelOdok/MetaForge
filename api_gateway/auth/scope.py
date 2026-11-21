@@ -150,6 +150,9 @@ class RouteTenancy(enum.Enum):
     #: Adds to or changes the caller's own library entries (FORGE-876):
     #: allowed when the scope names a tenant; shared entries stay read-only.
     TENANT_LIBRARY = "tenant_library"
+    #: The caller's own account settings (FORGE-904): read by anyone signed in,
+    #: changed only by a caller with an account; each account sees its own.
+    ACCOUNT_SETTINGS = "account_settings"
     #: Names an entity, not a project; checked against the entity's owner.
     PROJECT_ENTITY = "project_entity"
     #: Pure computation over the request body: reads and stores nothing.
@@ -168,6 +171,9 @@ EXPLICIT: dict[tuple[str, str], RouteTenancy] = {
     # answered, then filtered to the caller's projects by the route (an
     # explicit project_id that is not theirs is a 404 there).
     ("GET", "/v1/approvals"): RouteTenancy.ACCOUNT_LIST,
+    # FORGE-904: the caller's own account approval settings.
+    ("GET", "/v1/account/approval-policy"): RouteTenancy.ACCOUNT_SETTINGS,
+    ("PUT", "/v1/account/approval-policy"): RouteTenancy.ACCOUNT_SETTINGS,
     # The run request carries its project (``request.project_id``, or the
     # held tool call's ``project`` / ``arguments.project_id``).
     ("POST", "/v1/runs"): RouteTenancy.PROJECT_BODY,
@@ -431,6 +437,15 @@ async def decide(app: ASGIApp, request: Request, scope: ProjectScope) -> ScopeDe
             RouteTenancy.STATELESS,
         ):
             return ScopeDecision(allowed=True, tenancy=tenancy)
+        if tenancy is RouteTenancy.ACCOUNT_SETTINGS:
+            if request.method in ("GET", "HEAD") or scope.tenant:
+                return ScopeDecision(allowed=True, tenancy=tenancy)
+            return ScopeDecision(
+                allowed=False,
+                status=403,
+                tenancy=tenancy,
+                detail="This sign-in has no account whose settings it can change.",
+            )
         if tenancy is RouteTenancy.TENANT_LIBRARY:
             if scope.tenant:
                 return ScopeDecision(allowed=True, tenancy=tenancy)

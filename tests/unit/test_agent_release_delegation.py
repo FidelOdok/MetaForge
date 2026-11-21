@@ -22,7 +22,7 @@ import httpx
 import pytest
 
 from api_gateway.approvals.policy import ApprovalPolicy, PolicyStore, reset_policy_store
-from api_gateway.approvals.service import AGENT_RELEASE_REASON, for_caller, tool_item
+from api_gateway.approvals.service import for_caller, tool_item
 from api_gateway.library import routes as library_routes
 from api_gateway.operations import publisher as ops
 from api_gateway.twin import dfm_findings as dfm
@@ -336,7 +336,7 @@ async def test_the_outcome_is_counted_as_delegated_release(
     seen: list[str] = []
     monkeypatch.setattr(tool_approvals, "_record_outcome", seen.append)
     monkeypatch.setenv(RELEASE_FLAG, "true")
-    tool_approvals.approve_delegated(
+    await tool_approvals.approve_delegated(
         tool_approvals.DelegatedApprovalRequest(
             tool=APPROVE, agent=AGENT, on_behalf_of=PERSON, approver=PERSON
         ),
@@ -360,11 +360,13 @@ async def test_an_agent_decides_a_held_baseline_only_under_the_release_flag(
     )
     item = tool_item(run)
     monkeypatch.setenv(HUMAN_FLAG, "true")
-    held = for_caller(item, "agent")
-    assert held.decidable is False and held.not_decidable_reason == AGENT_RELEASE_REASON
-    assert for_caller(item, "dashboard").decidable is True
+    held = await for_caller(item, "agent")
+    assert held.decidable is False
+    assert "fixes or approves a manufacturing release" in str(held.not_decidable_reason)
+    assert "METAFORGE_ALLOW_AGENT_RELEASE" in str(held.not_decidable_reason)
+    assert (await for_caller(item, "dashboard")).decidable is True
     monkeypatch.setenv(RELEASE_FLAG, "true")
-    assert for_caller(item, "agent").decidable is True
+    assert (await for_caller(item, "agent")).decidable is True
 
 
 # ── what the tools record ────────────────────────────────────────────────
