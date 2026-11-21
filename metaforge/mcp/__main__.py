@@ -2215,9 +2215,12 @@ async def _bootstrap(
     brief_provider = None
     try:
         from api_gateway.projects.brief_provider import make_brief_provider
-        from api_gateway.projects.routes import get_project_backend
 
-        brief_provider = make_brief_provider(twin, get_project_backend())
+        # The same project store the project tools use. The gateway's
+        # ``get_project_backend()`` is never set up in this process, so a brief
+        # built on it found no project at all: every metaforge://twin/brief and
+        # /requirements read said "no project", locally and on staging.
+        brief_provider = make_brief_provider(twin, project_backend)
     except Exception as exc:  # noqa: BLE001 — degrade to no resources, loudly
         logger.warning("mcp_brief_provider_unavailable", error=str(exc))
 
