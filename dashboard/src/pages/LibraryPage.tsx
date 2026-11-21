@@ -107,7 +107,7 @@ function SourcedTable({
       <tbody>
         {rows.map(([key, v, fromModel]) => (
           <tr key={key}>
-            <td>{key.replace(/_(mm|kg|kn|n|v|mah|rpm|mpa|c|pct|w_mk|um_mk|kg_m3)$/, '').replace(/_/g, ' ')}</td>
+            <td>{key.replace(/_(mm|kg|kn|n|v|mah|rpm|mpa|c|pct|w_mk|um_mk|kg_m3|a|ma|khz|w)$/, '').replace(/_/g, ' ')}</td>
             <td className="font-mono">{formatValue(v)}</td>
             <td className="mf-library-muted">
               {v.source_ref?.startsWith('http') ? (

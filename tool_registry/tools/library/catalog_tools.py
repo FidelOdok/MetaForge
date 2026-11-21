@@ -164,6 +164,11 @@ _SPECS = (
     "outer_diameter_mm, thickness_mm, bore_mm, width_mm, travel_mm (mm); dynamic_load_kn, "
     "static_load_kn, fatigue_load_limit_kn (kN); reference_speed_rpm, limiting_speed_rpm "
     "(rpm); mass_kg (kg); force_n (N); torque_nm (N m); voltage_v (V); capacity_mah (mAh). "
+    "An electronic part, one value each, a range as its min and max: input_voltage_min_v, "
+    "input_voltage_max_v, output_voltage_v (V); output_current_a (the maximum continuous "
+    "output), current_limit_a (a switch or peak current limit) (A); supply_current_ma (mA); "
+    "switching_frequency_khz (kHz); power_w (W); operating_temp_min_c, "
+    "operating_temp_max_c (C). "
     "A module, battery or electronic part is length_mm x width_mm x height_mm: its height "
     "is height_mm, never thickness_mm (that is for plates and washers). "
 )

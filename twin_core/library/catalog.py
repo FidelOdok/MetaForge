@@ -216,7 +216,26 @@ COMPONENT_SPECS: dict[str, str] = {
     "torque_nm": "N m",
     "voltage_v": "V",
     "capacity_mah": "mAh",
+    # Electronic parts (a regulator, an LED driver, a sensor): one value per
+    # spec, a range as its min and max; read from the datasheet, never defaulted.
+    "input_voltage_min_v": "V",
+    "input_voltage_max_v": "V",
+    "output_voltage_v": "V",
+    "output_current_a": "A",
+    "current_limit_a": "A",
+    "supply_current_ma": "mA",
+    "switching_frequency_khz": "kHz",
+    "power_w": "W",
+    "operating_temp_min_c": "C",
+    "operating_temp_max_c": "C",
 }
+#: Specs that may be zero or below (a minimum operating temperature of -40 C).
+SIGNED_SPECS: frozenset[str] = frozenset({"operating_temp_min_c", "operating_temp_max_c"})
+#: A range given as two specs: the first may not be above the second.
+SPEC_RANGES: tuple[tuple[str, str], ...] = (
+    ("input_voltage_min_v", "input_voltage_max_v"),
+    ("operating_temp_min_c", "operating_temp_max_c"),
+)
 
 #: FORGE-631: how a surface is finished.
 APPEARANCE_FINISHES: tuple[str, ...] = (
@@ -397,10 +416,25 @@ def parse_specs(raw: Any) -> dict[str, Sourced]:
             raise CatalogError(f"spec {key} must be an object with value, unit and source")
         if str(item.get("unit") or unit).strip() != unit:
             raise CatalogError(f"spec {key} is in {unit}")
-        value = _number(f"spec {key}", item.get("value"))
+        if key in SIGNED_SPECS:
+            value = _finite(f"spec {key}", item.get("value"))
+        else:
+            value = _number(f"spec {key}", item.get("value"))
         kind, ref = _source(f"spec {key}", item)
         out[key] = Sourced(value, unit, kind, ref, kind == "assumption")
+    for low, high in SPEC_RANGES:
+        if low in out and high in out and out[low].value > out[high].value:
+            raise CatalogError(
+                f"spec {low} ({out[low].value:g}) is above {high} ({out[high].value:g})"
+            )
     return out
+
+
+def _finite(where: str, value: Any) -> float:
+    ok = isinstance(value, int | float) and not isinstance(value, bool)
+    if not ok or value != value or value in (float("inf"), float("-inf")):
+        raise CatalogError(f"{where} must be a number")
+    return float(value)
 
 
 def check_body_specs(family: str, specs: dict[str, Any]) -> None:
