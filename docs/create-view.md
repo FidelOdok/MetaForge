@@ -607,7 +607,10 @@ model's height, so the buttons under it never move.
   fits the view, several scroll. A board with none says so and offers to
   generate it. A preview that was made but could not be stored says why.
   Previews load through the gateway with the person's sign-in, as every file
-  image in the dashboard does; one that cannot be loaded says why.
+  image in the dashboard does; one that cannot be loaded says why. A layout
+  recorded with `twin.record_design_files` also keeps the populated board as a
+  GLB (`kicad.export_3d`), and the PCB view then has a **Layout / 3D** switch
+  to turn it in 3D, with its components' KiCad models.
 
 Beside the views, as in Imagine's studio, a **Next step** card names the
 nearest missing piece (no system schematic, then each board's schematic,

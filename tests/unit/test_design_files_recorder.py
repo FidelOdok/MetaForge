@@ -60,8 +60,8 @@ class _Links:
 class _Kicad:
     """kicad.export_svg, writing its SVGs where the real adapter would."""
 
-    def __init__(self, workspace: Path, fail: bool = False) -> None:
-        self.workspace, self.fail = workspace, fail
+    def __init__(self, workspace: Path, fail: bool = False, fail_3d: bool = False) -> None:
+        self.workspace, self.fail, self.fail_3d = workspace, fail, fail_3d
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
     async def invoke(
@@ -70,6 +70,13 @@ class _Kicad:
         self.calls.append((tool_id, params))
         if self.fail:
             raise RuntimeError("kicad adapter unreachable")
+        if tool_id == "kicad.export_3d":
+            if self.fail_3d:
+                raise RuntimeError("kicad-cli glb export failed")
+            glb = self.workspace / "3d" / f"{Path(params['pcb_file']).stem}.glb"
+            glb.parent.mkdir(exist_ok=True)
+            glb.write_bytes(b"glTF-board")
+            return {"file": str(glb), "format": "glb"}
         out = self.workspace / "svg"
         out.mkdir(exist_ok=True)
         names = ["drone-fc.svg", "drone-fc-power.svg"] if "schematic_file" in params else ["b.svg"]
@@ -189,6 +196,48 @@ class TestSchematicAndBoard:
         assert first["item_ref"].endswith("@1") and second["item_ref"].endswith("@2")
         assert first["item_ref"].split("@")[0] == second["item_ref"].split("@")[0]
         assert first["content_hash"] != second["content_hash"]
+
+    async def test_a_board_also_keeps_its_populated_3d_model(
+        self, twin: InMemoryTwinAPI, tmp_path: Path, stored: dict[str, bytes]
+    ) -> None:
+        proj = _kicad_project(tmp_path)
+        bridge = _Kicad(tmp_path)
+        out = await _recorder(twin, tmp_path, bridge=bridge)(
+            work_product_type="pcb_layout",
+            file_path="generated/drone-fc/drone-fc.kicad_pcb",
+            name="Drone FC board",
+        )
+        assert out["previews"] == ["preview/b.svg", "preview/drone-fc-3d.glb"]
+        assert (
+            "kicad.export_3d",
+            {"pcb_file": str(proj / "drone-fc.kicad_pcb"), "format": "glb"},
+        ) in bridge.calls
+        wp = await twin.get_work_product(UUID(out["node_id"]))
+        assert wp is not None
+        assert stored[wp.metadata["image_files"]["preview/drone-fc-3d.glb"]] == b"glTF-board"
+
+    async def test_a_schematic_has_no_3d_model(
+        self, twin: InMemoryTwinAPI, tmp_path: Path, stored: dict[str, bytes]
+    ) -> None:
+        _kicad_project(tmp_path)
+        bridge = _Kicad(tmp_path)
+        await _recorder(twin, tmp_path, bridge=bridge)(
+            work_product_type="schematic",
+            file_path="generated/drone-fc/drone-fc.kicad_sch",
+            name="Drone FC schematic",
+        )
+        assert [c[0] for c in bridge.calls] == ["kicad.export_svg"]
+
+    async def test_a_failed_3d_export_keeps_the_board_sheets(
+        self, twin: InMemoryTwinAPI, tmp_path: Path, stored: dict[str, bytes]
+    ) -> None:
+        _kicad_project(tmp_path)
+        out = await _recorder(twin, tmp_path, bridge=_Kicad(tmp_path, fail_3d=True))(
+            work_product_type="pcb_layout",
+            file_path="generated/drone-fc/drone-fc.kicad_pcb",
+            name="Board",
+        )
+        assert out["previews"] == ["preview/b.svg"] and out.get("preview_error") is None
 
     async def test_preview_failure_still_records_the_files(
         self, twin: InMemoryTwinAPI, tmp_path: Path, stored: dict[str, bytes]

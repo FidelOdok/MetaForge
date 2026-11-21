@@ -525,7 +525,21 @@ def make_design_files_recorder(
                 images.append((f"preview/{p.name}", p.read_bytes()))
             except (OSError, ValueError) as exc:
                 return [], f"preview file unreadable: {exc}"
-        return images, None if images else "kicad.export_svg returned no files"
+        if not images:
+            return [], "kicad.export_svg returned no files"
+        if kind == "pcb_layout":
+            # The populated board in 3D, for the PCB view's 3D switch. Best
+            # effort like the SVG: a board without it still has its sheets.
+            try:
+                out3d = await mcp_bridge.invoke(
+                    "kicad.export_3d", {"pcb_file": str(primary), "format": "glb"}
+                )
+                d3 = out3d.get("data", out3d) if isinstance(out3d, dict) else {}
+                glb = resolve_in_workspace(str(d3.get("file")), root)
+                images.append((f"preview/{primary.stem}-3d.glb", glb.read_bytes()))
+            except Exception as exc:  # noqa: BLE001 -- the 3D preview is best effort
+                logger.warning("design_files_3d_preview_failed", error=str(exc))
+        return images, None
 
     async def record(
         *,
@@ -675,7 +689,12 @@ def make_design_files_recorder(
                         primary_key = key
                 for rel, data in images:
                     image_files[rel] = store_work_product_blob(
-                        str(wp_id), rel, data, content_type="image/svg+xml"
+                        str(wp_id),
+                        rel,
+                        data,
+                        content_type="model/gltf-binary"
+                        if rel.endswith(".glb")
+                        else "image/svg+xml",
                     )
             except Exception as exc:  # noqa: BLE001 -- keep the node, like the BOM recorder
                 store_error = str(exc)
