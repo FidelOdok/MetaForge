@@ -679,12 +679,50 @@ with the approver `reviewer:<source>:<model>` and surface `reviewer`, never as
 a person.
 
 **Setting it.** `GET /v1/projects/{id}/approval-policy` returns the stored
-policy, the mode in force now and the operator cap.
+policy, the mode in force now, the highest mode the project may choose, which
+layer holds it below its choice (`limited_by`: `expired`, `account` or
+`deployment`), whether agents may act for a person here (`delegation`) and the
+deployment's limits (`deployment`).
 `PUT /v1/projects/{id}/approval-policy` with `{mode, reviewer, reviewer_model,
-expires_in_hours}` sets it. Changing the policy is a person's decision: a
-request with `X-MetaForge-Surface: agent` gets 403, and no MCP tool sets it.
-The gateway's `METAFORGE_AUTO_APPROVE_MAX` (default `advise`) caps the highest
-mode any project may use; a mode above it is refused with 422.
+expires_in_hours, allow_human_authority, allow_release}` sets it. Changing the
+policy is a person's decision: a request with `X-MetaForge-Surface: agent` gets
+403, and no MCP tool sets it. A mode above the deployment's or the account's
+ceiling is refused with 422.
+
+### Three layers: deployment, account, project
+
+Who may decide is set in three layers. Each can only narrow the one above it.
+
+| Layer | Who sets it | Where | What it sets |
+|---|---|---|---|
+| Deployment | The people who run the MetaForge | Its environment: `METAFORGE_AUTO_APPROVE_MAX`, `METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY`, `METAFORGE_ALLOW_AGENT_RELEASE`, the hourly caps | The highest mode any project may use; whether agents may ever act for a person |
+| Account | A person on the account | Dashboard, **Settings, Approvals**; `GET`/`PUT /v1/account/approval-policy` with `{max_mode, allow_human_authority, allow_release}` | A lower ceiling for every project of the account; agents acting for a person turned off for every project |
+| Project | A person on the project | The project page's **Approval policy** panel | The project's mode; agents acting for a person turned off for this project |
+
+The rules:
+
+- **The mode in force** is the project's mode, held at the lowest of the
+  deployment's and the account's ceilings (and `auto` past its expiry is
+  `advise`). The account's ceiling is `null` to follow the deployment.
+- **Agents acting for a person** (deciding a human-authority step, or a
+  release) need every layer: the deployment's switch on, the account not off,
+  the project not off. `null` follows the layer above; `false` turns it off. An
+  account cannot turn on what the deployment has off (422); a project setting
+  it `true` cannot reach past an account that has it off. Every refusal names
+  the layer, so the person knows where to change it.
+- **Whose account.** On a signed-in gateway the caller's account applies; the
+  MCP server forwards the account it acts for with each approval request
+  (`X-MetaForge-Library-View`, honoured only from the deployment's own service
+  credential). A caller with no account of its own (the design-flow worker)
+  uses the account recorded on the project's policy when a person last saved
+  it. A local gateway has one account.
+- **Never by any layer.** Destructive tools, spending, and project, flow, run,
+  approval, review, phase, session, library and vendor tools are never approved
+  by a policy.
+
+The project panel says what is in force and which layer set it, offers only the
+modes under both ceilings (saying which one a greyed-out mode is above), and
+shows the deployment's limits read only, with its hourly caps.
 
 **Where the reviewer runs.** After a gate is announced, the design-flow
 worker runs one `review_gate` step (the in-process engine does the same). It

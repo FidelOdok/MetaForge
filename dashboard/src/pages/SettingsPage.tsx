@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 import { ConfirmDialog } from '../components/ui/Modal';
 import { PageHeader } from '../components/ui/PageHeader';
+import { AccountApprovalSettings } from '../components/approvals/AccountApprovalSettings';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/Toast';
@@ -415,7 +416,7 @@ export function SettingsPage() {
 
   return (
     <div style={{ maxWidth: 880 }}>
-      <PageHeader title="Settings" meta="gateway, AI providers and cloud adapters" />
+      <PageHeader title="Settings" meta="gateway, AI providers, cloud adapters and approvals" />
 
       <section style={{ ...GLASS, padding: 20 }} aria-labelledby="gateway-heading">
         <div className="flex items-center gap-2">
@@ -557,6 +558,21 @@ export function SettingsPage() {
       <ProvidersPanel />
 
       <CloudAdaptersPanel />
+
+      <section style={{ ...GLASS, padding: 20, marginTop: 16 }} aria-labelledby="approvals-heading">
+        <div className="flex items-center gap-2">
+          <span className="material-symbols-outlined" aria-hidden="true" style={{ fontSize: 18, color: C.primary }}>
+            verified_user
+          </span>
+          <h2 id="approvals-heading" style={{ fontSize: 14, fontWeight: 600, color: C.onSurface }}>
+            Approvals
+          </h2>
+        </div>
+        <p style={{ fontSize: 13, color: C.onSurfaceVariant, margin: '8px 0 12px' }}>
+          Limits for every project of your account. A project can narrow them further on its own page.
+        </p>
+        <AccountApprovalSettings />
+      </section>
 
       <section style={{ ...GLASS, padding: 20, marginTop: 16 }} aria-labelledby="expose-heading">
         <div className="flex items-center gap-2">

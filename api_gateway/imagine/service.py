@@ -2019,7 +2019,7 @@ class ImagineService:
         with tracer.start_as_current_span("imagine.accept") as span:
             span.set_attribute("project_id", project_id)
             span.set_attribute("imagine.agent", agent)
-            delegated = _delegation("acceptance", agent, on_behalf_of)
+            delegated = await _delegation("acceptance", agent, on_behalf_of, project_id)
             if not assumptions and not scenarios:
                 _count("acceptance", "refused")
                 raise ImagineError("Name at least one assumption or scenario to accept.", 422)
@@ -2106,7 +2106,7 @@ class ImagineService:
         """
         with tracer.start_as_current_span("imagine.handover") as span:
             span.set_attribute("project_id", project_id)
-            delegated = _delegation("handover", agent, on_behalf_of)
+            delegated = await _delegation("handover", agent, on_behalf_of, project_id)
             if delegated:
                 actor = delegated["by"]
                 span.set_attribute("imagine.agent", str(agent))
@@ -2414,7 +2414,7 @@ class ImagineService:
     ) -> StudioResponse:
         with tracer.start_as_current_span("imagine.rework") as span:
             span.set_attribute("project_id", project_id)
-            delegated = _delegation("rework", agent, on_behalf_of)
+            delegated = await _delegation("rework", agent, on_behalf_of, project_id)
             if delegated:
                 actor = delegated["by"]
                 span.set_attribute("imagine.agent", str(agent))
@@ -2536,7 +2536,9 @@ class ImagineService:
         )
 
 
-def _delegation(what: str, agent: str | None, on_behalf_of: str | None) -> dict[str, Any]:
+async def _delegation(
+    what: str, agent: str | None, on_behalf_of: str | None, project_id: str | None = None
+) -> dict[str, Any]:
     """The record of an agent deciding a person's step for them (FORGE-824).
 
     The handover and the rework are a person's decisions. An agent may make
@@ -2548,16 +2550,13 @@ def _delegation(what: str, agent: str | None, on_behalf_of: str | None) -> dict[
     """
     if agent is None:
         return {}
-    from api_gateway.approvals.service import (
-        AGENT_HUMAN_AUTHORITY_REASON,
-        agent_may_decide_human_authority,
-    )
+    # FORGE-904: the deployment, the account and the project must all allow it.
+    from api_gateway.approvals.delegation import delegation_allowed
 
-    if not agent_may_decide_human_authority():
+    verdict = await delegation_allowed("human_authority", project_id)
+    if not verdict.allowed:
         _count(what, "refused")
-        raise ImagineError(
-            f"The Imagine {what} is a person's decision: " + AGENT_HUMAN_AUTHORITY_REASON, 403
-        )
+        raise ImagineError(f"The Imagine {what} is a person's decision: {verdict.reason}.", 403)
     agent = agent.strip()[:100]
     person = (on_behalf_of or "").strip()[:200]
     if not agent or not person:

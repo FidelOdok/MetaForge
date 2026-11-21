@@ -238,3 +238,12 @@ class ApprovalPolicyRow(Base):
 
     project_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     policy: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+
+class AccountApprovalPolicyRow(Base):
+    """``account_approval_policies``: one account's approval settings, as JSON (FORGE-904)."""
+
+    __tablename__ = "account_approval_policies"
+
+    account: Mapped[str] = mapped_column(String(255), primary_key=True)
+    policy: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)

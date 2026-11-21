@@ -756,28 +756,40 @@ AGENT_RELEASE_REASON = (
 )
 
 
-def agent_refusal(item: ApprovalItem) -> str | None:
+async def agent_refusal(item: ApprovalItem) -> str | None:
     """Why an agent may not decide this item, or ``None`` when it may.
 
-    Human-authority kinds need the human-authority flag (FORGE-510). A held
-    release step (``twin.create_baseline``, ``twin.approve_release``) needs
-    the release flag (FORGE-834); the human-authority flag does not cover it.
+    Human-authority kinds need agents allowed to decide human-authority steps
+    (FORGE-510); a held release step (``twin.create_baseline``,
+    ``twin.approve_release``) needs agents allowed to release (FORGE-834); the
+    first does not cover the second. FORGE-904: allowed means the deployment, the
+    item's account and its project all allow it.
     """
-    from mcp_core.guardrails import release_delegated, requires_release_delegation
+    from api_gateway.approvals.delegation import delegation_allowed
+    from mcp_core.guardrails import requires_release_delegation
 
-    if item.kind in HUMAN_AUTHORITY_KINDS and not agent_may_decide_human_authority():
-        return AGENT_HUMAN_AUTHORITY_REASON
+    if item.kind in HUMAN_AUTHORITY_KINDS:
+        verdict = await delegation_allowed("human_authority", item.project_id)
+        if not verdict.allowed:
+            return (
+                f"this approval needs a human decision; agents may not decide it: {verdict.reason}"
+            )
     tool = str((item.detail or {}).get("tool") or "")
-    if item.kind == "tool_call" and requires_release_delegation(tool) and not release_delegated():
-        return AGENT_RELEASE_REASON
+    if item.kind == "tool_call" and requires_release_delegation(tool):
+        verdict = await delegation_allowed("release", item.project_id)
+        if not verdict.allowed:
+            return (
+                "this approval fixes or approves a manufacturing release; agents may not "
+                f"decide it: {verdict.reason}"
+            )
     return None
 
 
-def for_caller(item: ApprovalItem, surface: str) -> ApprovalItem:
+async def for_caller(item: ApprovalItem, surface: str) -> ApprovalItem:
     """The item as an agent caller may act on it: human-authority kinds are not decidable."""
     if surface != "agent":
         return item
-    refusal = agent_refusal(item)
+    refusal = await agent_refusal(item)
     if refusal is None:
         return item
     return item.model_copy(
@@ -924,7 +936,7 @@ async def decide(
     """
     kind, raw = split_id(item_id)
     current = await get_item(app, item_id)  # 404 first, and the not-decidable check
-    refusal = agent_refusal(current) if surface == "agent" else None
+    refusal = await agent_refusal(current) if surface == "agent" else None
     if refusal is not None:
         raise HTTPException(status_code=403, detail=refusal)
     if current.status != "pending":

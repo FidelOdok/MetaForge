@@ -2409,10 +2409,13 @@ def create_app(
     app.include_router(files_router)
     app.include_router(links_router)
     # FORGE-726: who decides a project's gates (policy) and the reviewer's notes.
+    from api_gateway.approvals.policy_routes import account_router as account_policy_router
     from api_gateway.approvals.policy_routes import review_router as gate_review_router
     from api_gateway.approvals.policy_routes import router as approval_policy_router
 
     app.include_router(approval_policy_router)
+    # FORGE-904: an account's approval settings.
+    app.include_router(account_policy_router)
     app.include_router(gate_review_router)
     # FORGE-730: reviews done by a connected client's reviewer subagent.
     from api_gateway.approvals.review_tasks import router as review_tasks_router

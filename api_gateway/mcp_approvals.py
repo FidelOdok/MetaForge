@@ -203,7 +203,7 @@ class InProcessApprovalLedger:
         from api_gateway.chat.tool_approvals import DelegatedApprovalRequest, approve_delegated
 
         try:
-            run = approve_delegated(
+            run = await approve_delegated(
                 DelegatedApprovalRequest(
                     tool=ask.tool_id,
                     arguments=ask.arguments,
