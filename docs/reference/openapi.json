@@ -120,6 +120,30 @@
         "title": "AddConceptOptionRequest",
         "type": "object"
       },
+      "AdoptPost": {
+        "description": "Adopt what Develop decided for one component into the studio.",
+        "properties": {
+          "base_revision": {
+            "description": "The studio revision the thread was read at.",
+            "minimum": 1.0,
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "key": {
+            "description": "The component thread's key, from GET .../components/thread.",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "base_revision",
+          "key"
+        ],
+        "title": "AdoptPost",
+        "type": "object"
+      },
       "AnalysedRef": {
         "properties": {
           "current": {
@@ -42788,6 +42812,51 @@
         ]
       }
     },
+    "/v1/twin/projects/{project_id}/components/thread": {
+      "get": {
+        "description": "Every component, followed through Imagine, Develop, Check and Make.",
+        "operationId": "get_component_threads_v1_twin_projects__project_id__components_thread_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Component Threads V1 Twin Projects  Project Id  Components Thread Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Component Threads",
+        "tags": [
+          "imagine"
+        ]
+      }
+    },
     "/v1/twin/projects/{project_id}/concept-mesh": {
       "get": {
         "description": "The newest 3D concept, the job still running and what the next one would use.",
@@ -43946,6 +44015,59 @@
         "summary": "Record Verification",
         "tags": [
           "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/imagine/adopt": {
+      "post": {
+        "description": "Take Develop's part or board for one component thread into the studio.\n\n404 when no thread has that key, 409 when the thread has nothing to adopt, the\nstudio moved past ``base_revision`` or is handed over; otherwise the new revision.",
+        "operationId": "post_adopt_v1_twin_projects__project_id__imagine_adopt_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdoptPost"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Adopt",
+        "tags": [
+          "imagine"
         ]
       }
     },

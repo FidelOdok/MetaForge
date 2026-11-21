@@ -128,7 +128,7 @@ class TestTelemetryMetricsGroupAccess:
         # + 3 CadQuery isolated script runner runs, durations and limit stops.
         # + 1 MCP project-scope decisions (account-confined MCP calls).
         # + 1 MCP approval prompts kept open past their call.
-        assert len(MetricsRegistry.all_metrics()) == 172
+        assert len(MetricsRegistry.all_metrics()) == 173
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (

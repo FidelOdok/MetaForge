@@ -16,7 +16,7 @@ its own copy; this one lives in `api_gateway/imagine/` (provenance in its
 |---|---|
 | Gateway | `/v1/twin/projects/{project_id}/imagine/...` (`api_gateway/imagine/`) |
 | Twin item | `IMG-STUDIO`, work product type `imagine_studio` (a definition: every config change or rework is its next revision) |
-| MCP | `twin.imagine_get_studio`, `twin.imagine_put_studio`, `twin.imagine_patch_studio`, `twin.imagine_handover_status`; under delegation only, `twin.imagine_handover` and `twin.imagine_rework` |
+| MCP | `twin.imagine_get_studio`, `twin.imagine_put_studio`, `twin.imagine_patch_studio`, `twin.imagine_handover_status`, `twin.component_thread`, `twin.imagine_adopt`; under delegation only, `twin.imagine_handover` and `twin.imagine_rework` |
 | Engine | `api_gateway/imagine/engine/` (HTML, CSS and JS), three.js r128 vendored under `engine/vendor/` |
 
 ## Verification levels
@@ -154,6 +154,7 @@ gateway's middleware, like every other route.
 | POST | `/validate` | `{config?, revision?, scope?, gates?}` | the same report as a dry run; 404 with no studio, 409 for a `config` on a handed-over studio, 422 for a non-head `revision`, an unknown `scope` ref (`bad_refs`) or an invalid config (the body is the report) |
 | POST | `/handover` | `{op_id}` | 409 with `{detail: {message, items}}` (the whole checklist, the blocking ones `missing`) when not ready; otherwise `{handed_over: true, revision, created: [refs]}` |
 | POST | `/rework` | `{op_id, reason}` | the studio, the same shape as `GET /studio`, on its new revision, with `stale: [refs]` |
+| POST | `/adopt` | `{base_revision, key}` | the studio on its new revision, with Develop's part for component thread `key` taken in; 404 for an unknown thread, 409 when the thread has nothing to adopt, the studio moved past `base_revision` or is handed over, 400 for a board |
 
 `collections` is the twin-backed state of each browser collection, keyed by
 document id (`choices`, `scenarios`, `contextEdits`, `assumptions`,
@@ -318,7 +319,7 @@ kind of record (`api_gateway/imagine/twin_bridge.py`):
 | Requirements, custom requirements | The `CS-IMAGINE` constraint set: each with its source (`limit_source`) and verification method |
 | Assumptions | An `assumption` entity; the manufacturing context field it names, marked `assumption`. A person's confirmation records it as stated and flips the field to `user_stated` |
 | Option choices | A design decision, with the other candidates as alternatives, pinned to the studio revision |
-| Parts (at handover) | A concept assembly decision: each chosen part gets its `CMP-` component id; sources, retrieved dates and envelopes are in the record |
+| Parts (at handover) | A concept assembly decision: each chosen part gets its `CMP-` component id and keeps its studio part id (`studio_part`), role, order code and library entry, so Develop, Check and Make can follow it ([Components across the stages](create-view.md#components-across-the-stages)); sources, retrieved dates and envelopes are in the record |
 | Scenarios | Scenario requirements in `CS-IMAGINE` (verified by demonstration) |
 | Context edits | Manufacturing context changes with provenance (`imagine.studio`, the actor, the studio ref) |
 | Interfaces (at handover) | Proposed interface contracts: `IFC-CAD-EDA` (each part's envelope) and `IFC-EDA-FIRMWARE` (each part's buses, and the firmware pin map from the connection list). One Develop already holds is left alone |

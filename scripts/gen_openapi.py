@@ -19,6 +19,7 @@ a request and a response into identical "-Input"/"-Output" copies.
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import logging
 import re
@@ -109,6 +110,13 @@ def main() -> int:
                 "Run `python scripts/gen_openapi.py` and commit the result.",
                 file=sys.stderr,
             )
+            # What differs, so an environment-only difference (a library version
+            # that renders a schema differently) can be seen without guessing.
+            diff = difflib.unified_diff(
+                current.splitlines(), fresh.splitlines(), "committed", "generated", n=2, lineterm=""
+            )
+            for line in list(diff)[:120]:
+                print(line, file=sys.stderr)
             return 1
         print(f"OK: {OUTPUT.name} is up to date.")
         return 0

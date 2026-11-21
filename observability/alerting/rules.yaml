@@ -1247,6 +1247,25 @@ groups:
             gateway logs (imagine_event_failed, imagine_handover_failed,
             imagine_rework_failed) and the twin backend.
 
+  # FORGE-903 -- the component thread (api_gateway/twin/component_thread.py).
+  - name: metaforge_component_thread
+    rules:
+      - alert: ComponentThreadFailing
+        expr: >-
+          sum(increase(metaforge_component_thread_total{outcome="failed"}[1h])) > 0
+          and sum(increase(metaforge_component_thread_total{outcome="failed"}[1h]))
+          / clamp_min(sum(increase(metaforge_component_thread_total[1h])), 1) > 0.2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Component threads are failing"
+          description: >-
+            More than a fifth of the last hour's component thread reads or adoptions
+            failed. The Components view in Create cannot show where a part stands
+            across Imagine, Develop, Check and Make. Check the gateway logs
+            (component_thread_failed, component_adopt_failed).
+
   # FORGE-778 -- AI 3D reference meshes (api_gateway/twin/concept_mesh.py).
   - name: metaforge_concept_mesh
     rules:

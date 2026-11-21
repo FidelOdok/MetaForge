@@ -386,6 +386,8 @@ TOOL_RULES: dict[str, ToolRule] = {
     "twin.imagine_get_studio": _project(),
     "twin.imagine_put_studio": _project(),
     "twin.imagine_patch_studio": _project(),
+    "twin.imagine_adopt": _project(),
+    "twin.component_thread": _project(),
     "twin.imagine_add_mesh_reference": _project(),
     "twin.imagine_look": _project(),
     "twin.imagine_validate": _project(),

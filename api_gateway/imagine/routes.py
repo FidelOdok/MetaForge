@@ -30,6 +30,7 @@ from fastapi.responses import HTMLResponse, Response
 
 from api_gateway.imagine import engine_page, engine_token
 from api_gateway.imagine.schemas import (
+    AdoptPost,
     EventAccepted,
     HandoverChecklist,
     HandoverPost,
@@ -329,6 +330,70 @@ async def post_rework(project_id: str, body: ReworkPost, request: Request) -> St
             on_behalf_of=on_behalf_of,
         ),
     )
+
+
+# ── the component thread (FORGE-903) ────────────────────────────────────
+
+
+async def _threads(project_id: str) -> dict[str, Any]:
+    from api_gateway.twin.component_thread import gather_threads
+    from api_gateway.twin.routes import get_twin
+
+    service = get_service()
+    return await gather_threads(get_twin(), project_id, studio_service=service)
+
+
+@router.get("/projects/{project_id}/components/thread")
+async def get_component_threads(project_id: str) -> dict[str, Any]:
+    """Every component, followed through Imagine, Develop, Check and Make."""
+    return await _call("component_thread", project_id, lambda: _threads(project_id))
+
+
+@router.post(f"{_BASE}/adopt", response_model=StudioResponse)
+async def post_adopt(project_id: str, body: AdoptPost, request: Request) -> StudioResponse:
+    """Take Develop's part or board for one component thread into the studio.
+
+    404 when no thread has that key, 409 when the thread has nothing to adopt, the
+    studio moved past ``base_revision`` or is handed over; otherwise the new revision.
+    """
+    from api_gateway.twin.component_thread import count
+
+    actor = _actor(request)
+
+    async def run() -> StudioResponse:
+        data = await _threads(project_id)
+        thread = next((t for t in data["threads"] if t["key"] == body.key), None)
+        if thread is None:
+            count("adopt", "refused")
+            raise ImagineError(f"No component thread {body.key}.", 404)
+        adopt = thread.get("adopt")
+        if not adopt:
+            count("adopt", "refused")
+            raise ImagineError(
+                f"{thread['name']}: Imagine and Develop already agree; there is nothing to adopt.",
+                409,
+            )
+        payload = {
+            **adopt,
+            "part_id": (thread.get("imagine") or {}).get("part_id"),
+            "role": thread.get("role"),
+            "name": thread.get("name"),
+        }
+        try:
+            out = await get_service().adopt_component(
+                project_id, body.base_revision, payload, actor=actor
+            )
+        except ImagineError:
+            count("adopt", "refused")
+            raise
+        except Exception:
+            count("adopt", "failed")
+            logger.error("component_adopt_failed", project_id=project_id, key=body.key)
+            raise
+        count("adopt", "ok")
+        return out
+
+    return await _call("adopt", project_id, run)
 
 
 __all__ = ["get_service", "router", "set_service"]

@@ -11,6 +11,7 @@ import {
 import { dfmKeys, evaluateDfm, getDfm, openFindings } from '../../api/endpoints/dfmFindings';
 import { useComponentSelection } from '../../store/component-selection-store';
 import { StageActions } from './StageActions';
+import { ComponentThreadPanel } from './ComponentThread';
 
 function ContractIcon({ c }: { c: InterfaceContractView }) {
   const state = plainState(c);
@@ -116,6 +117,7 @@ export function CheckStage({ projectId, onAsk }: { projectId: string; onAsk: (te
         )}
         {dfm.data?.disclaimer && <p className="cv-fineprint">{dfm.data.disclaimer}</p>}
       </section>
+      <ComponentThreadPanel projectId={projectId} stage="check" open />
     </div>
   );
 }

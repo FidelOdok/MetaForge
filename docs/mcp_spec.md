@@ -1440,6 +1440,17 @@ per-product formgraph config for Create's Imagine stage
   reference `file` is refused. A config that fails the checks is a tool error
   listing every error; a handed-over studio is a tool error until a person
   reworks it.
+- `twin.component_thread` (read-only): `{project_id, studio, threads,
+  summary, warnings}`. One thread per component, keyed `part:<studio part id>`,
+  `selection:<node id>`, `board-part:<order code>` or `board:<name>`, with
+  `relation` (`same`, `refined`, `replaced`, `develop_only`, `imagine_only`) and
+  one object per stage (`imagine`, `develop`, `check`, `make`); `adopt` is set
+  when Develop's part can be taken into the studio. See
+  [Components across the stages](create-view.md#components-across-the-stages).
+- `twin.imagine_adopt` (additive): takes `base_revision` and a thread `key` and
+  writes Develop's part into the studio as the next revision, checked as any
+  studio write is. Refused for an unknown key, a thread with nothing to adopt,
+  a moved head, a handed-over studio or a board.
 - `twin.imagine_patch_studio` (additive): takes `base_revision` and `changes`
   (1 to 64), each `{op, path, value}` in the style of JSON Patch (RFC 6902):
   `add`, `replace` or `remove` at a JSON Pointer. In a list of objects with an
