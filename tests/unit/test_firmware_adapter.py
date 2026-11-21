@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from tool_registry.tools.firmware.adapter import (
+    CORE_CLOCK_SYMBOL,
     RENODE_BOARDS,
     FirmwareServer,
     FirmwareToolNotAvailableError,
@@ -28,6 +29,7 @@ from tool_registry.tools.firmware.adapter import (
     _suppressions,
     check_memory,
     check_uart,
+    elf_symbol,
     freertos_port,
     missing_package,
     parse_check_report,
@@ -36,6 +38,7 @@ from tool_registry.tools.firmware.adapter import (
     parse_size,
     parse_toolchain,
     renode_script,
+    systick_clock,
 )
 from tool_registry.tools.firmware.config import FirmwareConfig
 
@@ -261,6 +264,55 @@ class TestRenodeScript:
         assert 'emulation RunFor "2"' in lines
         assert "sysbus ReadDoubleWord 0x20000000" in lines
         assert lines[-1] == "quit"
+
+    def test_systick_follows_the_firmware_clock_by_default(self) -> None:
+        """Renode times SysTick from the board model's fixed clock (72 MHz on the
+        F4 Discovery). A 16 MHz firmware then ticked 4.5x too fast: a 250 ms
+        blink toggled 37 times in 2 s, not 8. A watchpoint on SystemCoreClock
+        hands the firmware's own clock to the NVIC."""
+        script = renode_script(
+            "r.repl",
+            "/ws/fw.elf",
+            "sysbus.usart2",
+            "/ws/u.txt",
+            2.0,
+            [],
+            core_clock_address=0x20000008,
+        )
+        lines = script.splitlines()
+        hook = (
+            "sysbus AddWatchpointHook 0x20000008 DoubleWord Write "
+            "\"self.Machine['sysbus.nvic'].Frequency = value\""
+        )
+        assert hook in lines
+        assert lines.index(hook) < lines.index('emulation RunFor "2"')
+
+    def test_a_given_core_clock_is_set_and_wins(self) -> None:
+        script = renode_script(
+            "r.repl",
+            "/ws/fw.elf",
+            "sysbus.usart2",
+            "/ws/u.txt",
+            2.0,
+            [],
+            core_clock_hz=168_000_000,
+            core_clock_address=0x20000008,
+        )
+        assert "sysbus.nvic Frequency 168000000" in script.splitlines()
+        assert "AddWatchpointHook" not in script
+
+    def test_without_a_clock_the_script_is_unchanged(self) -> None:
+        script = renode_script("r.repl", "/ws/fw.elf", "sysbus.usart2", "/ws/u.txt", 2.0, [])
+        assert "nvic" not in script
+
+    def test_the_reported_clock_names_its_source(self) -> None:
+        assert systick_clock(None, 0x20000008, {0x20000008: 16_000_000}) == {
+            "hz": 16_000_000,
+            "source": f"the firmware's {CORE_CLOCK_SYMBOL} (followed through the run)",
+        }
+        assert systick_clock(8_000_000, None, {})["source"] == "core_clock_hz argument"
+        unknown = systick_clock(None, None, {})
+        assert unknown["hz"] is None and "pass core_clock_hz" in unknown["source"]
 
     def test_read_values_follow_their_markers(self) -> None:
         out = "(monitor) MFREAD 0x20000000\n0x00000012\nMFREAD 0x20000004\n0xDEADBEEF\n"
@@ -775,3 +827,21 @@ serial = args[args.index("-serial") + 1].split("file:", 1)[1]
 pathlib.Path(serial).write_text("I (31) boot: ESP-IDF\nI (300) main_task: Calling app_main()\n")
 """,
     )
+
+
+class TestElfSymbol:
+    """A real STM32Cube blink for disco_f407vg, debug info stripped."""
+
+    ELF = FIXTURES / "stm32f4_blink.elf"
+
+    def test_finds_the_core_clock_and_the_hal_tick(self) -> None:
+        assert elf_symbol(self.ELF, "SystemCoreClock") == 0x20000008
+        assert elf_symbol(self.ELF, "uwTick") == 0x20000028
+
+    def test_a_missing_symbol_or_a_non_elf_is_none(self, tmp_path: Path) -> None:
+        assert elf_symbol(self.ELF, "no_such_symbol") is None
+        other = tmp_path / "x.bin"
+        other.write_bytes(b"not an elf")
+        assert elf_symbol(other, "SystemCoreClock") is None
+        other.write_bytes(self.ELF.read_bytes()[:200])
+        assert elf_symbol(other, "SystemCoreClock") is None

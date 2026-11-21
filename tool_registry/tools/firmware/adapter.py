@@ -375,6 +375,75 @@ def check_uart(
 
 _READ_MARK = "MFREAD"
 
+#: The CMSIS variable every STM32Cube (and most CMSIS) firmware keeps the core
+#: clock in. Renode's NVIC times SysTick from a fixed ``systickFrequency`` in the
+#: platform description (72 MHz on the F4 Discovery, 216 MHz on the F7), not from
+#: the RCC registers the firmware programs, so a firmware still on its 16 MHz
+#: reset clock saw every millisecond tick 4.5x too fast: a 250 ms blink toggled
+#: 37 times in 2 s instead of 8.
+CORE_CLOCK_SYMBOL = "SystemCoreClock"
+
+
+def elf_symbol(path: Path, name: str) -> int | None:
+    """The address of global ``name`` in an ELF's ``.symtab``, or ``None``.
+
+    Stdlib only, so the adapter needs no binutils of its own. Handles 32- and
+    64-bit, either byte order. A truncated or malformed file is ``None``: the
+    run then keeps the board model's clock and says so.
+    """
+    import struct
+
+    try:
+        return _elf_symbol(path.read_bytes(), name)
+    except (struct.error, IndexError, ValueError):
+        return None
+
+
+def _elf_symbol(data: bytes, name: str) -> int | None:
+    import struct
+
+    if data[:4] != b"\x7fELF":
+        return None
+    is64 = data[4] == 2
+    end = "<" if data[5] == 1 else ">"
+    if is64:
+        shoff, shentsize, shnum = (
+            struct.unpack_from(end + "Q", data, 0x28)[0],
+            *struct.unpack_from(end + "HH", data, 0x3A),
+        )
+    else:
+        shoff, shentsize, shnum = (
+            struct.unpack_from(end + "I", data, 0x20)[0],
+            *struct.unpack_from(end + "HH", data, 0x2E),
+        )
+    sections = []
+    for i in range(shnum):
+        base = shoff + i * shentsize
+        if is64:
+            _, stype, _, _, off, size, link, _, _, entsize = struct.unpack_from(
+                end + "IIQQQQIIQQ", data, base
+            )
+        else:
+            _, stype, _, _, off, size, link, _, _, entsize = struct.unpack_from(
+                end + "IIIIIIIIII", data, base
+            )
+        sections.append((stype, off, size, link, entsize))
+    want = name.encode()
+    for stype, off, size, link, entsize in sections:
+        if stype != 2 or not entsize:  # SHT_SYMTAB
+            continue
+        str_off = sections[link][1]
+        for i in range(size // entsize):
+            base = off + i * entsize
+            if is64:
+                st_name, _, _, _, value, _ = struct.unpack_from(end + "IBBHQQ", data, base)
+            else:
+                st_name, value, _, _, _, _ = struct.unpack_from(end + "IIIBBH", data, base)
+            start = str_off + st_name
+            if data[start : data.index(b"\0", start)] == want and value:
+                return int(value)
+    return None
+
 
 def renode_script(
     repl: str,
@@ -383,20 +452,56 @@ def renode_script(
     uart_log: str,
     sim_seconds: float,
     reads: list[int],
+    *,
+    core_clock_hz: int | None = None,
+    core_clock_address: int | None = None,
 ) -> str:
-    """A Renode monitor script: load, capture the UART to a file, run, read, quit."""
+    """A Renode monitor script: load, capture the UART to a file, run, read, quit.
+
+    SysTick follows the firmware's clock: a fixed ``core_clock_hz`` when the
+    caller gives one, otherwise a watchpoint on ``SystemCoreClock`` sets the
+    NVIC's frequency each time the firmware writes it (the startup copy of its
+    reset value, then any clock reconfiguration).
+    """
     lines = [
         'mach create "metaforge"',
         f"machine LoadPlatformDescription @{repl}",
         f"sysbus LoadELF @{elf}",
         f"{uart} CreateFileBackend @{uart_log} true",
-        f'emulation RunFor "{sim_seconds:g}"',
     ]
+    if core_clock_hz:
+        lines.append(f"sysbus.nvic Frequency {int(core_clock_hz)}")
+    elif core_clock_address is not None:
+        lines.append(
+            f"sysbus AddWatchpointHook 0x{core_clock_address:08X} DoubleWord Write "
+            "\"self.Machine['sysbus.nvic'].Frequency = value\""
+        )
+    lines.append(f'emulation RunFor "{sim_seconds:g}"')
     for addr in reads:
         lines.append(f'echo "{_READ_MARK} 0x{addr:08X}"')
         lines.append(f"sysbus ReadDoubleWord 0x{addr:08X}")
     lines.append("quit")
     return "\n".join(lines) + "\n"
+
+
+def systick_clock(
+    core_clock_hz: int | None, clock_address: int | None, reads: dict[int, int]
+) -> dict[str, Any]:
+    """Where the emulated SysTick took its clock from, for the result."""
+    if core_clock_hz:
+        return {"hz": core_clock_hz, "source": "core_clock_hz argument"}
+    if clock_address is not None:
+        return {
+            "hz": reads.get(clock_address),
+            "source": f"the firmware's {CORE_CLOCK_SYMBOL} (followed through the run)",
+        }
+    return {
+        "hz": None,
+        "source": (
+            f"the board model's fixed SysTick clock: the ELF has no {CORE_CLOCK_SYMBOL}, "
+            "so millisecond timing may be off; pass core_clock_hz"
+        ),
+    }
 
 
 def parse_renode_reads(stdout: str) -> dict[int, int]:
@@ -974,6 +1079,10 @@ class FirmwareServer(McpToolServer):
         sim_seconds = float(arguments.get("sim_time_s", 2.0))
         if not 0 < sim_seconds <= 600:
             raise ValueError("sim_time_s must be in (0, 600]")
+        clock = arguments.get("core_clock_hz")
+        core_clock_hz = int(clock) if clock is not None else None
+        if core_clock_hz is not None and not 32_768 <= core_clock_hz <= 2_000_000_000:
+            raise ValueError("core_clock_hz must be in 32768..2000000000")
 
         run_dir = Path(self.config.work_dir) / "firmware" / "emulation" / uuid.uuid4().hex[:12]
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -981,7 +1090,9 @@ class FirmwareServer(McpToolServer):
             span.set_attribute("firmware.board", board)
             chip = _esp_chip(board, elf)
             if board in RENODE_BOARDS:
-                result = await self._run_renode(board, elf, run_dir, sim_seconds, memory)
+                result = await self._run_renode(
+                    board, elf, run_dir, sim_seconds, memory, core_clock_hz
+                )
             elif chip in ESP_QEMU:
                 result = await self._run_esp_qemu(chip, elf, run_dir, sim_seconds)
             else:
@@ -1028,6 +1139,7 @@ class FirmwareServer(McpToolServer):
                 "sim_time_s": sim_seconds,
                 "wall_time_s": result.get("wall_time_s"),
                 "assertions": assertions,
+                "systick_clock": result.get("systick_clock"),
                 "uart_log": uart[-8000:],
                 "run_dir": self._ws_rel(run_dir),
             }
@@ -1044,6 +1156,7 @@ class FirmwareServer(McpToolServer):
         run_dir: Path,
         sim_seconds: float,
         memory: list[dict[str, Any]],
+        core_clock_hz: int | None = None,
     ) -> dict[str, Any]:
         renode = shutil.which(self.config.renode)
         if renode is None:
@@ -1052,8 +1165,20 @@ class FirmwareServer(McpToolServer):
         uart_log = run_dir / "uart.txt"
         script = run_dir / "run.resc"
         reads = [_int(m["address"]) for m in memory]
+        clock_address = None if core_clock_hz else elf_symbol(elf, CORE_CLOCK_SYMBOL)
+        if clock_address is not None and clock_address not in reads:
+            reads.append(clock_address)
         script.write_text(
-            renode_script(spec["repl"], str(elf), spec["uart"], str(uart_log), sim_seconds, reads),
+            renode_script(
+                spec["repl"],
+                str(elf),
+                spec["uart"],
+                str(uart_log),
+                sim_seconds,
+                reads,
+                core_clock_hz=core_clock_hz,
+                core_clock_address=clock_address,
+            ),
             encoding="utf-8",
         )
         started = time.monotonic()
@@ -1065,12 +1190,14 @@ class FirmwareServer(McpToolServer):
         elapsed = round(time.monotonic() - started, 3)
         (run_dir / "renode.log").write_text(out, encoding="utf-8")
         uart = uart_log.read_text(errors="replace") if uart_log.exists() else ""
+        values = parse_renode_reads(out)
         result: dict[str, Any] = {
             "emulator": "renode",
             "version": await _tool_version(renode, r"Renode v?([\d.]+)"),
             "uart": uart,
-            "reads": parse_renode_reads(out),
+            "reads": values,
             "wall_time_s": elapsed,
+            "systick_clock": systick_clock(core_clock_hz, clock_address, values),
         }
         if rc == -9:
             result["reason"] = f"Renode exceeded {self.config.max_emulation_time}s and was stopped"
@@ -1414,6 +1541,13 @@ _EMULATE_SCHEMA: dict[str, Any] = {
             "type": "number",
             "default": 2.0,
             "description": "Emulated seconds (Renode); ESP32 QEMU gets ~5x this in wall time",
+        },
+        "core_clock_hz": {
+            "type": "integer",
+            "description": (
+                "Renode only: the core clock SysTick runs from. Default: followed from "
+                "the firmware's SystemCoreClock; give it for firmware without one"
+            ),
         },
         "uart_expect": {
             "type": "array",
