@@ -2621,6 +2621,19 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
 
     _try("release_package_creator", _release_package_creator)
 
+    # twin.create_firmware_scaffold, as the gateway wires it (FORGE-276).
+    # Without it the tool existed only in the gateway's own registry, so an
+    # MCP client (claude.ai, the plugin) was told it isn't on this server.
+    def _firmware_scaffold_creator() -> Any:
+        from api_gateway.twin.document_recorder import make_document_recorder
+        from api_gateway.twin.firmware_scaffold import make_firmware_scaffold_creator
+
+        return make_firmware_scaffold_creator(
+            twin, document_recorder=make_document_recorder(twin, project_backend)
+        )
+
+    _try("firmware_scaffold_creator", _firmware_scaffold_creator)
+
     try:
         from api_gateway.requirement_intelligence.promotion import attempt_promotion
 
