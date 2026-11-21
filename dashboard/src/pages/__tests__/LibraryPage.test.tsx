@@ -317,3 +317,25 @@ describe('LibraryPage: shared and your own (FORGE-876)', () => {
     );
   });
 });
+
+it("names an electronic part's datasheet figures without their unit suffix", async () => {
+  const src = { source_kind: 'datasheet', source_ref: 'AL8862.pdf p.4', needs_review: false };
+  api.listComponents.mockResolvedValue([
+    part('diodes_al8862sp_13', {
+      specs: {
+        output_current_a: { value: 1, unit: 'A', ...src },
+        supply_current_ma: { value: 0.5, unit: 'mA', ...src },
+        switching_frequency_khz: { value: 1000, unit: 'kHz', ...src },
+        power_w: { value: 2, unit: 'W', ...src },
+      },
+    }),
+  ]);
+  api.listMaterials.mockResolvedValue([]);
+  api.listMachines.mockResolvedValue([]);
+  api.listOrganisations.mockResolvedValue([]);
+  render(<LibraryPage />);
+  const detail = await screen.findByTestId('library-detail');
+  for (const name of ['output current', 'supply current', 'switching frequency', 'power']) {
+    expect(within(detail).getByText(name)).toBeInTheDocument();
+  }
+});

@@ -15,7 +15,7 @@ engineering verification. Missing specifications remain unknown.
   part (a single chip, button or connector). Such an entry also carries
   `manufacturer`, `mpn` (the maker's order code), `datasheet` (an http(s) link)
   and `interfaces` (`[{id, bus, dir}]`, `dir` one of `in`, `out`, `bi`); a
-  battery's `capacity_mah` is a typed spec. Entries saved before these fields
+  battery's `capacity_mah` is a typed spec. An electronic part keeps its datasheet figures as typed specs too, one value each and a range as its min and max: `input_voltage_min_v`, `input_voltage_max_v`, `output_voltage_v` (V), `output_current_a` (the maximum continuous output) and `current_limit_a` (a switch or peak current limit) (A), `supply_current_ma` (mA), `switching_frequency_khz` (kHz), `power_w` (W), and `operating_temp_min_c` and `operating_temp_max_c` (C, which may be below zero). A minimum above its maximum is refused. Entries saved before these fields
   load with them empty. The body of a module, battery or electronic part is
   `length_mm` x `width_mm` x `height_mm`: `thickness_mm` (for plates and
   washers) is refused for these families. An older entry that named its height

@@ -282,3 +282,88 @@ def test_a_supplier_without_an_offer_still_registers() -> None:
 def test_a_malformed_offer_is_refused(over: dict[str, Any], message: str) -> None:
     with pytest.raises(CatalogError, match=message):
         SqliteCatalog().register("component", _with_offer(**over))
+
+
+def test_an_electronic_part_keeps_its_datasheet_figures_as_numbers() -> None:
+    """Found registering the AL8862 from claude.ai: its output current, switch current
+    limit and switching frequency had no spec name, so they went into the notes as text
+    and no tool could use them."""
+    source = {
+        "source_kind": "datasheet",
+        "source_ref": "https://www.diodes.com/assets/Datasheets/AL8862.pdf p.4",
+    }
+    specs = {
+        "input_voltage_min_v": {"value": 5, "unit": "V", **source},
+        "input_voltage_max_v": {"value": 60, "unit": "V", **source},
+        "output_current_a": {"value": 1, "unit": "A", **source},
+        "current_limit_a": {"value": 2.2, "unit": "A", **source},
+        "switching_frequency_khz": {"value": 1000, "unit": "kHz", **source},
+        "operating_temp_min_c": {"value": -40, "unit": "C", **source},
+        "operating_temp_max_c": {"value": 125, "unit": "C", **source},
+    }
+    entry = (
+        SqliteCatalog()
+        .register(
+            "component",
+            {
+                "name": "diodes_al8862sp_13",
+                "family": "electronic",
+                "origin": "purchased",
+                "manufacturer": "Diodes Incorporated",
+                "mpn": "AL8862SP-13",
+                "specs": specs,
+            },
+            by="test",
+        )
+        .as_dict()
+    )
+    assert entry["specs"]["output_current_a"]["value"] == 1
+    assert entry["specs"]["switching_frequency_khz"]["unit"] == "kHz"
+    assert entry["specs"]["operating_temp_min_c"]["value"] == -40
+
+
+def test_an_electronic_spec_in_the_wrong_unit_is_refused() -> None:
+    import pytest
+
+    from twin_core.library.catalog import CatalogError
+
+    with pytest.raises(CatalogError, match="output_current_a is in A"):
+        SqliteCatalog().register(
+            "component",
+            {
+                "name": "some_driver",
+                "family": "electronic",
+                "origin": "purchased",
+                "specs": {
+                    "output_current_a": {
+                        "value": 1000,
+                        "unit": "mA",
+                        "source_kind": "datasheet",
+                        "source_ref": "d",
+                    }
+                },
+            },
+            by="test",
+        )
+
+
+def test_an_electronic_range_must_run_from_low_to_high() -> None:
+    import pytest
+
+    from twin_core.library.catalog import CatalogError
+
+    src = {"source_kind": "datasheet", "source_ref": "d p.4"}
+    with pytest.raises(CatalogError, match="input_voltage_min_v .* is above input_voltage_max_v"):
+        SqliteCatalog().register(
+            "component",
+            {
+                "name": "some_regulator",
+                "family": "electronic",
+                "origin": "purchased",
+                "specs": {
+                    "input_voltage_min_v": {"value": 60, "unit": "V", **src},
+                    "input_voltage_max_v": {"value": 5, "unit": "V", **src},
+                },
+            },
+            by="test",
+        )
