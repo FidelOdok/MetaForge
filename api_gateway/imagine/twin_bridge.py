@@ -135,7 +135,7 @@ class TwinBridge:
         return ref_of(result, "constraint_set")
 
     async def record_candidates(
-        self, project_id: str, chosen: dict[str, dict[str, Any]], reason: str
+        self, project_id: str, chosen: list[tuple[str, dict[str, Any]]], reason: str
     ) -> list[str]:
         """Seed Develop with the studio's chosen bought parts, as candidates (FORGE-903).
 
@@ -159,7 +159,7 @@ class TwinBridge:
             thread = specs.get("thread") if isinstance(specs.get("thread"), dict) else {}
             taken.update(str(p) for p in (thread or {}).get("studio_parts") or [])
         groups: dict[str, list[tuple[str, dict[str, Any]]]] = {}
-        for role, part in chosen.items():
+        for role, part in chosen:
             pid = str(part.get("id") or "")
             maker = str(part.get("manufacturer") or "").strip()
             key = mpn_key(part.get("mpn"))

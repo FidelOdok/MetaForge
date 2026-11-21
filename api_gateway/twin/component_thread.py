@@ -137,21 +137,21 @@ def library_for(mpn: str, entries: list[dict[str, Any]]) -> dict[str, Any] | Non
 
 def studio_parts_of(state: dict[str, Any]) -> list[StudioPart]:
     """The studio's parts, each marked chosen when the studio picks it for its role."""
-    from api_gateway.imagine.service import _chosen_parts, _parts
+    from api_gateway.imagine.service import _chosen_parts, _parts, _parts_in_use
 
     config = state.get("config") or {}
     cols = state.get("collections") or {}
     parts = _parts(config)
     try:
-        picks = _chosen_parts(config, cols)
-        chosen = {str(p.get("id")) for p in picks.values() if p}
-        decided = set(picks)
+        chosen = {str(p.get("id")) for _, p in _parts_in_use(config, cols)}
+        decided = set(_chosen_parts(config, cols))
     except Exception:  # noqa: BLE001 - a studio that cannot say treats every part as chosen
         chosen, decided = set(parts), set()
 
     def is_chosen(pid: str, p: dict[str, Any]) -> bool:
-        # A part is an alternative only where the studio chooses one part for its role;
-        # a part whose role the studio does not choose for (an adopted "other") is in.
+        # A part is an alternative only where the studio chooses one part for its role
+        # and the form does not draw it; a part whose role the studio does not choose
+        # for (an adopted "other") is in.
         if p.get("excluded"):
             return False
         return pid in chosen or str(p.get("role") or "") not in decided

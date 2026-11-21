@@ -579,3 +579,57 @@ async def test_a_part_with_no_ratings_says_which_requirements_wait_on_it(catalog
     )
     check = (await gather_threads(twin, PID))["threads"][0]["check"]
     assert check == {"status": "unchecked", "violates": [], "margins": 0, "unchecked": 1}
+
+
+def test_a_part_develop_put_on_a_board_is_in_develop_without_a_selection() -> None:
+    parts = [StudioPart("esp", "Wi-Fi module", "fn:e_wifi", "ESP32-C3-WROOM-02", "Espressif")]
+    t = build_threads(
+        studio_parts=parts,
+        selections=[],
+        board_parts=[BoardPart("Controller board", "U1", "ESP32-C3-WROOM-02")],
+    )[0]
+    assert t["relation"] == "same"
+    assert t["develop"]["status"] == "on_board"
+    assert t["develop"]["boards"] == [{"board": "Controller board", "ref": "U1"}]
+
+
+def test_board_refs_with_no_order_code_are_listed_under_their_board() -> None:
+    threads = build_threads(
+        studio_parts=[],
+        selections=[],
+        board_parts=[
+            BoardPart("LED board", "D1", ""),
+            BoardPart("LED board", "J1", ""),
+            BoardPart("Controller board", "J4", ""),
+        ],
+        boards=["LED board", "Controller board"],
+        make_lines=[MakeLine("bom", "bom", "Emitter", 1, ["D1"], board="LED board")],
+    )
+    assert [t["key"] for t in threads] == ["board:LED board", "board:Controller board"]
+    led = threads[0]
+    assert [b["ref"] for b in led["develop"]["boards"]] == [None, "D1", "J1"]
+    assert led["make"]["status"] == "in_bom"
+
+
+def test_a_part_the_form_draws_is_in_use_though_its_role_picks_another() -> None:
+    from api_gateway.twin.component_thread import studio_parts_of
+
+    def part(pid: str) -> dict[str, Any]:
+        return {
+            "id": pid,
+            "role": "fn:e_ldrv",
+            "name": pid,
+            "mpn": "AL8862",
+            "manufacturer": "Diodes",
+        }
+
+    config = {
+        "functions": ["e_ldrv"],
+        "context": {
+            "components": {"parts": [part("drv-warm"), part("drv-cool"), part("drv-spare")]},
+            "options": {"decisions": [{"id": "d", "kind": "part", "pick": "drv-warm"}]},
+        },
+        "form": {"authored": {"parts": [{"id": "a", "component_ref": "drv-cool"}]}},
+    }
+    by_id = {p.id: p.chosen for p in studio_parts_of({"config": config, "collections": {}})}
+    assert by_id == {"drv-warm": True, "drv-cool": True, "drv-spare": False}

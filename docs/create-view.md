@@ -1031,6 +1031,11 @@ the selection, else its library entry) against those limits. Make shows a select
 that is missing from its board's BOM as *Missing from its board's BOM*, and a release
 package leaves candidates out.
 
+A studio part counts as in use when the studio picks it for its role or the form draws
+it, so two LED channels are two drivers. A part Develop has placed on a board it designed
+(the system schematic names its order code) counts as in Develop even before a selection is
+recorded. References with no order code are listed under their board's own row.
+
 Develop may add parts Imagine never named. A part on a board Develop designed that fills
 no studio role and is not a bought module (a regulator, a capacitor) is marked **Board
 part**: it belongs to the board, is never offered to Imagine and does not count as

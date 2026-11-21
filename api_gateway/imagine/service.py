@@ -396,6 +396,34 @@ def _chosen_parts(
     return chosen
 
 
+def _form_refs(config: dict[str, Any]) -> set[str]:
+    """The context parts the authored form draws (its component parts' ``component_ref``)."""
+    form = config.get("form") if isinstance(config.get("form"), dict) else {}
+    authored = (form or {}).get("authored")
+    parts = authored.get("parts") if isinstance(authored, dict) else None
+    return {
+        str(p["component_ref"])
+        for p in parts or []
+        if isinstance(p, dict) and isinstance(p.get("component_ref"), str)
+    }
+
+
+def _parts_in_use(
+    config: dict[str, Any], collections: dict[str, Any]
+) -> list[tuple[str, dict[str, Any]]]:
+    """Every part the product uses: the one chosen for each role, and every part the form
+    draws (two LED channels are two drivers, though a role picks one) (FORGE-903)."""
+    parts = _parts(config)
+    used: dict[str, tuple[str, dict[str, Any]]] = {
+        str(p["id"]): (role, p) for role, p in _chosen_parts(config, collections).items() if p
+    }
+    for pid in sorted(_form_refs(config)):
+        p = parts.get(pid)
+        if p and not p.get("excluded") and pid not in used:
+            used[pid] = (str(p.get("role") or ""), p)
+    return list(used.values())
+
+
 def _machine_library() -> Any:
     """The gateway's machine library (the studio's machines come from it, FORGE-879)."""
     from api_gateway.library.routes import get_machine_library
@@ -2259,7 +2287,7 @@ class ImagineService:
         # FORGE-903: Develop starts from the concept's parts, as candidates it confirms
         # or replaces, each already linked to the studio parts it fills.
         created += await self.bridge.record_candidates(
-            project_id, chosen, f"handover of {head.ref}"
+            project_id, _parts_in_use(config, cols), f"handover of {head.ref}"
         )
 
         # Proposed interface contracts: never overwrite one Develop already holds.

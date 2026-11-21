@@ -142,11 +142,22 @@ def latest_selections(selections: Iterable[Selection]) -> list[Selection]:
     return list(newest.values())
 
 
-def _relation(part: StudioPart | None, sels: list[Selection], how: str) -> str:
+def _relation(
+    part: StudioPart | None,
+    sels: list[Selection],
+    how: str,
+    placed: list[str] | None = None,
+) -> str:
+    """How Imagine and Develop compare. ``placed`` are the order codes of the board
+    parts Develop put this on: a part on a board Develop designed is in Develop even
+    before anyone records a selection for it."""
     if part is None:
         return "develop_only"
     if not sels:
-        return "imagine_only"
+        codes = [c for c in placed or [] if c]
+        if not codes:
+            return "imagine_only"
+        return "same" if any(mpn_key(c) == mpn_key(part.mpn) for c in codes) else "refined"
     mpns = {mpn_key(s.mpn) for s in sels}
     if mpn_key(part.mpn) in mpns:
         if any(
@@ -226,7 +237,7 @@ def build_threads(
         for i, bp in enumerate(board_parts):
             if any(same_family(bp.mpn, m) for m in mpns if m):
                 used_board_parts.add(i)
-                out.append({"board": bp.board, "ref": bp.ref})
+                out.append({"board": bp.board, "ref": bp.ref, "mpn": bp.mpn})
         return out
 
     def make_of(mpns: list[str], on_boards: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -257,7 +268,7 @@ def build_threads(
         violates = sorted({v for s in psels for v in s.violates})
         checked = sum(s.margins for s in psels)
         unchecked = sum(s.unchecked for s in psels)
-        relation = _relation(part, psels, how)
+        relation = _relation(part, psels, how, [b.get("mpn") or "" for b in on_boards])
         selected = [s for s in psels if s.selection == "selected"]
         bom = [ln for ln in lines if ln["kind"] == "bom"]
         ordered = [ln for ln in lines if ln["kind"] == "procurement"]
@@ -294,7 +305,11 @@ def build_threads(
                 else {"status": "absent"}
             ),
             "develop": {
-                "status": "selected" if selected else ("candidate" if psels else "absent"),
+                "status": (
+                    "selected"
+                    if selected
+                    else ("candidate" if psels else ("on_board" if on_boards else "absent"))
+                ),
                 "linked_by": how or None,
                 "selections": [
                     {
@@ -307,7 +322,7 @@ def build_threads(
                     }
                     for s in psels
                 ],
-                "boards": on_boards,
+                "boards": [{"board": b["board"], "ref": b["ref"]} for b in on_boards],
             },
             "check": {
                 "status": (
@@ -366,11 +381,17 @@ def build_threads(
             )
         )
     # Board parts no selection or studio part explains, grouped by order code.
+    # A board part with no order code is only a reference on its board: it is listed
+    # under the board's own row, not as a component of its own.
     extra: dict[str, list[BoardPart]] = {}
+    unnamed: dict[str, list[BoardPart]] = {}
     for i, bp in enumerate(board_parts):
         if i in used_board_parts:
             continue
-        extra.setdefault(mpn_key(bp.mpn) or f"{bp.board}:{bp.ref}", []).append(bp)
+        if not mpn_key(bp.mpn):
+            unnamed.setdefault(bp.board, []).append(bp)
+            continue
+        extra.setdefault(mpn_key(bp.mpn), []).append(bp)
     for key, bps in extra.items():
         first = bps[0]
         on_boards = [{"board": b.board, "ref": b.ref} for b in bps]
@@ -403,7 +424,9 @@ def build_threads(
         )
     # The boards themselves: designed in Develop, made in Make.
     for board in boards or []:
-        lines = [
+        refs = unnamed.get(board, [])
+        ref_lines = make_of([], [{"board": board, "ref": b.ref} for b in refs]) if refs else []
+        orders = [
             {
                 "record": ln.record,
                 "kind": ln.kind,
@@ -411,9 +434,10 @@ def build_threads(
                 "quantity": ln.quantity,
                 "refs": ln.refs,
             }
-            for i, ln in enumerate(make_lines)
+            for ln in make_lines
             if ln.kind == "procurement" and board.lower() in (ln.part + " " + ln.text).lower()
         ]
+        lines = [*orders, *ref_lines]
         threads.append(
             {
                 "key": f"board:{board}",
@@ -426,10 +450,16 @@ def build_threads(
                     "status": "designed",
                     "linked_by": None,
                     "selections": [],
-                    "boards": [{"board": board, "ref": None}],
+                    "boards": [
+                        {"board": board, "ref": None},
+                        *({"board": board, "ref": b.ref} for b in refs),
+                    ],
                 },
                 "check": {"status": "absent", "violates": [], "margins": 0, "unchecked": 0},
-                "make": {"status": "ordered" if lines else "absent", "lines": lines},
+                "make": {
+                    "status": "ordered" if orders else ("in_bom" if ref_lines else "absent"),
+                    "lines": lines,
+                },
                 # A board is designed, not bought: the studio's parts are sourced
                 # bought parts, so a board is shown to Imagine, never written into it.
                 "adopt": None,

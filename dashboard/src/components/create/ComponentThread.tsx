@@ -50,8 +50,13 @@ function developCell(t: ComponentThread): string {
     if (sel.library?.name) parts.push(`${sel.library.shared ? 'shared' : 'your'} library ${sel.library.name}`);
   } else if (d.status === 'designed') {
     parts.push('Board designed');
+  } else if (d.status === 'on_board') {
+    parts.push('On a board, no part recorded');
   }
-  const refs = d.boards.filter((b) => b.ref).map((b) => `${b.board} ${b.ref}`);
+  // A board's own row lists its references alone; a part's says which board too.
+  const refs = d.boards
+    .filter((b) => b.ref)
+    .map((b) => (d.status === 'designed' ? `${b.ref}` : `${b.board} ${b.ref}`));
   if (refs.length) parts.push(refs.join(', '));
   return parts.length ? parts.join(' · ') : 'Nothing chosen yet';
 }
