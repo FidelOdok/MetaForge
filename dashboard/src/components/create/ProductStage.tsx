@@ -30,16 +30,27 @@ export function wpTypeOf(node: TwinNode): string {
  */
 const SKETCH_TYPES = new Set(['sketch_strokes', 'generated_sketch']);
 
+/**
+ * One board's layout (its design files name the board it belongs to) is a
+ * part of the product, shown in Develop's PCB view, never the product model.
+ * A layout with no board, an electronics-only product, still is.
+ */
+export function isBoardSheet(node: TwinNode): boolean {
+  const t = wpTypeOf(node);
+  return (t === 'pcb_layout' || t === 'pcb') && Boolean(node.designFiles?.board);
+}
+
 export function isVisual(node: TwinNode): boolean {
   const t = wpTypeOf(node);
   if (SKETCH_TYPES.has(t)) return false;
+  if (isBoardSheet(node)) return false;
   if (ENGINEERING_TYPES.has(t) || CONCEPT_TYPES.has(t)) return true;
   const { engine } = previewEngineFor(node);
   return is3dEngine(engine) || engine === 'image';
 }
 
 export function isEngineering(node: TwinNode): boolean {
-  return ENGINEERING_TYPES.has(wpTypeOf(node));
+  return ENGINEERING_TYPES.has(wpTypeOf(node)) && !isBoardSheet(node);
 }
 
 /**

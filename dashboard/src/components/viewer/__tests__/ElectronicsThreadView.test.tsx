@@ -3,6 +3,18 @@ import { render, screen, fireEvent, within } from '../../../test/test-utils';
 import type { TwinNode, TwinRelationship } from '../../../types/twin';
 import { ElectronicsThreadView, currentOf, isLinked, linkState } from '../ElectronicsThreadView';
 
+// AuthedImg has its own tests (it loads the file with the token); here it is
+// a plain <img> so these tests can check which file each view asks for.
+vi.mock('../../shared/AuthedImg', () => ({
+  AuthedImg: (props: Record<string, unknown>) => <img {...props} />,
+  AuthedFileLink: ({ src, children, ...rest }: { src: string; children: import('react').ReactNode } & Record<string, unknown>) => (
+    <a href={src} {...rest}>
+      {children}
+    </a>
+  ),
+}));
+
+
 vi.mock('../../../api/endpoints/twin', () => ({
   nodeNamedFileUrl: (id: string, path: string) => `/files/${id}/${path}`,
 }));

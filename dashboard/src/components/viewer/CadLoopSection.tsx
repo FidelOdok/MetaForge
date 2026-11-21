@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { AuthedImg } from '../shared/AuthedImg';
 import {
   STOP_TEXT,
   cadLoopKeys,
@@ -59,7 +60,7 @@ function IterationDetail({ run, it, previous }: { run: LoopRun; it: LoopIteratio
           {it.render.views
             .filter((v) => v.file)
             .map((v) => (
-              <img
+              <AuthedImg
                 key={v.view}
                 src={loopImageUrl(run.node_id, v.file!)}
                 alt={`${v.label ?? v.view}, iteration ${it.n}`}

@@ -1,5 +1,6 @@
 import { CircuitBoard } from 'lucide-react';
 import { nodeNamedFileUrl } from '../../api/endpoints/twin';
+import { AuthedImg } from '../shared/AuthedImg';
 import type { TwinNode, TwinRelationship } from '../../types/twin';
 import { iconForNode } from '../../utils/wp-icons';
 
@@ -149,7 +150,7 @@ function StageCard({
         return (
           <button key={n.id} type="button" onClick={() => onSelect(n.id)} className="tw-thread-node">
             {preview ? (
-              <img src={nodeNamedFileUrl(n.id, preview)} alt={`${n.name} preview`} />
+              <AuthedImg src={nodeNamedFileUrl(n.id, preview)} alt={`${n.name} preview`} />
             ) : (
               <span className="material-symbols-outlined">{iconForNode(n)}</span>
             )}

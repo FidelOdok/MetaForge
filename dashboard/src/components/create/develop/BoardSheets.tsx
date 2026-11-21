@@ -1,5 +1,6 @@
 import { nodeNamedFileUrl } from '../../../api/endpoints/twin';
 import type { TwinNode } from '../../../types/twin';
+import { AuthedImg } from '../../shared/AuthedImg';
 import { wpTypeOf } from '../ProductStage';
 
 export type BoardSheet = 'schematic' | 'pcb';
@@ -53,7 +54,7 @@ export function BoardSheets({ nodes, board, sheet, onAsk }: BoardSheetsProps) {
             : node.designFiles?.previewError || `No preview was made for ${node.name}.`}
         </p>
       ) : (
-        previews.map((p) => <img key={p} src={nodeNamedFileUrl(node.id, p)} alt={`${node.name}: ${p}`} />)
+        previews.map((p) => <AuthedImg key={p} src={nodeNamedFileUrl(node.id, p)} alt={`${node.name}: ${p}`} />)
       )}
     </div>
   );
