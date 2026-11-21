@@ -1229,8 +1229,11 @@ body.cv-resizing {
 .cv-system { display: flex; flex-direction: column; justify-content: center; }
 .cv-dev-side { max-height: calc(100dvh - 392px); }
 /* One sheet fits the view whole; several scroll, each at full width. */
-.cv-board-sheets:has(> img:only-child) { display: flex; align-items: center; justify-content: center; }
-.cv-board-sheets > img:only-child { width: 100%; height: 100%; object-fit: contain; }
+/* One sheet fits the view, also under the board's Layout / 3D switch. */
+.cv-board-sheets:has(> img:only-of-type) { display: flex; flex-direction: column; align-items: stretch; }
+.cv-board-sheets > img:only-of-type { flex: 1; min-height: 0; width: 100%; height: 100%; object-fit: contain; }
+.cv-board-sheets:has(> .cv-board-3d) { display: flex; flex-direction: column; }
+.cv-board-sheets > .cv-board-3d { flex: 1; min-height: 0; height: auto; }
 
 /* A board's Layout / 3D switch, and the populated board in 3D. */
 .cv-board-view { align-self: flex-start; margin-bottom: 8px; }

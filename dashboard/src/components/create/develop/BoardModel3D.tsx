@@ -4,17 +4,17 @@ import { Bounds, OrbitControls, useGLTF } from '@react-three/drei';
 import { useAuthedObjectUrl } from '../../shared/AuthedImg';
 import { ErrorBoundary } from '../../ErrorBoundary';
 import { VIEWER_COLOR_MANAGEMENT, VIEWER_GPU_PREFERENCE } from '../../viewer/viewerColor';
-import { decideUpAxis, uprightRotationX, type GltfAssetInfo } from '../../../lib/up-axis';
 
+/**
+ * kicad-cli writes the GLB through OpenCASCADE's glTF writer, which already
+ * turns KiCad's Z-up board into glTF's Y-up: the board lies flat, components
+ * on top. Never rotate it again. (decideUpAxis reads "Open CASCADE" as a
+ * Z-up CAD generator and stood the board on its edge.)
+ */
 function Board({ url }: { url: string }) {
-  const { scene, asset } = useGLTF(url);
+  const { scene } = useGLTF(url);
   const copy = useMemo(() => scene.clone(true), [scene]);
-  const { axis } = decideUpAxis({ asset: asset as GltfAssetInfo | undefined, scene, format: 'glb', source: 'file' });
-  return (
-    <group rotation={[uprightRotationX(axis), 0, 0]}>
-      <primitive object={copy} />
-    </group>
-  );
+  return <primitive object={copy} />;
 }
 
 /**
