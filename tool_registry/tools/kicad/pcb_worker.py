@@ -790,7 +790,7 @@ def strip_routing(board: Any) -> dict[str, Any]:
     tracks = list(board.GetTracks())
     vias = sum(1 for t in tracks if t.GetClass() == "PCB_VIA")
     for t in tracks:
-        board.Remove(t)
+        board.Delete(t)
     pours = [
         z
         for z in list(board.Zones())
@@ -798,7 +798,7 @@ def strip_routing(board: Any) -> dict[str, Any]:
     ]
     nets = sorted({z.GetNetname() for z in pours if z.GetNetname()})
     for z in pours:
-        board.Remove(z)
+        board.Delete(z)
     return {"tracks": len(tracks) - vias, "vias": vias, "pours": len(pours), "pour_nets": nets}
 
 
@@ -834,7 +834,7 @@ def edit(req: dict[str, Any]) -> dict[str, Any]:
             fp = board.FindFootprintByReference(ref) if ref else None
             drill = op.get("drill_mm")
             if fp is not None and drill is not None and _hole_drill(fp) != float(drill):
-                board.Remove(fp)
+                board.Delete(fp)
                 fp = None
             if fp is None:
                 taken = {f.GetReference() for f in board.GetFootprints()}
@@ -853,7 +853,7 @@ def edit(req: dict[str, Any]) -> dict[str, Any]:
         if kind == "remove_mounting_hole":
             if _hole_drill(fp) is None or any(pad.GetNetname() for pad in fp.Pads()):
                 return {"ok": False, "errors": [f"{ref} is not a mounting hole"]}
-            board.Remove(fp)
+            board.Delete(fp)
             applied.append({"op": kind, "ref": ref})
             continue
         touched.add(ref)
