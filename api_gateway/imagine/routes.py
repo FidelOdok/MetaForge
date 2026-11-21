@@ -362,10 +362,10 @@ async def post_adopt(project_id: str, body: AdoptPost, request: Request) -> Stud
 
     async def run() -> StudioResponse:
         data = await _threads(project_id)
-        thread = next((t for t in data["threads"] if t["key"] == body.key), None)
+        thread = next((t for t in data["threads"] if t["key"] == body.thread), None)
         if thread is None:
             count("adopt", "refused")
-            raise ImagineError(f"No component thread {body.key}.", 404)
+            raise ImagineError(f"No component thread {body.thread}.", 404)
         adopt = thread.get("adopt")
         if not adopt:
             count("adopt", "refused")
@@ -388,7 +388,7 @@ async def post_adopt(project_id: str, body: AdoptPost, request: Request) -> Stud
             raise
         except Exception:
             count("adopt", "failed")
-            logger.error("component_adopt_failed", project_id=project_id, key=body.key)
+            logger.error("component_adopt_failed", project_id=project_id, key=body.thread)
             raise
         count("adopt", "ok")
         return out

@@ -633,3 +633,10 @@ def test_a_part_the_form_draws_is_in_use_though_its_role_picks_another() -> None
     }
     by_id = {p.id: p.chosen for p in studio_parts_of({"config": config, "collections": {}})}
     assert by_id == {"drv-warm": True, "drv-cool": True, "drv-spare": False}
+
+
+def test_the_approval_prompt_shows_which_component_is_adopted() -> None:
+    from mcp_core.elicitation import _summarise_arguments
+
+    lines = _summarise_arguments({"base_revision": 6, "thread": "part:al8862-cool"})
+    assert "  thread: part:al8862-cool" in lines

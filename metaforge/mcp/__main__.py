@@ -3044,6 +3044,31 @@ def _install_gateway_machine_view(env: Any = None) -> bool:
     return True
 
 
+def _install_gateway_catalog_view(env: Any = None) -> bool:
+    """Make this sidecar process's library catalog the gateway's (read-only, FORGE-903).
+
+    Components, materials, processes and organisations were read from an empty
+    in-memory catalog here, so the Imagine studio could not size a part from its
+    library entry and the component thread found no entry for a part, though the
+    gateway had one. Called once by ``main`` (see ``_install_gateway_machine_view``
+    for why never by ``_bootstrap``). ``True`` when installed.
+    """
+    source = os.environ if env is None else env
+    gateway_url = (source.get("METAFORGE_GATEWAY_URL") or "").strip()
+    if not gateway_url:
+        return False
+    try:
+        from api_gateway.library.catalog_routes import init_catalog
+        from metaforge.mcp.remote_library import GatewayCatalogView
+
+        init_catalog(GatewayCatalogView(gateway_url))  # type: ignore[arg-type]
+    except Exception as exc:  # noqa: BLE001 - reported, never fatal
+        logger.error("mcp_catalog_view_unavailable", error=str(exc))
+        return False
+    logger.info("mcp_catalog_view_installed", gateway=gateway_url)
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     args = _parse_args(raw_argv)
@@ -3057,6 +3082,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             return _run_with_reload(raw_argv)
     _install_gateway_machine_view()
+    _install_gateway_catalog_view()
 
     # Bootstrap and stdio loop must share one asyncio event loop because
     # remote adapters open aiohttp ClientSessions during bootstrap that

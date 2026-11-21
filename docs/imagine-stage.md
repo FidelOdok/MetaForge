@@ -154,7 +154,7 @@ gateway's middleware, like every other route.
 | POST | `/validate` | `{config?, revision?, scope?, gates?}` | the same report as a dry run; 404 with no studio, 409 for a `config` on a handed-over studio, 422 for a non-head `revision`, an unknown `scope` ref (`bad_refs`) or an invalid config (the body is the report) |
 | POST | `/handover` | `{op_id}` | 409 with `{detail: {message, items}}` (the whole checklist, the blocking ones `missing`) when not ready; otherwise `{handed_over: true, revision, created: [refs]}` |
 | POST | `/rework` | `{op_id, reason}` | the studio, the same shape as `GET /studio`, on its new revision, with `stale: [refs]` |
-| POST | `/adopt` | `{base_revision, key}` | the studio on its new revision, with Develop's part for component thread `key` taken in; 404 for an unknown thread, 409 when the thread has nothing to adopt, the studio moved past `base_revision` or is handed over, 400 for a board |
+| POST | `/adopt` | `{base_revision, thread}` | the studio on its new revision, with Develop's part for component thread `thread` taken in; 404 for an unknown thread, 409 when the thread has nothing to adopt, the studio moved past `base_revision` or is handed over, 400 for a board |
 
 `collections` is the twin-backed state of each browser collection, keyed by
 document id (`choices`, `scenarios`, `contextEdits`, `assumptions`,
