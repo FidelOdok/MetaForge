@@ -221,9 +221,11 @@ class TestTheHeldCallsPromptStaysOpen:
             decided = await http.post(f"{LIST}/{approval_id}", json={"decision": "approve"})
             assert decided.status_code == 200
             await _until(lambda: client.withdrawn)
+            # The prompt is withdrawn, then the standing entry is dropped: on a
+            # busy CI runner the second can land a moment after the first.
+            await _until(lambda: not server._standing.is_open(str(SESSION), approval_id))  # noqa: SLF001
 
         assert client.withdrawn == ["approval decided elsewhere"]
-        assert not server._standing.is_open(str(SESSION), approval_id)  # noqa: SLF001
         assert ran == []
 
     async def test_answering_it_late_records_the_decision_and_the_retry_runs_once(
