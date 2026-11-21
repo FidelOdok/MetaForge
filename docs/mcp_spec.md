@@ -1447,7 +1447,7 @@ per-product formgraph config for Create's Imagine stage
   one object per stage (`imagine`, `develop`, `check`, `make`); `adopt` is set
   when Develop's part can be taken into the studio. See
   [Components across the stages](create-view.md#components-across-the-stages).
-- `twin.imagine_adopt` (additive): takes `base_revision` and a thread `key` and
+- `twin.imagine_adopt` (additive): takes `base_revision` and a thread key as `thread` and
   writes Develop's part into the studio as the next revision, checked as any
   studio write is. Refused for an unknown key, a thread with nothing to adopt,
   a moved head, a handed-over studio or a board.

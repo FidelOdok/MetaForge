@@ -82,14 +82,19 @@ def library_components() -> list[dict[str, Any]]:
     out = []
     for entry in catalog.list("component"):
         data = entry.as_dict() if hasattr(entry, "as_dict") else dict(entry)
-        owner = catalog.owner_of(str(data.get("id"))) if hasattr(catalog, "owner_of") else ""
+        if isinstance(data.get("shared"), bool):
+            # The gateway's view (the MCP sidecar) says so itself.
+            shared = bool(data["shared"])
+        else:
+            owner = catalog.owner_of(str(data.get("id"))) if hasattr(catalog, "owner_of") else ""
+            shared = not owner
         out.append(
             {
                 "id": data.get("id"),
                 "name": data.get("name"),
                 "mpn": data.get("mpn") or "",
                 "manufacturer": data.get("manufacturer") or data.get("manufacturer_org") or "",
-                "shared": not owner,
+                "shared": shared,
             }
         )
     return out
@@ -108,7 +113,7 @@ def library_specs(entry_id: str) -> dict[str, Any]:
     from api_gateway.library.catalog_routes import get_catalog
 
     try:
-        data = get_catalog().get(entry_id).as_dict()
+        data = get_catalog().get(entry_id, "component").as_dict()
     except Exception:  # noqa: BLE001 - an entry that cannot be read has no specs
         return {}
     out: dict[str, Any] = {}

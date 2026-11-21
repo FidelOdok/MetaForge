@@ -9654,7 +9654,7 @@ class TwinServer(McpToolServer):
                     "Take what Develop decided for one component into the Imagine studio, "
                     "so the concept stays true to the design: the studio part gets "
                     "Develop's order code, maker and library entry (and is then drawn from "
-                    "the entry's model), or a part only Develop has is added. key is a "
+                    "the entry's model), or a part only Develop has is added. thread is a "
                     "thread key from twin.component_thread; base_revision is the studio "
                     "revision that read returned. Refused when the studio moved on, is "
                     "handed over (reopen it first) or the thread has nothing to adopt; a "
@@ -9666,9 +9666,13 @@ class TwinServer(McpToolServer):
                     "properties": {
                         **project,
                         "base_revision": {"type": "integer", "minimum": 1},
-                        "key": {"type": "string", "minLength": 1},
+                        "thread": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "The thread's key, e.g. part:al8862-warm.",
+                        },
                     },
-                    "required": ["base_revision", "key"],
+                    "required": ["base_revision", "thread"],
                 },
                 output_schema=studio_out,
                 phase=1,
@@ -10296,9 +10300,11 @@ class TwinServer(McpToolServer):
         tool = "twin.imagine_adopt"
         pid = self._imagine_project(arguments, tool)
         base = arguments.get("base_revision")
-        key = str(arguments.get("key") or "").strip()
+        # Named ``thread``, not ``key``: an approval prompt hides any argument whose
+        # name looks like a secret, and the person must see which part is adopted.
+        key = str(arguments.get("thread") or "").strip()
         if isinstance(base, bool) or not isinstance(base, int) or not key:
-            raise ValueError(f"{tool}: 'base_revision' (an integer) and 'key' are required")
+            raise ValueError(f"{tool}: 'base_revision' (an integer) and 'thread' are required")
         data = await gather_threads(self._twin, pid, studio_service=self._imagine_studio)
         thread = next((t for t in data["threads"] if t["key"] == key), None)
         if thread is None:

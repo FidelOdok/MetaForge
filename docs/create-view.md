@@ -1177,7 +1177,7 @@ loop can be shown without a gateway.
 
 The component thread is under the twin: `GET /v1/twin/projects/{project_id}/components/thread`
 returns `{project_id, studio, threads, summary, warnings}`, and
-`POST /v1/twin/projects/{project_id}/imagine/adopt {base_revision, key}` takes one
+`POST /v1/twin/projects/{project_id}/imagine/adopt {base_revision, thread}` takes one
 thread's part into the studio (see [Components across the stages](#components-across-the-stages)).
 Everything else is under `/v1/create/{project_id}`. Every write accepts `expected_version`
 and answers `409` with the current record when it is stale. Writes return the

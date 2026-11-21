@@ -104,7 +104,7 @@ export async function adoptComponent(
 ): Promise<ImagineStudio> {
   const { data } = await apiClient.post<ImagineStudio>(`/twin/projects/${enc(projectId)}/imagine/adopt`, {
     base_revision: baseRevision,
-    key,
+    thread: key,
   });
   return data;
 }

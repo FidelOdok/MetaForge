@@ -129,17 +129,17 @@
             "title": "Base Revision",
             "type": "integer"
           },
-          "key": {
+          "thread": {
             "description": "The component thread's key, from GET .../components/thread.",
             "maxLength": 300,
             "minLength": 1,
-            "title": "Key",
+            "title": "Thread",
             "type": "string"
           }
         },
         "required": [
           "base_revision",
-          "key"
+          "thread"
         ],
         "title": "AdoptPost",
         "type": "object"

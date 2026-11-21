@@ -18,7 +18,12 @@ from metaforge.mcp.gateway_auth import gateway_auth_headers
 from metaforge.mcp.remote_flows import _Gateway
 from twin_core.library.viewer import VIEW_HEADER, current_viewer, encode_view
 
-__all__ = ["GatewayMachineView", "RemoteMachineLibrary", "library_view_headers"]
+__all__ = [
+    "GatewayCatalogView",
+    "GatewayMachineView",
+    "RemoteMachineLibrary",
+    "library_view_headers",
+]
 
 
 def library_view_headers() -> dict[str, str]:
@@ -246,6 +251,90 @@ class GatewayMachineView:
         suffix = f"?{urlencode(query)}" if query else ""
         data = self._get(f"/v1/library/machines{suffix}")
         return [self._entry(r) for r in data.get("machines", [])]
+
+
+_CATALOG_PATHS = {
+    "process": "processes",
+    "material": "materials",
+    "component": "components",
+    "appearance": "appearances",
+    "ergonomic_limit": "ergonomic-limits",
+    "organisation": "organisations",
+}
+
+
+class _CatalogEntry(dict):  # type: ignore[type-arg]
+    """A library entry as the gateway serves it, read like a catalog entry."""
+
+    def as_dict(self) -> dict[str, Any]:
+        return dict(self)
+
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return self[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+
+
+class GatewayCatalogView:
+    """A read-only, synchronous view of the gateway's library catalog (FORGE-903).
+
+    The sidecar's own catalog was an empty in-memory store, so whatever read it here (the
+    Imagine studio sizing a part from its library entry, the component thread finding a
+    part's entry) found nothing, while the same call through the gateway found the entry.
+    Every read carries the caller's library view, so an account sees the shared entries
+    and its own. Reads only: writes go through ``RemoteMachineLibrary``.
+    """
+
+    def __init__(
+        self,
+        gateway_url: str,
+        *,
+        client: httpx.Client | None = None,
+        timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    ) -> None:
+        self._base = gateway_url.rstrip("/")
+        self._client = client
+        self._timeout = timeout_seconds
+
+    def _get(self, path: str) -> Any:
+        url = f"{self._base}{path}"
+        view = library_view_headers()
+        if self._client is not None:
+            response = self._client.get(url, headers=view)
+        else:
+            with httpx.Client(timeout=self._timeout, headers=gateway_auth_headers()) as http:
+                response = http.get(url, headers=view)
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json()
+
+    def get(self, ref: str, kind: str | None = None, *, viewer: Any = None) -> Any:
+        from twin_core.library.catalog import CatalogNotFoundError
+
+        data = self._get(f"/v1/library/{_CATALOG_PATHS[kind or 'component']}/{quote(ref, safe='')}")
+        if not data or not isinstance(data.get("entry"), dict):
+            raise CatalogNotFoundError(ref)
+        return _CatalogEntry(data["entry"])
+
+    def list(self, kind: str, *, family: str | None = None, viewer: Any = None) -> list[Any]:
+        suffix = f"?{urlencode({'family': family})}" if family else ""
+        data = self._get(f"/v1/library/{_CATALOG_PATHS[kind]}{suffix}") or {}
+        return [_CatalogEntry(e) for e in data.get("entries") or [] if isinstance(e, dict)]
+
+    def process_limits(self, ref: str, material: str | None = None, *, viewer: Any = None) -> Any:
+        from twin_core.library.catalog import CatalogNotFoundError
+
+        query = f"?{urlencode({'material': material})}" if material else ""
+        data = self._get(f"/v1/library/processes/{quote(ref, safe='')}/limits{query}")
+        if data is None:
+            raise CatalogNotFoundError(ref)
+        return data
+
+    def owner_of(self, entry_id: str) -> str | None:
+        """Not served: each entry says ``shared`` itself."""
+        return None
 
 
 def remote_material_source(gateway_url: str, *, client: httpx.AsyncClient | None = None) -> Any:
