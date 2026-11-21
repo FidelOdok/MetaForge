@@ -76,3 +76,17 @@ async def test_the_sidecar_tool_list_has_the_release_path(twin: Any) -> None:
     tools = {t.tool_id for t in server.tool_registry.list_tools()}
     missing = RELEASE_TOOLS - tools
     assert not missing, f"the sidecar does not serve {sorted(missing)}"
+
+
+async def test_the_sidecar_serves_the_firmware_scaffold(twin: Any) -> None:
+    """Found testing the electronics tools from claude.ai on staging: the
+    gateway's registry had ``twin.create_firmware_scaffold``, the sidecar's
+    did not, so no MCP client could make a board's firmware skeleton."""
+    from metaforge.mcp.server import build_unified_server
+
+    bindings, _bridges = _build_evidence_bindings(twin, None)
+    assert bindings.get("firmware_scaffold_creator") is not None
+    server = await build_unified_server(
+        adapter_ids=[], twin=twin, constraint_engine=twin.constraints, **bindings
+    )
+    assert "twin.create_firmware_scaffold" in {t.tool_id for t in server.tool_registry.list_tools()}
