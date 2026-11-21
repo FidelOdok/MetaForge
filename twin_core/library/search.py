@@ -147,9 +147,22 @@ def search_library(
     return {
         "query": query,
         "total": len(hits),
-        "results": [h.as_dict() for h in hits[:limit]],
+        "results": [_with_owner(h.as_dict(), catalog, machines) for h in hits[:limit]],
         "filters": {"kinds": wanted, "role": role, "region": region, "status": status},
     }
+
+
+def _with_owner(hit: dict[str, Any], catalog: Any, machines: Any) -> dict[str, Any]:
+    """The hit, saying whether it is from the shared library (FORGE-876) or the
+    caller's own, as every library listing does."""
+    store = machines if hit["kind"] == "machine" else catalog
+    owner_of = getattr(store, "owner_of", None)
+    if owner_of is None:
+        return hit
+    try:
+        return {**hit, "shared": owner_of(hit["id"]) is None}
+    except Exception:  # noqa: BLE001 -- an entry removed mid-search is just unmarked
+        return hit
 
 
 def _match(

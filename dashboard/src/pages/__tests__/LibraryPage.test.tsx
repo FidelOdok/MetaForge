@@ -247,3 +247,73 @@ function org(id: string, title: string, extra: Partial<LibraryOrganisation> = {}
     ...extra,
   };
 }
+
+describe('LibraryPage: shared and your own (FORGE-876)', () => {
+  beforeEach(() => {
+    Object.values(api).forEach((f) => {
+      if (typeof f === 'function') f.mockReset();
+    });
+    api.listMaterials.mockResolvedValue([]);
+    api.listMachines.mockResolvedValue([]);
+    api.listOrganisations.mockResolvedValue([]);
+  });
+
+  it('says nothing about layers on a local library, where every entry comes back shared', async () => {
+    api.listComponents.mockResolvedValue(PARTS.map((p) => ({ ...p, shared: true })));
+    render(<LibraryPage />);
+    await screen.findByTestId('library-count');
+    expect(screen.queryByTestId('library-owner')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('library-owner-note')).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Whose entries' })).not.toBeInTheDocument();
+  });
+
+  it('marks each entry Shared or Yours, and filters by it', async () => {
+    api.listComponents.mockResolvedValue([
+      { ...PARTS[0]!, shared: true },
+      { ...PARTS[1]!, shared: true },
+      part('my_led_driver', { title: 'Diodes AL8862: LED driver', manufacturer: 'Diodes', shared: false }),
+    ]);
+    render(<LibraryPage />);
+    await screen.findByTestId('library-count');
+    const rows = screen.getByRole('listbox', { name: 'Components' });
+    expect(within(rows).getAllByText('Shared')).toHaveLength(2);
+    expect(within(rows).getAllByText('Yours')).toHaveLength(1);
+
+    const filter = screen.getByRole('group', { name: 'Whose entries' });
+    expect(within(filter).getByRole('button', { name: /All/ })).toHaveTextContent('3');
+    expect(within(filter).getByRole('button', { name: /Shared/ })).toHaveTextContent('2');
+    fireEvent.click(within(filter).getByRole('button', { name: /Yours/ }));
+    expect(screen.getByTestId('library-count')).toHaveTextContent('1 parts');
+    expect(screen.getByTestId('library-owner-note')).toHaveTextContent('Your own entry');
+  });
+
+  it('explains that a shared entry is read-only and how to have your own', async () => {
+    api.listComponents.mockResolvedValue([
+      { ...PARTS[0]!, shared: true },
+      part('mine', { shared: false }),
+    ]);
+    render(<LibraryPage />);
+    await screen.findByTestId('library-count');
+    fireEvent.click(screen.getByRole('option', { name: /nRF52840/ }));
+    expect(screen.getByTestId('library-owner-note')).toHaveTextContent(
+      'only the people who run MetaForge can change it',
+    );
+  });
+
+  it('keeps your own entry apart from a shared one with the same name', async () => {
+    api.listComponents.mockResolvedValue([
+      part('aluminium_bracket', { id: 'co_shared', title: 'Bracket (catalogue)', shared: true }),
+      part('aluminium_bracket', { id: 'co_mine', title: 'Bracket (my version)', shared: false }),
+    ]);
+    render(<LibraryPage />);
+    await screen.findByTestId('library-count');
+    const options = within(screen.getByRole('listbox', { name: 'Components' })).getAllByRole('option');
+    expect(options).toHaveLength(2);
+    fireEvent.click(options[1]!);
+    expect(options.filter((o) => o.getAttribute('aria-selected') === 'true')).toHaveLength(1);
+    const chosen = options.find((o) => o.getAttribute('aria-selected') === 'true')!;
+    expect(within(screen.getByTestId('library-detail')).getByTestId('library-owner')).toHaveTextContent(
+      within(chosen).getByTestId('library-owner').textContent ?? '',
+    );
+  });
+});

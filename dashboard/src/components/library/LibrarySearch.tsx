@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { OwnerBadge } from './Ownership';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, Search } from 'lucide-react';
 import { EmptyState } from '../ui/EmptyState';
@@ -36,7 +37,9 @@ function HitRow({ hit, onOpen }: { hit: SearchHit; onOpen: (hit: SearchHit) => v
       <button type="button" onClick={() => onOpen(hit)} data-testid="library-search-hit">
         <span className="mf-library-row-line">
           <span className="mf-library-search-kind">{KIND_TEXT[hit.kind]}</span>
-          <span className="mf-library-row-title">{hit.title}</span>
+          <span className="mf-library-row-title">
+            {hit.title} <OwnerBadge shared={hit.shared} />
+          </span>
           {(hit.blocked?.length || hit.status === 'blocked') && (
             <span className="mf-library-org-status" data-status="blocked" title={(hit.blocked ?? []).join('; ')}>
               <AlertTriangle size={11} aria-hidden="true" /> Blocked
