@@ -31,6 +31,9 @@ const RELATION: Record<ThreadRelation, { label: string; help: string; tone: 'ok'
   imagine_only: { label: 'Imagine only', help: 'Named in Imagine; Develop has not chosen a part yet.', tone: 'warn' },
 };
 
+const BOARD_PART_HELP =
+  'Develop put this on a board it designed. It belongs to the board, not the concept, so Imagine does not need it.';
+
 function imagineCell(t: ComponentThread): string {
   const i = t.imagine;
   if (i.status === 'absent') return 'Not in the studio';
@@ -43,7 +46,7 @@ function developCell(t: ComponentThread): string {
   const parts: string[] = [];
   const sel = d.selections[0];
   if (sel) {
-    parts.push(`${sel.mpn}${sel.selection === 'candidate' ? ' (candidate)' : ''}`);
+    parts.push(`${sel.mpn}${sel.selection === 'candidate' ? ' (candidate, not chosen yet)' : ''}`);
     if (sel.library?.name) parts.push(`${sel.library.shared ? 'shared' : 'your'} library ${sel.library.name}`);
   } else if (d.status === 'designed') {
     parts.push('Board designed');
@@ -57,13 +60,17 @@ function checkCell(t: ComponentThread): string {
   const c = t.check;
   if (c.status === 'violates') return `Misses ${c.violates.join(', ')}`;
   if (c.status === 'pass') return `Meets ${c.margins} requirement${c.margins === 1 ? '' : 's'}`;
-  if (c.status === 'unchecked') return 'No requirement checks this part';
+  if (c.status === 'unchecked')
+    return c.unchecked > 0
+      ? `${c.unchecked} requirement${c.unchecked === 1 ? '' : 's'} need this part's ratings`
+      : 'No requirement checks this part';
   return 'Nothing to check yet';
 }
 
 function makeCell(t: ComponentThread): string {
   const m = t.make;
   if (m.status === 'absent') return 'Not in a BOM or order';
+  if (m.status === 'not_in_bom') return "Missing from its board's BOM";
   const orders = m.lines.filter((l) => l.kind === 'procurement');
   const bom = m.lines.filter((l) => l.kind === 'bom');
   const out: string[] = [];
@@ -84,6 +91,7 @@ function tone(stage: ThreadStage, t: ComponentThread): string {
   const status = t[stage].status;
   if (status === 'absent') return 'is-absent';
   if (stage === 'check' && status === 'violates') return 'is-bad';
+  if (stage === 'make' && status === 'not_in_bom') return 'is-bad';
   if (stage === 'imagine' && (t.relation === 'replaced' || t.relation === 'refined')) return 'is-behind';
   return 'is-there';
 }
@@ -142,8 +150,12 @@ export function ComponentThreadPanel({
                 <tr key={t.key} data-testid={`thread-${t.key}`}>
                   <th scope="row">
                     <span className="cv-thread-name">{t.name}</span>
-                    <span className={`cv-thread-rel is-${rel.tone}`} title={rel.help} data-testid="thread-relation">
-                      {rel.label}
+                    <span
+                      className={`cv-thread-rel is-${t.level === 'board' ? 'ok' : rel.tone}`}
+                      title={t.level === 'board' ? BOARD_PART_HELP : rel.help}
+                      data-testid="thread-relation"
+                    >
+                      {t.level === 'board' ? 'Board part' : rel.label}
                     </span>
                     {t.adopt && studioRevision != null && (
                       t.adopt.needs_rework ? (

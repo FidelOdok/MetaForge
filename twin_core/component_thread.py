@@ -80,6 +80,7 @@ class Selection:
     library: dict[str, Any] | None = None
     recorded_at: str = ""
     datasheet: str = ""
+    purchase_unit: str = ""
     violates: list[str] = field(default_factory=list)
     margins: int = 0
     unchecked: int = 0
@@ -197,16 +198,26 @@ def build_threads(
     filled: dict[str, list[Selection]] = {}
     how_by_part: dict[str, str] = {}
     loose: list[Selection] = []
+    links = {id(sel): link_selection(sel, studio_parts) for sel in sels}
     for sel in sels:
-        pids, how = link_selection(sel, studio_parts)
+        pids, how = links[id(sel)]
         sel.studio_parts = pids
         if not pids:
             loose.append(sel)
         for pid in pids:
             filled.setdefault(pid, []).append(sel)
-            how_by_part[pid] = how
+            # A chosen part's link says how it was linked, not a candidate's.
+            if sel.selection == "selected" or pid not in how_by_part:
+                how_by_part[pid] = how
+    # Once Develop has chosen a part for a studio part, the candidate the handover
+    # seeded for it is history, not a second answer.
+    for pid, psels in filled.items():
+        if any(s.selection == "selected" for s in psels):
+            filled[pid] = [s for s in psels if s.selection == "selected"]
 
     threads: list[dict[str, Any]] = []
+    # Boards that have a BOM file: a selected part on one of them must be in it.
+    boards_with_bom = {ln.board for ln in make_lines if ln.kind == "bom" and ln.board}
     used_board_parts: set[int] = set()
     used_lines: set[int] = set()
 
@@ -251,11 +262,22 @@ def build_threads(
         bom = [ln for ln in lines if ln["kind"] == "bom"]
         ordered = [ln for ln in lines if ln["kind"] == "procurement"]
         adopt_from = selected[0] if selected else (psels[0] if psels else None)
+        # A part only Develop has, on a board Develop designed, that fills no studio role
+        # and is not a bought module, is the board's own (a regulator, a capacitor): it
+        # is Develop's alone and never offered to Imagine.
+        level = "concept"
+        if part is None and on_boards and not role_key(role).startswith("e_"):
+            if all(s.purchase_unit != "cots_assembly" for s in psels):
+                level = "board"
+        missing_from_bom = bool(
+            selected and not bom and any(b["board"] in boards_with_bom for b in on_boards)
+        )
         return {
             "key": key,
             "name": name,
             "role": role,
             "relation": relation,
+            "level": level,
             "imagine": (
                 {
                     "status": "chosen" if part.chosen else "candidate",
@@ -298,7 +320,11 @@ def build_threads(
                 "unchecked": unchecked,
             },
             "make": {
-                "status": "ordered" if ordered else ("in_bom" if bom else "absent"),
+                "status": (
+                    "ordered"
+                    if ordered
+                    else ("in_bom" if bom else ("not_in_bom" if missing_from_bom else "absent"))
+                ),
                 "lines": lines,
             },
             "adopt": (
@@ -312,7 +338,9 @@ def build_threads(
                     "recorded_at": adopt_from.recorded_at or None,
                     "needs_rework": studio.get("status") == "handed_over",
                 }
-                if adopt_from is not None and relation in ("refined", "replaced", "develop_only")
+                if adopt_from is not None
+                and level == "concept"
+                and relation in ("refined", "replaced", "develop_only")
                 else None
             ),
         }
@@ -353,6 +381,7 @@ def build_threads(
                 "name": first.name or first.mpn or first.ref,
                 "role": "",
                 "relation": "develop_only",
+                "level": "board",
                 "imagine": {"status": "absent"},
                 "develop": {
                     "status": "on_board",
@@ -391,6 +420,7 @@ def build_threads(
                 "name": board,
                 "role": "board",
                 "relation": "develop_only",
+                "level": "board",
                 "imagine": {"status": "absent"},
                 "develop": {
                     "status": "designed",

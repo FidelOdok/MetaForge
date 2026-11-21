@@ -37,6 +37,8 @@ export interface ComponentThread {
   name: string;
   role: string;
   relation: ThreadRelation;
+  /** `board`: a part Develop put on a board it designed; Develop's alone. */
+  level: 'concept' | 'board';
   imagine: {
     status: 'chosen' | 'candidate' | 'absent';
     part_id?: string;
@@ -61,7 +63,7 @@ export interface ComponentThread {
     unchecked: number;
   };
   make: {
-    status: 'in_bom' | 'ordered' | 'absent';
+    status: 'in_bom' | 'ordered' | 'not_in_bom' | 'absent';
     lines: ThreadLine[];
   };
   adopt: {

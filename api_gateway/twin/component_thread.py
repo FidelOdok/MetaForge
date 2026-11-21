@@ -95,6 +95,30 @@ def library_components() -> list[dict[str, Any]]:
     return out
 
 
+#: The library writes a few units its own way; the requirement check reads pint units.
+_LIBRARY_UNITS = {"C": "degC"}
+
+
+def library_specs(entry_id: str) -> dict[str, Any]:
+    """A library entry's numeric specs as ``{key: {value, unit}}``, for the requirement check.
+
+    The selection's own specs win; these fill what the selection left out, so a part
+    whose datasheet figures live in the library is still checked (FORGE-903).
+    """
+    from api_gateway.library.catalog_routes import get_catalog
+
+    try:
+        data = get_catalog().get(entry_id).as_dict()
+    except Exception:  # noqa: BLE001 - an entry that cannot be read has no specs
+        return {}
+    out: dict[str, Any] = {}
+    for key, spec in (data.get("specs") or {}).items():
+        if isinstance(spec, dict) and isinstance(spec.get("value"), (int, float)):
+            unit = str(spec.get("unit") or "")
+            out[key] = {"value": float(spec["value"]), "unit": _LIBRARY_UNITS.get(unit, unit)}
+    return out
+
+
 def library_for(mpn: str, entries: list[dict[str, Any]]) -> dict[str, Any] | None:
     """The library entry for an order code: the exact one first, else the family."""
     key = mpn_key(mpn)
@@ -158,26 +182,38 @@ async def studio_state(
     return head.state, {"status": head.state.get("status") or "draft", "revision": head.revision}
 
 
-def selection_of(item: Any, constraints: list[Any], library: list[dict[str, Any]]) -> Selection:
+def selection_of(
+    item: Any,
+    constraints: list[Any],
+    library: list[dict[str, Any]],
+    specs_of: Any = None,
+) -> Selection:
     from twin_core.consistency.spec_margins import compare_specs_to_requirements
 
     specs = dict(getattr(item, "specifications", None) or {})
     raw_thread = specs.get("thread")
     thread: dict[str, Any] = raw_thread if isinstance(raw_thread, dict) else {}
     mpn = str(getattr(item, "part_number", "") or "")
-    numbers = {
+    numbers: dict[str, Any] = {
         k: v
         for k, v in specs.items()
         if k not in _META_SPECS and isinstance(v, (int, float)) and not isinstance(v, bool)
     }
+    lib_ref = specs.get("library_entry") if isinstance(specs.get("library_entry"), dict) else None
+    lib_ref = lib_ref or library_for(mpn, library)
+    if specs_of is not None and lib_ref and lib_ref.get("id"):
+        for key, value in specs_of(str(lib_ref["id"])).items():
+            numbers.setdefault(key, value)
     margins: list[Any] = []
     unchecked: list[Any] = []
-    if numbers and constraints:
+    if not numbers:
+        # Typed requirements that wait on this part's ratings: none recorded yet.
+        unchecked = [c for c in constraints if getattr(c, "metric", "")]
+    elif constraints:
         try:
             margins, unchecked = compare_specs_to_requirements(numbers, constraints)
         except Exception as exc:  # noqa: BLE001 - a margin that fails is unchecked
             logger.warning("component_thread_margins_failed", mpn=mpn, error=str(exc))
-    lib = specs.get("library_entry") if isinstance(specs.get("library_entry"), dict) else None
     return Selection(
         node_id=str(getattr(item, "id", "")),
         mpn=mpn,
@@ -185,9 +221,10 @@ def selection_of(item: Any, constraints: list[Any], library: list[dict[str, Any]
         role=str(specs.get("role") or ""),
         selection=str(specs.get("selection") or "selected"),
         studio_parts=[str(p) for p in thread.get("studio_parts") or []],
-        library=lib or library_for(mpn, library),
+        library=lib_ref,
         recorded_at=str(specs.get("recorded_at") or ""),
         datasheet=str(getattr(item, "datasheet_url", "") or ""),
+        purchase_unit=str(specs.get("purchase_unit") or ""),
         violates=[m.requirement for m in margins if not m.satisfied],
         margins=len(margins),
         unchecked=len(unchecked),
@@ -300,7 +337,14 @@ async def gather_threads(
         selections: list[Selection] = []
         try:
             items = await twin.list_bom_items(pid)
-            selections = [selection_of(i, constraints, library) for i in items]
+            memo: dict[str, dict[str, Any]] = {}
+
+            def specs_of(entry_id: str) -> dict[str, Any]:
+                if entry_id not in memo:
+                    memo[entry_id] = library_specs(entry_id)
+                return memo[entry_id]
+
+            selections = [selection_of(i, constraints, library, specs_of) for i in items]
         except Exception as exc:  # noqa: BLE001
             warnings.append(f"The component selections could not be read: {exc}")
 

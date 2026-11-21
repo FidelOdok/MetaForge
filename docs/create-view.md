@@ -1024,6 +1024,18 @@ handed over from Imagine keeps its `studio_part`, so a concept component id lead
 the studio part. Board parts, BOM lines and order lines are joined by order code and, on
 a board, by reference designator.
 
+Each stage gets its inputs from the one before. The handover seeds Develop with the
+studio's chosen parts as candidates, already linked, and records the operating
+environment as typed limits. Check holds each selected part's rated temperatures (from
+the selection, else its library entry) against those limits. Make shows a selected part
+that is missing from its board's BOM as *Missing from its board's BOM*, and a release
+package leaves candidates out.
+
+Develop may add parts Imagine never named. A part on a board Develop designed that fills
+no studio role and is not a bought module (a regulator, a capacitor) is marked **Board
+part**: it belongs to the board, is never offered to Imagine and does not count as
+Imagine being behind. A bought module, or a part for a studio role, is still offered.
+
 **Use in Imagine**, on a Refined, Replaced or Develop only row, takes Develop's part
 into the studio at the revision the row was read at: the studio part gets the order
 code, maker and library entry (and is drawn from the entry's model), or a part only

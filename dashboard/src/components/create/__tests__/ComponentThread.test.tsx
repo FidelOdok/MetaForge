@@ -20,6 +20,7 @@ const DRIVER: ComponentThread = {
   name: 'Driver, warm channel',
   role: 'fn:e_ldrv',
   relation: 'refined',
+  level: 'concept',
   imagine: { status: 'chosen', part_id: 'al8862-warm', mpn: 'AL8862', library: null, revision: 5, handed_over: false },
   develop: {
     status: 'selected',
@@ -53,6 +54,7 @@ const LED: ComponentThread = {
   name: 'Status indicator',
   role: 'fn:e_led',
   relation: 'imagine_only',
+  level: 'concept',
   imagine: { status: 'chosen', part_id: 'status-led', mpn: '<order code not yet chosen>', revision: 5 },
   develop: { status: 'absent', linked_by: null, selections: [], boards: [] },
   check: { status: 'absent', violates: [], margins: 0, unchecked: 0 },
@@ -117,6 +119,27 @@ describe('Component thread', () => {
     render(<ComponentThreadPanel projectId={P} stage="develop" open />);
     expect(await screen.findByText('Reopen Imagine to take this in')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Use in Imagine' })).toBeNull();
+  });
+
+  it('marks a board part as the board’s own and flags a part missing from its BOM', async () => {
+    const reg: ComponentThread = {
+      ...DRIVER,
+      key: 'selection:reg',
+      name: 'TI TPS62160DGKR',
+      relation: 'develop_only',
+      level: 'board',
+      imagine: { status: 'absent' },
+      check: { status: 'unchecked', violates: [], margins: 0, unchecked: 2 },
+      make: { status: 'not_in_bom', lines: [] },
+      adopt: null,
+    };
+    getComponentThreads.mockResolvedValue(threads(reg));
+    render(<ComponentThreadPanel projectId={P} stage="make" open />);
+    const row = await screen.findByTestId('thread-selection:reg');
+    expect(within(row).getByTestId('thread-relation')).toHaveTextContent('Board part');
+    expect(within(row).getAllByRole('cell')[3]).toHaveTextContent("Missing from its board's BOM");
+    expect(within(row).getAllByRole('cell')[3]).toHaveClass('is-bad');
+    expect(within(row).queryByRole('button')).toBeNull();
   });
 
   it('renders nothing for a project with no components', async () => {
