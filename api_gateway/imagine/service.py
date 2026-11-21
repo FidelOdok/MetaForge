@@ -396,6 +396,34 @@ def _chosen_parts(
     return chosen
 
 
+def _form_refs(config: dict[str, Any]) -> set[str]:
+    """The context parts the authored form draws (its component parts' ``component_ref``)."""
+    form = config.get("form") if isinstance(config.get("form"), dict) else {}
+    authored = (form or {}).get("authored")
+    parts = authored.get("parts") if isinstance(authored, dict) else None
+    return {
+        str(p["component_ref"])
+        for p in parts or []
+        if isinstance(p, dict) and isinstance(p.get("component_ref"), str)
+    }
+
+
+def _parts_in_use(
+    config: dict[str, Any], collections: dict[str, Any]
+) -> list[tuple[str, dict[str, Any]]]:
+    """Every part the product uses: the one chosen for each role, and every part the form
+    draws (two LED channels are two drivers, though a role picks one) (FORGE-903)."""
+    parts = _parts(config)
+    used: dict[str, tuple[str, dict[str, Any]]] = {
+        str(p["id"]): (role, p) for role, p in _chosen_parts(config, collections).items() if p
+    }
+    for pid in sorted(_form_refs(config)):
+        p = parts.get(pid)
+        if p and not p.get("excluded") and pid not in used:
+            used[pid] = (str(p.get("role") or ""), p)
+    return list(used.values())
+
+
 def _machine_library() -> Any:
     """The gateway's machine library (the studio's machines come from it, FORGE-879)."""
     from api_gateway.library.routes import get_machine_library
@@ -511,6 +539,53 @@ def _requirements(config: dict[str, Any], collections: dict[str, Any]) -> list[d
             "acceptance": ", ".join(str(x) for x in s.get("requires") or []),
         }
     return list(out.values())
+
+
+#: The environment's limits that every part must be rated for (FORGE-903): the studio
+#: key, the part spec it binds, the comparison and the words. A part's rated minimum
+#: must reach down to the coldest use, and its rated maximum up to the hottest.
+_ENV_LIMITS: tuple[tuple[str, str, str, str], ...] = (
+    ("opMin", "operating_temp_min_c", "<=", "down to {v} °C, the coldest the product is used in"),
+    ("opMax", "operating_temp_max_c", ">=", "up to {v} °C, the hottest the product is used in"),
+)
+
+
+def _recorded_requirements(
+    config: dict[str, Any], collections: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """What the requirements constraint set records: the person's requirements, and the
+    environment as typed limits for parts. The handover checklist reads only the former."""
+    return [*_requirements(config, collections), *_environment_requirements(config).values()]
+
+
+def _environment_requirements(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The operating environment as typed requirements every part is held against.
+
+    Only figures the studio states as numbers; Check compares each part's rated
+    temperatures with them (spec margins), so a part rated for less than the product's
+    environment is flagged when it is chosen, not at a gate.
+    """
+    env = config.get("environment") if isinstance(config.get("environment"), dict) else {}
+    out: dict[str, dict[str, Any]] = {}
+    for key, metric, op, words in _ENV_LIMITS:
+        value = (env or {}).get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        out[f"env:{key}"] = {
+            "name": f"img_env_{metric}",
+            "text": f"Every part is rated to operate {words.format(v=value)}.",
+            "priority": "Must",
+            "verify": "inspection",
+            "verify_defaulted": False,
+            "source": f"the operating environment set in the Imagine studio (environment.{key})",
+            "acceptance": "the part's datasheet operating temperature range",
+            "metric": metric,
+            "operator": op,
+            "limit": float(value),
+            "unit": "degC",
+            "target_node_type": "BOMItem",
+        }
+    return out
 
 
 def _mfc_from_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -1359,7 +1434,9 @@ class ImagineService:
             return [await self._map_choice(project_id, head, doc_id, data)]
         if kind in ("scenario", "requirement"):
             ref = await self.bridge.record_requirements(
-                project_id, _requirements(config, cols), f"{kind} {doc_id} in the Imagine studio"
+                project_id,
+                _recorded_requirements(config, cols),
+                f"{kind} {doc_id} in the Imagine studio",
             )
             return [ref] if ref else []
         if kind == "ledger":
@@ -2104,7 +2181,7 @@ class ImagineService:
         created: list[str] = []
 
         ref = await self.bridge.record_requirements(
-            project_id, _requirements(config, cols), f"handover of {head.ref}"
+            project_id, _recorded_requirements(config, cols), f"handover of {head.ref}"
         )
         if ref:
             created.append(ref)
@@ -2207,6 +2284,11 @@ class ImagineService:
             "component_ids": dec.get("component_ids"),
             "envelopes": envelopes,
         }
+        # FORGE-903: Develop starts from the concept's parts, as candidates it confirms
+        # or replaces, each already linked to the studio parts it fills.
+        created += await self.bridge.record_candidates(
+            project_id, _parts_in_use(config, cols), f"handover of {head.ref}"
+        )
 
         # Proposed interface contracts: never overwrite one Develop already holds.
         from api_gateway.twin.interface_contracts import get_contract

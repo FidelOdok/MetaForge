@@ -1689,3 +1689,67 @@ async def test_the_studio_comes_with_links_a_person_can_open(
     monkeypatch.setenv("METAFORGE_GATEWAY_PUBLIC_URL", "https://gw.example.test")
     again = await srv.imagine_get_studio({"project_id": PROJECT})
     assert again["engine_page_url"].startswith("https://gw.example.test/v1/twin/projects/")
+
+
+# ── FORGE-903: the handover hands Develop its parts and Check its limits ─────
+
+
+async def test_handover_seeds_develop_candidates_and_typed_environment_limits(
+    client: httpx.AsyncClient, twin: InMemoryTwinAPI, service: ImagineService
+) -> None:
+    from api_gateway.twin.component_thread import gather_threads
+
+    await _put(client)
+    await _make_ready(client, twin)
+    res = await client.post(f"{BASE}/handover", json={"op_id": "h1"})
+    assert res.status_code == 200, res.text
+    created = res.json()["created"]
+
+    # Develop starts from the concept's chosen parts, as candidates linked to them.
+    items = {i.part_number: i for i in await twin.list_bom_items()}
+    assert set(items) == {"USBC-A-01", "TH-A-01", "LTE-A-01", "BTN-A-01", "LED-A-01"}
+    th = items["TH-A-01"].specifications
+    assert th["selection"] == "candidate"
+    assert th["thread"]["studio_parts"] == ["th-a"] and th["thread"]["linked_by"] == "stored"
+    assert sum(c.startswith("bom_item:") for c in created) == 5
+    # The budget sensor the studio did not pick is not seeded.
+    assert "TH-B-01" not in items
+
+    # The environment is typed, so a part's rating can be held against it.
+    typed = {
+        c.metric: c
+        for c in await twin.list_constraints(project_id=UUID(PROJECT))
+        if getattr(c, "metric", "")
+    }
+    assert typed["operating_temp_min_c"].operator == "<="
+    assert typed["operating_temp_min_c"].limit == -10.0
+    assert typed["operating_temp_max_c"].operator == ">="
+    assert typed["operating_temp_max_c"].unit == "degC"
+
+    data = await gather_threads(twin, PROJECT, studio_service=service)
+    row = {t["key"]: t for t in data["threads"]}["part:th-a"]
+    assert row["develop"]["status"] == "candidate"
+    assert row["relation"] == "same" and row["adopt"] is None
+
+
+async def test_a_rehandover_never_puts_a_candidate_over_what_develop_chose(
+    client: httpx.AsyncClient, twin: InMemoryTwinAPI
+) -> None:
+    from api_gateway.twin.component_recorder import make_component_recorder
+
+    await _put(client)
+    record = make_component_recorder(twin)
+    # Develop chose a more exact part for the LTE module before Imagine was handed over.
+    await record(
+        mpn="LTE-A-01X",
+        manufacturer="Example Parts",
+        category="cellular_module",
+        purchase_unit="discrete_part",
+        role="fn:e_lte",
+        project_id=PROJECT,
+    )
+    await _make_ready(client, twin)
+    assert (await client.post(f"{BASE}/handover", json={"op_id": "h1"})).status_code == 200
+    lte = [i for i in await twin.list_bom_items() if i.part_number.startswith("LTE-A")]
+    assert [i.part_number for i in lte] == ["LTE-A-01X"]
+    assert lte[0].specifications["selection"] == "selected"

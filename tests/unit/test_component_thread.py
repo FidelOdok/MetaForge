@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -404,3 +405,231 @@ async def test_without_a_studio_a_selection_is_recorded_unlinked(catalog: Any) -
     data = await gather_threads(twin, PID)
     assert [t["relation"] for t in data["threads"]] == ["develop_only"]
     assert data["studio"] is None
+
+
+# ── what each stage takes from the one before ─────────────────────────────
+
+
+def test_a_part_on_a_develop_board_is_the_boards_own_not_imagines() -> None:
+    sels = [
+        Selection("reg", "TPS62160DGKR", "TI", role="buck", purchase_unit="discrete_part"),
+        Selection("mod", "SIM7080G", "SIMCom", role="radio", purchase_unit="cots_assembly"),
+    ]
+    threads = build_threads(
+        studio_parts=[],
+        selections=sels,
+        board_parts=[
+            BoardPart("Main board", "U3", "TPS62160DGKR"),
+            BoardPart("Main board", "U1", "SIM7080G"),
+        ],
+    )
+    by = {t["develop"]["selections"][0]["mpn"]: t for t in threads if t["develop"]["selections"]}
+    # A regulator on the board: Develop's alone, nothing to adopt, not "ahead".
+    assert by["TPS62160DGKR"]["level"] == "board"
+    assert by["TPS62160DGKR"]["adopt"] is None
+    # A bought module is a concept-level part even on a board: Imagine is offered it.
+    assert by["SIM7080G"]["level"] == "concept"
+    assert by["SIM7080G"]["adopt"]["mpn"] == "SIM7080G"
+
+
+def test_a_selected_part_missing_from_its_boards_bom_is_flagged() -> None:
+    threads = build_threads(
+        studio_parts=[],
+        selections=[Selection("s1", "OPT3001", "TI", role="fn:e_als")],
+        board_parts=[BoardPart("Main board", "U2", "OPT3001")],
+        make_lines=[MakeLine("bom", "bom", "AL8862SP-13", 1, ["U3"], board="Main board")],
+    )
+    assert threads[0]["make"]["status"] == "not_in_bom"
+    # On a board with no BOM yet there is nothing to be missing from.
+    threads = build_threads(
+        studio_parts=[],
+        selections=[Selection("s1", "OPT3001", "TI", role="fn:e_als")],
+        board_parts=[BoardPart("LED board", "U2", "OPT3001")],
+        make_lines=[MakeLine("bom", "bom", "AL8862SP-13", 1, ["U3"], board="Main board")],
+    )
+    assert threads[0]["make"]["status"] == "absent"
+
+
+async def test_check_holds_a_parts_library_ratings_against_the_environment(
+    catalog: Any,
+) -> None:
+    from api_gateway.twin.component_recorder import make_component_recorder
+    from api_gateway.twin.component_thread import gather_threads
+    from api_gateway.twin.constraint_recorder import make_constraint_recorder
+    from twin_core.api import InMemoryTwinAPI
+
+    src = {"kind": "datasheet", "ref": "https://example.com/al8862.pdf"}
+    catalog.register(
+        "component",
+        {
+            "name": "diodes_al8862sp_13",
+            "family": "electronic",
+            "origin": "purchased",
+            "mpn": "AL8862SP-13",
+            "manufacturer": "Diodes Incorporated",
+            "datasheet": "https://example.com/al8862.pdf",
+            "specs": {
+                "operating_temp_min_c": {"value": -40, "unit": "C", "source": src},
+                "operating_temp_max_c": {"value": 105, "unit": "C", "source": src},
+            },
+        },
+    )
+    twin = InMemoryTwinAPI.create()
+    await make_constraint_recorder(twin)(
+        title="Requirements",
+        project_id=PID,
+        constraints=[
+            {
+                "name": "env_min",
+                "metric": "operating_temp_min_c",
+                "operator": "<=",
+                "limit": -45,
+                "unit": "degC",
+            },
+            {
+                "name": "env_max",
+                "metric": "operating_temp_max_c",
+                "operator": ">=",
+                "limit": 35,
+                "unit": "degC",
+            },
+        ],
+    )
+    await make_component_recorder(twin)(
+        mpn="AL8862SP-13",
+        manufacturer="Diodes Incorporated",
+        category="led_driver",
+        purchase_unit="discrete_part",
+        project_id=PID,
+    )
+    data = await gather_threads(twin, PID)
+    check = data["threads"][0]["check"]
+    # The selection carries no specs of its own; the library entry's ratings are used.
+    assert check["margins"] == 2
+    assert check["status"] == "violates" and check["violates"] == ["env_min"]
+
+
+async def test_a_release_leaves_out_candidates() -> None:
+    from api_gateway.twin.component_recorder import make_component_recorder
+    from api_gateway.twin.release_package import _snapshot
+    from twin_core.api import InMemoryTwinAPI
+
+    twin = InMemoryTwinAPI.create()
+    record = make_component_recorder(twin)
+    chosen = await record(
+        mpn="OPT3001",
+        manufacturer="TI",
+        category="sensor",
+        purchase_unit="discrete_part",
+        project_id=PID,
+    )
+    await record(
+        mpn="VEML7700",
+        manufacturer="Vishay",
+        category="sensor",
+        purchase_unit="discrete_part",
+        project_id=PID,
+        selection="candidate",
+        role="als_alternative",
+    )
+    snap = await _snapshot(twin, UUID(PID))
+    assert snap["bom_item_ids"] == [chosen["node_id"]]
+
+
+def test_once_develop_chooses_the_handovers_candidate_drops_out() -> None:
+    parts = [StudioPart("lte-a", "LTE-M module", "fn:e_lte", "LTE-A-01", "Example")]
+    sels = [
+        Selection(
+            "cand", "LTE-A-01", role="fn:e_lte", selection="candidate", studio_parts=["lte-a"]
+        ),
+        Selection("pick", "LTE-A-01X", role="radio", studio_parts=["lte-a"]),
+    ]
+    t = build_threads(studio_parts=parts, selections=sels)[0]
+    assert [s["node_id"] for s in t["develop"]["selections"]] == ["pick"]
+    assert t["relation"] == "refined"
+
+
+async def test_a_part_with_no_ratings_says_which_requirements_wait_on_it(catalog: Any) -> None:
+    from api_gateway.twin.component_recorder import make_component_recorder
+    from api_gateway.twin.component_thread import gather_threads
+    from api_gateway.twin.constraint_recorder import make_constraint_recorder
+    from twin_core.api import InMemoryTwinAPI
+
+    twin = InMemoryTwinAPI.create()
+    await make_constraint_recorder(twin)(
+        title="Requirements",
+        project_id=PID,
+        constraints=[
+            {
+                "name": "env_min",
+                "metric": "operating_temp_min_c",
+                "operator": "<=",
+                "limit": 5,
+                "unit": "degC",
+            },
+            {"name": "statement", "expression": "True"},
+        ],
+    )
+    await make_component_recorder(twin)(
+        mpn="OPT3001",
+        manufacturer="TI",
+        category="sensor",
+        purchase_unit="discrete_part",
+        project_id=PID,
+    )
+    check = (await gather_threads(twin, PID))["threads"][0]["check"]
+    assert check == {"status": "unchecked", "violates": [], "margins": 0, "unchecked": 1}
+
+
+def test_a_part_develop_put_on_a_board_is_in_develop_without_a_selection() -> None:
+    parts = [StudioPart("esp", "Wi-Fi module", "fn:e_wifi", "ESP32-C3-WROOM-02", "Espressif")]
+    t = build_threads(
+        studio_parts=parts,
+        selections=[],
+        board_parts=[BoardPart("Controller board", "U1", "ESP32-C3-WROOM-02")],
+    )[0]
+    assert t["relation"] == "same"
+    assert t["develop"]["status"] == "on_board"
+    assert t["develop"]["boards"] == [{"board": "Controller board", "ref": "U1"}]
+
+
+def test_board_refs_with_no_order_code_are_listed_under_their_board() -> None:
+    threads = build_threads(
+        studio_parts=[],
+        selections=[],
+        board_parts=[
+            BoardPart("LED board", "D1", ""),
+            BoardPart("LED board", "J1", ""),
+            BoardPart("Controller board", "J4", ""),
+        ],
+        boards=["LED board", "Controller board"],
+        make_lines=[MakeLine("bom", "bom", "Emitter", 1, ["D1"], board="LED board")],
+    )
+    assert [t["key"] for t in threads] == ["board:LED board", "board:Controller board"]
+    led = threads[0]
+    assert [b["ref"] for b in led["develop"]["boards"]] == [None, "D1", "J1"]
+    assert led["make"]["status"] == "in_bom"
+
+
+def test_a_part_the_form_draws_is_in_use_though_its_role_picks_another() -> None:
+    from api_gateway.twin.component_thread import studio_parts_of
+
+    def part(pid: str) -> dict[str, Any]:
+        return {
+            "id": pid,
+            "role": "fn:e_ldrv",
+            "name": pid,
+            "mpn": "AL8862",
+            "manufacturer": "Diodes",
+        }
+
+    config = {
+        "functions": ["e_ldrv"],
+        "context": {
+            "components": {"parts": [part("drv-warm"), part("drv-cool"), part("drv-spare")]},
+            "options": {"decisions": [{"id": "d", "kind": "part", "pick": "drv-warm"}]},
+        },
+        "form": {"authored": {"parts": [{"id": "a", "component_ref": "drv-cool"}]}},
+    }
+    by_id = {p.id: p.chosen for p in studio_parts_of({"config": config, "collections": {}})}
+    assert by_id == {"drv-warm": True, "drv-cool": True, "drv-spare": False}

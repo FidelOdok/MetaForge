@@ -279,7 +279,13 @@ async def _snapshot(twin: Any, project_id: UUID) -> dict[str, Any]:
         # The schematics and boards left out: older revisions and strays.
         "excluded_design_files": [s.as_dict() for s in strays],
         "hierarchy_node_ids": [str(n.id) for n in hierarchy_nodes],
-        "bom_item_ids": [str(i.id) for i in bom_items],
+        # A candidate (a concept part handed over from Imagine, or one Develop is still
+        # weighing) is not chosen, so it is not released (FORGE-903).
+        "bom_item_ids": [
+            str(i.id)
+            for i in bom_items
+            if (getattr(i, "specifications", None) or {}).get("selection") != "candidate"
+        ],
         "evidence_ids": [str(e.id) for e in evidence],
         "decision_ids": [str(d.id) for d in decisions],
         # FORGE-293 (2D technical drawings) hasn't shipped -- always empty,

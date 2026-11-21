@@ -89,6 +89,9 @@ class TwinBridge:
         self._constraints = make_constraint_recorder(twin, project_backend)
         self._decisions = make_decision_recorder(twin, project_backend)
         self._entities = make_engineering_entity_recorder(twin, project_backend)
+        from api_gateway.twin.component_recorder import make_component_recorder
+
+        self._components = make_component_recorder(twin, project_backend)
 
     async def record_requirements(
         self, project_id: str, requirements: list[dict[str, Any]], reason: str
@@ -99,10 +102,17 @@ class TwinBridge:
         entries = []
         for r in requirements[:200]:
             source = str(r.get("source") or "").strip()
+            # FORGE-903: a requirement with a number (the operating environment) is typed,
+            # so a part's specs can be held against it; the rest stay statements.
+            typed = (
+                {k: r[k] for k in ("metric", "operator", "limit", "unit", "target_node_type")}
+                if r.get("metric") and r.get("limit") is not None
+                else {"expression": "True"}
+            )
             entries.append(
                 {
                     "name": r["name"],
-                    "expression": "True",
+                    **typed,
                     "severity": "error" if r.get("priority") == "Must" else "warning",
                     "message": str(r.get("text") or "")[:2000],
                     "domain": "systems",
@@ -123,6 +133,62 @@ class TwinBridge:
                 change_reason=reason,
             )
         return ref_of(result, "constraint_set")
+
+    async def record_candidates(
+        self, project_id: str, chosen: list[tuple[str, dict[str, Any]]], reason: str
+    ) -> list[str]:
+        """Seed Develop with the studio's chosen bought parts, as candidates (FORGE-903).
+
+        One candidate selection per order code, linked to every studio part it fills
+        (two channels, one driver), so Develop starts from the concept's parts instead of
+        typing them again. A part with no real order code or maker is left out, and so is
+        a part Develop already has a selection for: a handover after a rework never puts
+        a candidate over what Develop chose. Returns ``bom_item:<id>`` refs. Best effort:
+        a part that cannot be recorded is logged and skipped.
+        """
+        from twin_core.component_thread import mpn_key, same_family
+
+        existing: list[Any] = []
+        try:
+            existing = list(await self.twin.list_bom_items(UUID(project_id)))
+        except Exception as exc:  # noqa: BLE001 - no list reads as none
+            logger.warning("imagine_candidates_list_failed", error=str(exc))
+        taken: set[str] = set()
+        for item in existing:
+            specs = dict(getattr(item, "specifications", None) or {})
+            thread = specs.get("thread") if isinstance(specs.get("thread"), dict) else {}
+            taken.update(str(p) for p in (thread or {}).get("studio_parts") or [])
+        groups: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+        for role, part in chosen:
+            pid = str(part.get("id") or "")
+            maker = str(part.get("manufacturer") or "").strip()
+            key = mpn_key(part.get("mpn"))
+            if not pid or not key or not maker or "<" in maker or pid in taken:
+                continue
+            if any(same_family(getattr(i, "part_number", ""), part.get("mpn")) for i in existing):
+                continue
+            groups.setdefault(key, []).append((role, part))
+        refs: list[str] = []
+        for parts in groups.values():
+            role, first = parts[0]
+            try:
+                out = await self._components(
+                    mpn=str(first["mpn"]).strip(),
+                    manufacturer=str(first["manufacturer"]).strip(),
+                    category=role.split(":", 1)[-1] or "concept_part",
+                    purchase_unit="discrete_part",
+                    role=role,
+                    quantity=len(parts),
+                    datasheet_url=str(first.get("datasheet") or "") or None,
+                    source=reason,
+                    project_id=project_id,
+                    selection="candidate",
+                    studio_parts=[str(p.get("id")) for _, p in parts],
+                )
+                refs.append(f"bom_item:{out['node_id']}")
+            except Exception as exc:  # noqa: BLE001 - one part never stops a handover
+                logger.warning("imagine_candidate_failed", mpn=first.get("mpn"), error=str(exc))
+        return refs
 
     async def record_decision(
         self,
