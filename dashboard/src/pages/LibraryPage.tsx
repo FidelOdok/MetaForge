@@ -1,4 +1,13 @@
 import { useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import {
+  LayeredLibrary,
+  OwnerBadge,
+  OwnerFilterBar,
+  OwnerNote,
+  byOwner,
+  isLayered,
+  type OwnerFilter,
+} from '../components/library/Ownership';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Box, Download, ExternalLink, Search, Upload } from 'lucide-react';
 import { PageHeader } from '../components/ui/PageHeader';
@@ -178,7 +187,10 @@ function ComponentDetail({
     <article className="mf-library-detail" data-testid="library-detail">
       <PartPreview part={part} />
       <header className="mf-library-detail-head">
-        <h2>{describe(part)}</h2>
+        <h2>
+          {describe(part)} <OwnerBadge shared={part.shared} />
+        </h2>
+        <OwnerNote shared={part.shared} />
         {isEnding(part) && (
           <p className="mf-library-warning">
             <AlertTriangle size={13} aria-hidden="true" /> The research found this part being discontinued: check its
@@ -279,7 +291,12 @@ function ComponentsTab({
   const [demo, setDemo] = useState<Demo | ''>('');
   const [only3d, setOnly3d] = useState(false);
   const [hideEnding, setHideEnding] = useState(false);
-  const [selected, setSelected] = useState<string | null>(focus ?? null);
+  // By id: an account's own entry may share its name with a shared one.
+  const [selected, setSelected] = useState<string | null>(() => {
+    if (!focus) return null;
+    const hits = parts.filter((p) => p.id === focus || p.name === focus);
+    return (hits.find((p) => p.shared === false) ?? hits[0])?.id ?? null;
+  });
   const groups = useMemo(() => {
     const counts = new Map<Category, number>();
     parts.forEach((p) => counts.set(categoryOf(p), (counts.get(categoryOf(p)) ?? 0) + 1));
@@ -300,7 +317,7 @@ function ComponentsTab({
       })
       .sort((a, b) => `${a.manufacturer} ${handle(a)}`.localeCompare(`${b.manufacturer} ${handle(b)}`));
   }, [parts, query, group, level, demo, only3d, hideEnding]);
-  const current = parts.find((p) => p.name === selected && shown.includes(p)) ?? shown[0] ?? null;
+  const current = shown.find((p) => p.id === selected) ?? shown[0] ?? null;
 
   return (
     <>
@@ -375,13 +392,14 @@ function ComponentsTab({
                 <button
                   type="button"
                   role="option"
-                  aria-selected={current?.name === p.name}
-                  className={current?.name === p.name ? 'is-selected' : undefined}
-                  onClick={() => setSelected(p.name)}
+                  aria-selected={current?.id === p.id}
+                  className={current?.id === p.id ? 'is-selected' : undefined}
+                  onClick={() => setSelected(p.id)}
                 >
                   <span className="mf-library-row-line">
                     <span className="mf-library-row-title">{handle(p)}</span>
                     <span className="mf-library-row-icons">
+                      <OwnerBadge shared={p.shared} />
                       <span className="mf-library-level" title={LEVEL_HELP[levelOf(p)]}>
                         {levelOf(p).split(' ')[0]?.startsWith('L') ? levelOf(p).split(' ')[0] : ''}
                       </span>
@@ -415,11 +433,12 @@ function MaterialsTab({ materials }: { materials: LibraryMaterial[] }) {
       {materials.map((m) => (
         <details key={m.id} className="mf-library-section">
           <summary>
-            {m.title || m.name}
+            {m.title || m.name} <OwnerBadge shared={m.shared} />
             <span className="mf-library-count">{Object.keys(m.properties || {}).length}</span>
           </summary>
           <div className="mf-library-section-body">
             <p className="mf-library-muted">{label(m.family)}</p>
+            <OwnerNote shared={m.shared} />
             {Object.keys(m.properties || {}).length > 0 && <SourcedTable values={m.properties} />}
             <pre className="mf-library-notes">{m.notes}</pre>
           </div>
@@ -456,10 +475,11 @@ function MachineCard({ machine, model }: { machine: LibraryMachine; model?: Libr
   return (
     <details className="mf-library-section" data-testid="library-machine">
       <summary>
-        {machineName(machine)}
+        {machineName(machine)} <OwnerBadge shared={machine.shared} />
         <span className="mf-library-count">{total}</span>
       </summary>
       <div className="mf-library-section-body">
+        <OwnerNote shared={machine.shared} />
         <dl className="mf-library-facts mf-library-facts-tight">
           {facts.map(([k, v]) => (
             <div key={k}>
@@ -524,6 +544,8 @@ export function LibraryPage() {
   const materials = useQuery({ queryKey: ['library', 'materials'], queryFn: listMaterials });
   const machines = useQuery({ queryKey: ['library', 'machines'], queryFn: listMachines });
   const organisations = useQuery({ queryKey: ['library', 'organisations'], queryFn: listOrganisations });
+  const [owner, setOwner] = useState<OwnerFilter>('all');
+  const layered = isLayered(components.data, materials.data, machines.data, organisations.data);
   const orgById = useMemo(
     () => new Map((organisations.data ?? []).map((o) => [o.id, o])),
     [organisations.data],
@@ -542,7 +564,10 @@ export function LibraryPage() {
               : null;
     if (!target) return;
     setTab(target);
-    setFocus({ tab: target, ref: hit.kind === 'organisation' ? hit.id : hit.name, at: Date.now() });
+    // A hit outside the current Shared / Yours filter would not be found.
+    setOwner('all');
+    const byId = hit.kind === 'organisation' || hit.kind === 'component';
+    setFocus({ tab: target, ref: byId ? hit.id : hit.name, at: Date.now() });
   }
 
   async function onExport() {
@@ -583,77 +608,101 @@ export function LibraryPage() {
     }
   }
 
-  const parts = components.data ?? [];
+  // FORGE-876: on a library shared by several accounts, All / Shared / Yours.
+  const mine = <T extends { shared?: boolean }>(list: T[] | undefined): T[] =>
+    layered ? byOwner(list ?? [], owner) : (list ?? []);
+  const parts = mine(components.data);
   const counts: Record<Tab, number | undefined> = {
-    components: components.data?.length,
-    materials: materials.data?.length,
-    machines: machines.data?.length,
-    organisations: organisations.data?.length,
+    components: components.data && parts.length,
+    materials: materials.data && mine(materials.data).length,
+    machines: machines.data && mine(machines.data).length,
+    organisations: organisations.data && mine(organisations.data).length,
+  };
+  const here: Array<{ shared?: boolean }> =
+    { components: components.data, materials: materials.data, machines: machines.data, organisations: organisations.data }[
+      tab
+    ] ?? [];
+  const ownerCounts: Record<OwnerFilter, number> = {
+    all: here.length,
+    shared: byOwner(here, 'shared').length,
+    yours: byOwner(here, 'yours').length,
   };
 
   return (
-    <div className="mf-library">
-      <PageHeader
-        title="Library"
-        actions={
-          <>
-            <Button variant="ghost" size="sm" onClick={onExport} disabled={busy} title="Save the whole library as a file">
-              <Download size={14} aria-hidden="true" /> Export
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => fileInput.current?.click()}
-              disabled={busy}
-              title="Add the entries of a library file"
-            >
-              <Upload size={14} aria-hidden="true" /> Import
-            </Button>
-            <input
-              ref={fileInput}
-              type="file"
-              accept="application/json,.json"
-              hidden
-              data-testid="library-import-file"
-              onChange={onImport}
+    <LayeredLibrary value={layered}>
+      <div className="mf-library">
+        <PageHeader
+          title="Library"
+          actions={
+            <>
+              <Button variant="ghost" size="sm" onClick={onExport} disabled={busy} title="Save the whole library as a file">
+                <Download size={14} aria-hidden="true" /> Export
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => fileInput.current?.click()}
+                disabled={busy}
+                title="Add the entries of a library file"
+              >
+                <Upload size={14} aria-hidden="true" /> Import
+              </Button>
+              <input
+                ref={fileInput}
+                type="file"
+                accept="application/json,.json"
+                hidden
+                data-testid="library-import-file"
+                onChange={onImport}
+              />
+            </>
+          }
+        />
+        <LibrarySearch onOpen={openHit} />
+        <div className="mf-library-tabs" role="tablist">
+          {TABS.map(([t, name]) => (
+            <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
+              {name}
+              {counts[t] !== undefined && <span className="mf-library-count">{counts[t]}</span>}
+            </button>
+          ))}
+        </div>
+        {layered && <OwnerFilterBar value={owner} onChange={setOwner} counts={ownerCounts} />}
+        {components.isError && (
+          <EmptyState title="The library could not be read" description="Check that the gateway is running." />
+        )}
+        {!components.isLoading &&
+          !components.isError &&
+          tab === 'components' &&
+          parts.length === 0 &&
+          (owner === 'yours' ? (
+            <EmptyState
+              title="You have no parts of your own yet"
+              description="Parts you or an agent register go into your own library, marked Yours."
             />
-          </>
-        }
-      />
-      <LibrarySearch onOpen={openHit} />
-      <div className="mf-library-tabs" role="tablist">
-        {TABS.map(([t, name]) => (
-          <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
-            {name}
-            {counts[t] !== undefined && <span className="mf-library-count">{counts[t]}</span>}
-          </button>
-        ))}
+          ) : (
+            <EmptyState title="The library is empty" description="Import a library file, or let an agent research parts." />
+          ))}
+        {tab === 'components' && parts.length > 0 && (
+          <ComponentsTab
+            key={focus?.tab === 'components' ? `focus-${focus.at}` : 'browse'}
+            parts={parts}
+            orgs={orgById}
+            focus={focus?.tab === 'components' ? focus.ref : null}
+          />
+        )}
+        {tab === 'organisations' && (
+          <OrganisationsTab
+            key={focus?.tab === 'organisations' ? `focus-${focus.at}` : 'browse'}
+            orgs={mine(organisations.data)}
+            parts={parts}
+            machines={machines.data ?? []}
+            focus={focus?.tab === 'organisations' ? focus.ref : null}
+          />
+        )}
+        {tab === 'materials' && <MaterialsTab materials={mine(materials.data)} />}
+        {tab === 'machines' && <MachinesTab machines={mine(machines.data)} />}
       </div>
-      {components.isError && (
-        <EmptyState title="The library could not be read" description="Check that the gateway is running." />
-      )}
-      {!components.isLoading && !components.isError && tab === 'components' && parts.length === 0 && (
-        <EmptyState title="The library is empty" description="Import a library file, or let an agent research parts." />
-      )}
-      {tab === 'components' && parts.length > 0 && (
-        <ComponentsTab
-          key={focus?.tab === 'components' ? `focus-${focus.at}` : 'browse'}
-          parts={parts}
-          orgs={orgById}
-          focus={focus?.tab === 'components' ? focus.ref : null}
-        />
-      )}
-      {tab === 'organisations' && (
-        <OrganisationsTab
-          key={focus?.tab === 'organisations' ? `focus-${focus.at}` : 'browse'}
-          orgs={organisations.data ?? []}
-          parts={parts}
-          machines={machines.data ?? []}
-          focus={focus?.tab === 'organisations' ? focus.ref : null}
-        />
-      )}
-      {tab === 'materials' && <MaterialsTab materials={materials.data ?? []} />}
-      {tab === 'machines' && <MachinesTab machines={machines.data ?? []} />}
-    </div>
+    </LayeredLibrary>
   );
 }

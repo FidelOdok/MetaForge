@@ -398,3 +398,20 @@ def test_publishing_over_a_shared_name_is_refused(client: TestClient) -> None:
 def test_publish_names_only_catalog_kinds(client: TestClient) -> None:
     r = client.post("/v1/library/jobs/x/publish", headers=_as("service"))
     assert r.status_code == 404
+
+
+def test_search_says_which_results_are_shared_and_which_are_the_accounts(
+    client: TestClient,
+) -> None:
+    """The dashboard marks each result Shared or Yours from this (as every listing
+    does), so a person can tell the curated library from their own."""
+    client.post("/v1/library/materials", json=_material("my_petg"), headers=_as("alice"))
+    client.post("/v1/library/machines", json=INSTANCE, headers=_as("alice"))
+    r = client.get(
+        "/v1/library/search",
+        params=[("kind", "material"), ("kind", "machine")],
+        headers=_as("alice"),
+    )
+    assert r.status_code == 200, r.text
+    shared = {hit["name"]: hit["shared"] for hit in r.json()["results"]}
+    assert shared == {"pla": True, "my_petg": False, "Shop mill": False}

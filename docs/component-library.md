@@ -227,6 +227,23 @@ library, read the datasheet, adopt once, record the choice. The Imagine stage ca
 `component.find` in place of `library.list_components`, which listed the whole library.
 Code: `tool_registry/tools/components/finder.py`.
 
+## Shared entries and your own
+
+On a gateway shared by several accounts (a hosted MetaForge), the library has
+two layers: shared entries, curated for everyone and changed only by the
+deployment (`POST /v1/library/{kind}/{id}/publish`), and each account's own,
+which only that account sees and changes. Every listing, every read and every
+search result carries `shared` (`true` for the shared layer, `false` for the
+caller's own). An account may hold its own entry under a shared entry's name;
+both are listed, each marked.
+
+The dashboard's Library page marks each entry **Shared** or **Yours**, filters
+by **All / Shared / Yours** with how many of each, and says on an entry what its
+layer means: a shared one is read-only, and an account changes it for itself by
+registering its own version under the same name. Components are picked by id,
+so two entries with one name stay apart. A local MetaForge has one library and
+every entry comes back shared; the page shows none of this there.
+
 ## Searching the library
 
 `GET /v1/library/search?q=...` (and the `library.search` tool) searches every kind at once:

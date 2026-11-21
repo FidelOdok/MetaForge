@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { OwnerBadge, OwnerNote } from './Ownership';
 import { AlertTriangle, ExternalLink } from 'lucide-react';
 import { EmptyState } from '../ui/EmptyState';
 import {
@@ -63,8 +64,9 @@ function OrgDetail({
     <article className="mf-library-detail" data-testid="library-org-detail">
       <header className="mf-library-detail-head">
         <h2>
-          {org.title} <OrgStatusBadge org={org} />
+          {org.title} <OrgStatusBadge org={org} /> <OwnerBadge shared={org.shared} />
         </h2>
+        <OwnerNote shared={org.shared} />
         {org.status === 'blocked' && (
           <p className="mf-library-warning">
             <AlertTriangle size={13} aria-hidden="true" /> Blocked: {org.status_reason}. Parts made or sold only by it
@@ -232,7 +234,9 @@ export function OrganisationsTab({
                   onClick={() => setSelected(o.id)}
                 >
                   <span className="mf-library-row-line">
-                    <span className="mf-library-row-title">{o.title}</span>
+                    <span className="mf-library-row-title">
+                      {o.title} <OwnerBadge shared={o.shared} />
+                    </span>
                     {o.status === 'blocked' && (
                       <AlertTriangle size={12} aria-label="blocked" className="is-warning" />
                     )}

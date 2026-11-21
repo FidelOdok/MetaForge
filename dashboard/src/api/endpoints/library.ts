@@ -41,6 +41,8 @@ export interface ModelRepresentation {
 }
 
 export interface LibraryComponent {
+  /** FORGE-876: from the shared library (true) or the caller's own (false). */
+  shared?: boolean;
   id: string;
   name: string;
   title: string;
@@ -63,6 +65,8 @@ export interface LibraryComponent {
 }
 
 export interface LibraryMaterial {
+  /** FORGE-876: from the shared library (true) or the caller's own (false). */
+  shared?: boolean;
   id: string;
   name: string;
   title: string;
@@ -75,6 +79,8 @@ export interface LibraryMaterial {
 }
 
 export interface LibraryMachine {
+  /** FORGE-876: from the shared library (true) or the caller's own (false). */
+  shared?: boolean;
   id: string;
   layer: 'model' | 'instance';
   kind: string;
@@ -99,6 +105,8 @@ export const ORG_REGIONS = ['UK', 'EU', 'Europe', 'Asia', 'Americas', 'Oceania',
 
 /** A manufacturer, distributor, fabricator or test lab, recorded once however it is written. */
 export interface LibraryOrganisation {
+  /** FORGE-876: from the shared library (true) or the caller's own (false). */
+  shared?: boolean;
   id: string;
   name: string;
   title: string;
@@ -129,6 +137,8 @@ export type SearchKind =
 
 /** One library search result; ``matched`` names the fields that matched. */
 export interface SearchHit {
+  /** FORGE-876: from the shared library (true) or the caller's own (false). */
+  shared?: boolean;
   kind: SearchKind;
   id: string;
   name: string;

@@ -407,3 +407,31 @@
   color: var(--color-error, #ffb4ab);
   border-color: currentColor;
 }
+
+/* FORGE-876: whose entry it is, on a library shared by several accounts. */
+.mf-library-owner {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  border-radius: 9px;
+  border: 1px solid var(--mf-r-65-72-90-0p3);
+  color: var(--mf-c-9a9aaa);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.mf-library-owner.is-yours {
+  color: var(--mf-c-e2e2eb);
+  background: var(--mf-c-282a30);
+  border-color: var(--color-primary, #ff6a13);
+}
+.mf-library-owner-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+.mf-library-owner-filter {
+  margin: 8px 0 4px;
+}
