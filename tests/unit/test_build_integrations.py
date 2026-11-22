@@ -50,6 +50,23 @@ class TestTheConnectionIsAsked_Not_Assumed:
         assert "localhost" not in server["url"]
         assert "localhost" not in json.dumps(server)
 
+    def test_delegation_names_are_optional_settings_sent_as_headers(self) -> None:
+        """FORGE-827: a hands-off run names its agent and the person it acts for.
+
+        Empty by default, so nothing is claimed and a person's decisions stay
+        with the person unless they fill both in on a gateway that delegates.
+        """
+        manifest = plugin_manifest(default_gateway_url=DEFAULT_GATEWAY_URL)
+        for key in ("agent_name", "on_behalf_of"):
+            assert manifest["userConfig"][key]["default"] == ""
+            assert manifest["userConfig"][key]["required"] is False
+        headers = manifest["mcpServers"]["metaforge"]["headers"]
+        assert headers == {
+            "X-MetaForge-Agent": "${user_config.agent_name}",
+            "X-MetaForge-On-Behalf-Of": "${user_config.on_behalf_of}",
+        }
+        assert not any(h.lower() == "authorization" for h in headers)
+
     def test_the_default_can_point_anywhere(self) -> None:
         manifest = plugin_manifest(default_gateway_url="https://mcp.example.com/mcp")
         assert manifest["userConfig"]["gateway_url"]["default"] == "https://mcp.example.com/mcp"
@@ -60,10 +77,12 @@ class TestTheConnectionIsAsked_Not_Assumed:
         """FORGE-659. Claude Code does not fall back to OAuth once a configured
         Authorization header is rejected, so a bearer header here would stop the
         sign-in ever being offered. No header and no token field: the gateway's
-        401 flags the server in /mcp and the person signs in there."""
+        401 flags the server in /mcp and the person signs in there. The only
+        headers are the delegation names, which carry no credential."""
         manifest = plugin_manifest(default_gateway_url=DEFAULT_GATEWAY_URL)
         assert "api_token" not in manifest["userConfig"]
-        assert "headers" not in manifest["mcpServers"]["metaforge"]
+        headers = manifest["mcpServers"]["metaforge"].get("headers") or {}
+        assert set(headers) <= {"X-MetaForge-Agent", "X-MetaForge-On-Behalf-Of"}
         assert "Authorization" not in json.dumps(manifest)
 
 
