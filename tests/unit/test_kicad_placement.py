@@ -501,6 +501,53 @@ def test_a_power_pour_takes_the_board_clearance(
     assert zone.outline.points[0] == (int(101 * NM), int(101 * NM))
 
 
+def test_a_power_pour_keeps_other_nets_out_of_its_inside(
+    worker: types.ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Freerouting ran an EN track straight through a VIN pour and split it; a
+    rule area just inside the pour keeps other nets' tracks and vias out."""
+
+    class Poly:
+        def __init__(self, src: Any) -> None:
+            self.inflated: list[Any] = []
+            self.count = src.count
+
+        def Inflate(self, amount: int, *rest: Any) -> None:  # noqa: N802
+            self.inflated.append(amount)
+
+        def OutlineCount(self) -> int:  # noqa: N802
+            return self.count
+
+    class Zone:
+        def __init__(self, board: Any) -> None:
+            self.set: dict[str, Any] = {}
+
+        def __getattr__(self, name: str) -> Any:
+            return lambda *a: self.set.__setitem__(name, a[0] if a else None)
+
+    for name, value in {
+        "SHAPE_POLY_SET": Poly,
+        "ZONE": Zone,
+        "CORNER_STRATEGY_CHAMFER_ALL_CORNERS": 2,
+    }.items():
+        monkeypatch.setattr(worker.pcbnew, name, value, raising=False)
+    added: list[Any] = []
+    board = types.SimpleNamespace(Add=added.append)
+    outline = types.SimpleNamespace(count=1)
+    pour = types.SimpleNamespace(
+        Outline=lambda: outline, GetLayer=lambda: F_CU, GetZoneName=lambda: "power:VBAT"
+    )
+    rule = worker._pour_keepout(board, pour)
+    assert added == [rule]
+    assert rule.set["SetIsRuleArea"] is True and rule.set["SetZoneName"] == "power:VBAT:keepout"
+    assert rule.set["SetDoNotAllowTracks"] is True and rule.set["SetDoNotAllowVias"] is True
+    assert rule.set["SetDoNotAllowCopperPour"] is False and rule.set["SetDoNotAllowPads"] is False
+    assert rule.set["SetOutline"].inflated == [-int(worker.POUR_KEEPOUT_INSET_MM * NM)]
+    # A pour too narrow to keep anything inside gets no keepout.
+    outline.count = 0
+    assert worker._pour_keepout(board, pour) is None and len(added) == 1
+
+
 def test_strip_routing_keeps_the_power_pours(worker: types.ModuleType) -> None:
     class Zone:
         def __init__(self, name: str, net: str) -> None:

@@ -166,7 +166,9 @@ def generate(req: dict[str, Any]) -> dict[str, Any]:
             entry.update(hinted[entry["ref"]])
     zones = board_spec.get("power_zones") or []
     for rank, spec in enumerate(zones):
-        _power_zone(board, footprints, nets, spec, len(zones) - rank + 1, (x0, y0))
+        pour = _power_zone(board, footprints, nets, spec, len(zones) - rank + 1, (x0, y0))
+        if pour is not None:
+            _pour_keepout(board, pour)
     pcbnew.SaveBoard(out, board)
     return {
         "ok": True,
@@ -1249,6 +1251,37 @@ def _power_zone(
         outline.Append(MM(x), MM(y))
     board.Add(zone)
     return zone
+
+
+#: How far inside a power pour's edge its keepout starts: the band left open is
+#: where the router ties the net's outside parts to the pour.
+POUR_KEEPOUT_INSET_MM = 0.6
+
+
+def _pour_keepout(board: Any, pour: Any) -> Any:
+    """A no-tracks, no-vias rule area just inside a power pour.
+
+    Freerouting treats a pour on a signal layer as a plane of its net (pads in
+    it count as joined) but lets other nets' tracks run straight through it,
+    cutting it into islands. The keepout makes them go round; the band at the
+    edge stays open so the pour's own net can still be reached from outside.
+    """
+    inner = pcbnew.SHAPE_POLY_SET(pour.Outline())
+    inner.Inflate(-MM(POUR_KEEPOUT_INSET_MM), pcbnew.CORNER_STRATEGY_CHAMFER_ALL_CORNERS, MM(0.01))
+    if inner.OutlineCount() == 0:  # too narrow to keep anything out
+        return None
+    rule = pcbnew.ZONE(board)
+    rule.SetIsRuleArea(True)
+    rule.SetLayer(pour.GetLayer())
+    rule.SetZoneName(f"{pour.GetZoneName()}:keepout")
+    rule.SetDoNotAllowTracks(True)
+    rule.SetDoNotAllowVias(True)
+    rule.SetDoNotAllowPads(False)
+    rule.SetDoNotAllowCopperPour(False)
+    rule.SetDoNotAllowFootprints(False)
+    rule.SetOutline(inner)
+    board.Add(rule)
+    return rule
 
 
 def _pour(board: Any, net_name: str) -> None:
