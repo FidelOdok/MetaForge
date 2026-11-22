@@ -70,6 +70,8 @@ export interface DeploymentLimits {
   allow_release: boolean;
   hourly_caps: Array<{ tool: string; per_hour: number | null; set_by: string }>;
   approval_ttl_seconds: number;
+  /** Approval holds are off on this MetaForge (METAFORGE_APPROVALS=off). */
+  approvals_off?: boolean;
   set_in: string;
 }
 

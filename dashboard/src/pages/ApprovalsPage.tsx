@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Link, useSearchParams } from "react-router-dom";
 
+import { useQuery } from "@tanstack/react-query";
 import { ApprovalCard } from "../components/approvals/ApprovalCard";
+import { ACCOUNT_POLICY_KEY } from "../components/approvals/AccountApprovalSettings";
+import { ApprovalsOffNotice } from "../components/approvals/DeploymentLimitsNote";
+import { getAccountApprovalPolicy } from "../api/endpoints/approvals";
 import { EmptyState } from "../components/ui/EmptyState";
 import { useActiveProject } from "../hooks/use-active-project";
 import { useApprovals } from "../hooks/use-approvals";
@@ -152,6 +156,8 @@ export function ApprovalsPage() {
   // Items with no project are dropped server-side when a project is selected.
   // Said out loud: an approval that quietly disappears is the one nobody answers.
   const unscoped = query.data?.unscopedCount ?? 0;
+  // Whether this MetaForge holds anything at all (METAFORGE_APPROVALS).
+  const settings = useQuery({ queryKey: ACCOUNT_POLICY_KEY, queryFn: getAccountApprovalPolicy, retry: false });
 
   return (
     <div>
@@ -177,6 +183,7 @@ export function ApprovalsPage() {
           </label>
         }
       />
+      <ApprovalsOffNotice limits={settings.data?.deployment} />
 
       <div
         role="tablist"

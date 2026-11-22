@@ -225,6 +225,17 @@ class HarnessRuntime:
         all, an explicit rejection, or a timeout all raise
         :class:`ApprovalDeniedError` rather than ever silently proceeding.
         """
+        from mcp_core.guardrails import approvals_off, held_even_with_approvals_off
+
+        if approvals_off() and not held_even_with_approvals_off(spec.name):
+            # The people who run this MetaForge turned approvals off: the call
+            # runs, and the log says why it was not held.
+            logger.info(
+                "approval_skipped_approvals_off",
+                tool=spec.name,
+                session_id=self.session_id,
+            )
+            return
         if not self.approver_reachable:
             # FORGE-490: a hold nobody can answer. It will only time out and
             # deny, so say so loudly instead of looking like a slow approver.

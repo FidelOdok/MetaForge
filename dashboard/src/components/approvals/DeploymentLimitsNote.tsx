@@ -23,6 +23,17 @@ const TOOL_NAME: Record<string, string> = {
   'cadquery.execute_script': 'CadQuery scripts',
 };
 
+/** Said wherever approval settings are shown: with approvals off, no setting below holds a call. */
+export function ApprovalsOffNotice({ limits }: { limits?: DeploymentLimits | null }) {
+  if (!limits?.approvals_off) return null;
+  return (
+    <p role="status" data-testid="approvals-off" className="mf-approvals-off">
+      Approvals are off on this MetaForge (METAFORGE_APPROVALS=off): agents' writes run without waiting for anyone.
+      Steps that record a person's decision, approving a release and placing an order still wait for a person.
+    </p>
+  );
+}
+
 export function DeploymentLimitsNote({ limits }: { limits: DeploymentLimits }) {
   const yes = (v: boolean) => (v ? 'allowed' : 'not allowed');
   return (
@@ -36,6 +47,7 @@ export function DeploymentLimitsNote({ limits }: { limits: DeploymentLimits }) {
         below these limits but never go above them.
       </p>
       <ul style={{ margin: 0, paddingLeft: 18 }}>
+        <li>Approvals: {limits.approvals_off ? 'off (METAFORGE_APPROVALS=off)' : 'on'}</li>
         <li>Highest approval mode any project may use: {MODE_NAME[limits.max_mode]}</li>
         <li>
           Agents may decide accept, hand over, rework and uploads for a person:{' '}

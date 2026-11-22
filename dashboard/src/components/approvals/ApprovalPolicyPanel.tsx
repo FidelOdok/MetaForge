@@ -8,7 +8,7 @@ import {
   type ApprovalPolicyUpdate,
   type Delegation,
 } from '../../api/endpoints/approvals';
-import { DeploymentLimitsNote } from './DeploymentLimitsNote';
+import { ApprovalsOffNotice, DeploymentLimitsNote } from './DeploymentLimitsNote';
 
 /**
  * FORGE-726/730: who decides this project's design-flow gates and its held
@@ -97,6 +97,7 @@ export function ApprovalPolicyPanel({ projectId }: { projectId: string }) {
 
   return (
     <form className="glass rounded p-4 space-y-3" onSubmit={onSubmit} aria-label="Approval policy">
+      <ApprovalsOffNotice limits={data.deployment} />
       <p style={{ margin: 0, fontSize: 13 }} data-testid="policy-in-force">
         In force now: <strong>{data.effective_mode}</strong>
         {data.policy.expires_at && data.policy.mode === 'auto'

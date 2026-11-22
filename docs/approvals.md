@@ -632,6 +632,33 @@ What is not isolated:
   first, but they are defence in depth. A script that reaches `os` through
   dunder attributes is stopped by the layers above, not by them.
 
+### Turning approvals off
+
+`METAFORGE_APPROVALS=off` in a deployment's environment turns held tool calls off on that
+MetaForge, in any environment (local, staging or production). It is on by default. With it
+off:
+
+- a write that would wait for a person runs at once, over MCP (`guardrails.decide`) and in
+  the dashboard chat (`HarnessRuntime._await_approval`); this includes writes no project
+  policy approves, such as library, project and flow tools;
+- each one is logged, `mcp_tool_call_approvals_off` on the MCP server and
+  `approval_skipped_approvals_off` in the chat, and appears in the session capture like any
+  other call;
+- three kinds of call still wait, because running them with nobody deciding would record a
+  decision nobody made or spend money that cannot be taken back:
+  - a step whose record is a person's decision (accept, hand over, rework, an upload
+    decision);
+  - fixing the release baseline and approving a release;
+  - placing an order (`vendor.place_order`).
+
+  These keep their own routes: a person, or the owner's delegation switches
+  ([delegating approvals to an agent](#delegating-approvals-to-an-agent)).
+
+Design-flow proposals, gates and waivers are not tool-call holds and still go to a person.
+
+The deployment's limits report `approvals_off`. The dashboard says so plainly on the
+Approvals page, on a project's approval policy and in Settings, Approvals, while it is off.
+
 ## Re-checks after a cross-domain change
 
 When a design item's head moves, the twin walks its interface edges and

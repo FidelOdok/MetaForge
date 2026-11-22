@@ -223,6 +223,41 @@ def release_delegated() -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+#: The owner's switch that turns approval holds off on this MetaForge.
+APPROVALS_ENV = "METAFORGE_APPROVALS"
+
+#: Tools that spend money outside MetaForge: a hold is kept even with
+#: approvals off, because an order cannot be taken back.
+SPENDING_TOOLS: frozenset[str] = frozenset({"vendor.place_order"})
+
+
+def approvals_off() -> bool:
+    """Whether the people who run this MetaForge turned approval holds off.
+
+    ``METAFORGE_APPROVALS=off`` in the deployment's environment, in any
+    environment: local, staging or production. Off by default. With it off,
+    a write that would wait for a person runs at once (the server logs each
+    one), except :func:`held_even_with_approvals_off`.
+    """
+    raw = os.environ.get(APPROVALS_ENV, "").strip().lower()
+    return raw in ("off", "0", "false", "no")
+
+
+def held_even_with_approvals_off(tool_id: str) -> bool:
+    """Calls that wait for a person even when approvals are off.
+
+    A human-authority or release step records a person's decision, so
+    running it with nobody deciding would write down an authority that does
+    not exist; an order spends money. Those keep their own routes (a person,
+    or the owner's delegation switches).
+    """
+    return (
+        requires_human_authority(tool_id)
+        or requires_release_delegation(tool_id)
+        or tool_id in SPENDING_TOOLS
+    )
+
+
 def requires_release_delegation(tool_id: str) -> bool:
     """Is this a release step only a person, or an agent the owner delegates, decides?"""
     return tool_id in RELEASE_DELEGATED_TOOLS
@@ -654,6 +689,13 @@ def decide(
             tool_id,
             False,
             "its write is approved on the flow version it proposes or starts, not on the call",
+        )
+
+    if approvals_off() and not held_even_with_approvals_off(tool_id):
+        return Decision(
+            tool_id,
+            False,
+            f"approvals are off on this MetaForge ({APPROVALS_ENV}=off)",
         )
 
     if requires_human_authority(tool_id):
