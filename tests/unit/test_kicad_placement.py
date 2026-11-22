@@ -440,6 +440,33 @@ def test_edit_operations_are_checked_before_the_board_is_touched(
     assert worker.edit({"pcb_path": "x", "operations": [{"op": "explode"}]})["ok"] is False
 
 
+def test_set_model_replaces_or_adds_the_footprint_model(worker: types.ModuleType) -> None:
+    """KiCad ships no model for some packages; an edit points the footprint at one."""
+
+    class Model:
+        m_Filename = ""
+
+    class WithModels:
+        def __init__(self, models: list[Model]) -> None:
+            self.models = models
+
+        def Models(self) -> list[Model]:  # noqa: N802
+            return self.models
+
+    worker.pcbnew.FP_3DMODEL = Model
+    has = WithModels([Model()])
+    worker.set_model(has, "/workspace/models/wqfn30.step")
+    assert [m.m_Filename for m in has.models] == ["/workspace/models/wqfn30.step"]
+    bare = WithModels([])
+    worker.set_model(bare, "/workspace/models/wqfn30.step")
+    assert [m.m_Filename for m in bare.models] == ["/workspace/models/wqfn30.step"]
+    errors = worker.check_operations(
+        [{"op": "set_model", "ref": "U2"}, {"op": "set_model", "model": "a.step"}]
+    )
+    assert len(errors) == 2
+    assert worker.check_operations([{"op": "set_model", "ref": "U2", "model": "a.STEP"}]) == []
+
+
 def test_the_edit_moves_rotates_places_and_strips(
     worker: types.ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:

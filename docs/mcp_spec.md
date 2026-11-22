@@ -1767,6 +1767,7 @@ overlap, and the overlap is listed.
 | `place` | `ref`, any of `position`, `rotation_deg`, `side`, `edge_mount` | As a placement above |
 | `set_mounting_hole` | optional `ref`, `position`, optional `drill_mm` | Moves `H<n>`, or adds the next hole; a new drill replaces the hole |
 | `remove_mounting_hole` | `ref` | Removes a mounting hole (never a part with a net) |
+| `set_model` | `ref`, `model` (a `.step`, `.stp` or `.wrl` path) | Points the footprint's 3D model at that file, for a footprint KiCad ships without a model; copper and placement are unchanged |
 | `strip_routing` | | Removes every track and via and the outer-layer pours; inner planes stay |
 
 The edited board is a new file; record it with `twin.record_design_files`

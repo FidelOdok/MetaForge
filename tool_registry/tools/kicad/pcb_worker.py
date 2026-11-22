@@ -80,13 +80,7 @@ def generate(req: dict[str, Any]) -> dict[str, Any]:
             continue
         fp.SetReference(comp["ref"])
         if comp.get("model"):
-            models = fp.Models()
-            if len(models):
-                models[0].m_Filename = comp["model"]
-            else:
-                m = pcbnew.FP_3DMODEL()
-                m.m_Filename = comp["model"]
-                models.append(m)
+            set_model(fp, comp["model"])
         fp.SetValue(comp["value"])
         fp.SetFPID(pcbnew.LIB_ID(lib, name))
         for key, val in (comp.get("fields") or {}).items():
@@ -734,7 +728,34 @@ def _placement_entry(
 # -- edit --------------------------------------------------------------------------
 
 #: The operations ``edit`` takes, in the order given.
-EDIT_OPS = ("move", "rotate", "place", "set_mounting_hole", "remove_mounting_hole", "strip_routing")
+EDIT_OPS = (
+    "move",
+    "rotate",
+    "place",
+    "set_mounting_hole",
+    "remove_mounting_hole",
+    "set_model",
+    "strip_routing",
+)
+
+#: 3D model files KiCad's STEP export can read.
+MODEL_SUFFIXES = (".step", ".stp", ".wrl")
+
+
+def set_model(fp: Any, path: str) -> None:
+    """Point a footprint's first 3D model at ``path``, adding one if it has none.
+
+    For a library footprint whose model is wrong or missing (KiCad ships no
+    model for some packages, e.g. TI's WQFN-30 RNP0030B). Only the model
+    reference changes: pads, copper and placement stay as they are.
+    """
+    models = fp.Models()
+    if len(models):
+        models[0].m_Filename = path
+    else:
+        m = pcbnew.FP_3DMODEL()
+        m.m_Filename = path
+        models.append(m)
 
 
 def check_operations(ops: list[dict[str, Any]]) -> list[str]:
@@ -746,7 +767,9 @@ def check_operations(ops: list[dict[str, Any]]) -> list[str]:
         if kind not in EDIT_OPS:
             errors.append(f"operations[{i}]: op must be one of {', '.join(EDIT_OPS)}")
             continue
-        if kind in ("move", "rotate", "place", "remove_mounting_hole") and not op.get("ref"):
+        if kind in ("move", "rotate", "place", "remove_mounting_hole", "set_model") and not op.get(
+            "ref"
+        ):
             errors.append(f"{where}: needs ref")
         if kind == "move" and not op.get("position"):
             errors.append(f"{where}: needs position")
@@ -761,6 +784,8 @@ def check_operations(ops: list[dict[str, Any]]) -> list[str]:
             errors.append(f"{where}: needs position, rotation_deg, side or edge_mount")
         if kind == "set_mounting_hole" and not op.get("position"):
             errors.append(f"{where}: needs position")
+        if kind == "set_model" and not str(op.get("model") or "").lower().endswith(MODEL_SUFFIXES):
+            errors.append(f"{where}: needs model, a {', '.join(MODEL_SUFFIXES)} path")
     return errors
 
 
@@ -857,6 +882,10 @@ def edit(req: dict[str, Any]) -> dict[str, Any]:
                 return {"ok": False, "errors": [f"{ref} is not a mounting hole"]}
             board.Delete(fp)
             applied.append({"op": kind, "ref": ref})
+            continue
+        if kind == "set_model":
+            set_model(fp, str(op["model"]))
+            applied.append({"op": kind, "ref": ref, "model": str(op["model"])})
             continue
         touched.add(ref)
         if kind == "move":

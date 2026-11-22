@@ -149,7 +149,10 @@ def register_generation_tools(server: KicadServer) -> None:
                 "position?, rotation_deg?, side?, edge_mount?: {edge: +x|-x|+y|-y, "
                 "overhang_mm}} (the same rules as a generate_pcb placement); {op: "
                 "set_mounting_hole, ref?, position, drill_mm?} (moves H<n>, or adds one); "
-                "{op: remove_mounting_hole, ref}; {op: strip_routing}. With reroute "
+                "{op: remove_mounting_hole, ref}; {op: set_model, ref, model} (points the "
+                "footprint's 3D model at a .step/.stp/.wrl file on the workspace, for a "
+                "footprint KiCad ships without one; pass reroute false to keep the copper); "
+                "{op: strip_routing}. With reroute "
                 "(default true) the old tracks, vias and outer pours are stripped first "
                 "and the ground pour net is reused. The input file is never changed. "
                 "Record the new board with twin.record_design_files (work_product_type "
@@ -174,10 +177,15 @@ def register_generation_tools(server: KicadServer) -> None:
                                         "place",
                                         "set_mounting_hole",
                                         "remove_mounting_hole",
+                                        "set_model",
                                         "strip_routing",
                                     ],
                                 },
                                 "ref": {"type": "string"},
+                                "model": {
+                                    "type": "string",
+                                    "description": "set_model: a .step, .stp or .wrl path",
+                                },
                                 "position": {
                                     "type": "object",
                                     "properties": {
