@@ -529,3 +529,27 @@
   text-transform: uppercase;
   color: var(--mf-c-9a9aaa);
 }
+/* The three ratings tables share one column grid, so min, typ and max line up. */
+.mf-part-ratings .mf-library-table {
+  table-layout: fixed;
+}
+.mf-part-ratings .mf-library-table td {
+  overflow-wrap: anywhere;
+}
+.mf-part-ratings th:nth-child(1) {
+  width: 22%;
+}
+.mf-part-ratings th:nth-child(2),
+.mf-part-ratings th:nth-child(3),
+.mf-part-ratings th:nth-child(4) {
+  width: 8%;
+}
+.mf-part-ratings th:nth-child(5) {
+  width: 7%;
+}
+.mf-part-ratings th:nth-child(6) {
+  width: 29%;
+}
+.mf-part-ratings th:nth-child(7) {
+  width: 18%;
+}
