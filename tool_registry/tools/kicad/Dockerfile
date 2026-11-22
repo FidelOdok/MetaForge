@@ -63,7 +63,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends kicad-packages3
         Package_TO_SOT_SMD Package_SO Package_QFP Package_DFN_QFN Package_LGA Package_SON \
         Package_CSP Crystal Oscillator Connector_JST Connector_USB Connector_PinHeader_2.54mm \
         Connector_PinHeader_1.27mm Connector_PinSocket_2.54mm Button_Switch_SMD Fuse TestPoint \
-        Connector_Coaxial Buzzer_Beeper Sensor_Pressure RF_Module" \
+        Connector_Coaxial Buzzer_Beeper Sensor_Pressure RF_Module TerminalBlock_Phoenix" \
     && for d in *.3dshapes; do \
          case " $(echo $keep) " in *" ${d%.3dshapes} "*) ;; *) rm -rf "$d" ;; esac; \
        done \
