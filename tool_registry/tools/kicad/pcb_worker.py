@@ -164,6 +164,9 @@ def generate(req: dict[str, Any]) -> dict[str, Any]:
     for entry in placement["placements"]:
         if entry["ref"] in hinted:
             entry.update(hinted[entry["ref"]])
+    zones = board_spec.get("power_zones") or []
+    for rank, spec in enumerate(zones):
+        _power_zone(board, footprints, nets, spec, priority=len(zones) - rank + 1)
     pcbnew.SaveBoard(out, board)
     return {
         "ok": True,
@@ -813,7 +816,11 @@ def _board_frame(board: Any) -> tuple[float, float, float, float]:
 
 
 def strip_routing(board: Any) -> dict[str, Any]:
-    """Remove every track and via, and the outer-layer copper pours; inner planes stay."""
+    """Remove every track and via, and the outer-layer copper pours.
+
+    Inner planes stay, and so do local power pours (``power:<net>``): they are
+    part of the layout the circuit asked for, not the router's output.
+    """
     tracks = list(board.GetTracks())
     vias = sum(1 for t in tracks if t.GetClass() == "PCB_VIA")
     for t in tracks:
@@ -821,7 +828,9 @@ def strip_routing(board: Any) -> dict[str, Any]:
     pours = [
         z
         for z in list(board.Zones())
-        if not z.GetIsRuleArea() and z.GetLayer() in (pcbnew.F_Cu, pcbnew.B_Cu)
+        if not z.GetIsRuleArea()
+        and z.GetLayer() in (pcbnew.F_Cu, pcbnew.B_Cu)
+        and not z.GetZoneName().startswith(POWER_ZONE)  # part of the design, not routing
     ]
     nets = sorted({z.GetNetname() for z in pours if z.GetNetname()})
     for z in pours:
@@ -1141,6 +1150,83 @@ def _fanout_planes(board: Any) -> dict[str, Any]:
             if not done:
                 skipped.append(f"{fp.GetReference()}.{pad.GetNumber()}")
     return {"vias": len(placed) // 2, "skipped": skipped}
+
+
+#: Zone name prefix that marks a local power pour (kept by strip_routing).
+POWER_ZONE = "power:"
+
+
+def pad_hull(
+    boxes: list[tuple[float, float, float, float]], margin: float
+) -> list[tuple[float, float]]:
+    """The convex hull, counter-clockwise, of rectangles grown by ``margin`` on every side.
+
+    Pure geometry, so it is tested without KiCad: the outline of a power pour
+    over a net's pads.
+    """
+    pts = sorted(
+        {
+            (x, y)
+            for x0, y0, x1, y1 in boxes
+            for x in (x0 - margin, x1 + margin)
+            for y in (y0 - margin, y1 + margin)
+        }
+    )
+    if len(pts) <= 2:
+        return pts
+
+    def cross(o: tuple[float, float], a: tuple[float, float], b: tuple[float, float]) -> float:
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower: list[tuple[float, float]] = []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    upper: list[tuple[float, float]] = []
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return lower[:-1] + upper[:-1]
+
+
+def _power_zone(
+    board: Any,
+    footprints: dict[str, Any],
+    nets: dict[str, Any],
+    spec: dict[str, Any],
+    priority: int,
+) -> Any:
+    """A pour of ``spec['net']`` over the hull of its pads on ``spec['refs']``."""
+    net_name = spec["net"]
+    boxes = []
+    for ref in spec["refs"]:
+        fp = footprints.get(ref)
+        if fp is None:
+            continue
+        for pad in fp.Pads():
+            if pad.GetNetname() == net_name:
+                bb = pad.GetBoundingBox()
+                boxes.append(
+                    (_mm(bb.GetX()), _mm(bb.GetY()), _mm(bb.GetRight()), _mm(bb.GetBottom()))
+                )
+    if not boxes:
+        return None
+    layer = pcbnew.F_Cu if spec.get("layer", "F.Cu") == "F.Cu" else pcbnew.B_Cu
+    zone = pcbnew.ZONE(board)
+    zone.SetLayer(layer)
+    zone.SetNetCode(nets[net_name].GetNetCode())
+    zone.SetZoneName(f"{POWER_ZONE}{net_name}")
+    zone.SetAssignedPriority(priority)
+    zone.SetMinThickness(MM(0.25))
+    zone.SetPadConnection(pcbnew.ZONE_CONNECTION_FULL)
+    outline = zone.Outline()
+    outline.NewOutline()
+    for x, y in pad_hull(boxes, float(spec.get("margin_mm", 0.4))):
+        outline.Append(MM(x), MM(y))
+    board.Add(zone)
+    return zone
 
 
 def _pour(board: Any, net_name: str) -> None:

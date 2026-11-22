@@ -440,6 +440,42 @@ def test_edit_operations_are_checked_before_the_board_is_touched(
     assert worker.edit({"pcb_path": "x", "operations": [{"op": "explode"}]})["ok"] is False
 
 
+def test_a_power_pour_is_the_hull_of_its_pads(worker: types.ModuleType) -> None:
+    # Two pads 10 mm apart, grown by 0.5 mm: the hull is the rectangle around both.
+    hull = worker.pad_hull([(0, 0, 1, 1), (10, 0, 11, 1)], 0.5)
+    assert sorted(hull) == [(-0.5, -0.5), (-0.5, 1.5), (11.5, -0.5), (11.5, 1.5)]
+    # An L of three pads: the hull cuts the corner, counter-clockwise, no repeats.
+    hull = worker.pad_hull([(0, 0, 1, 1), (10, 0, 11, 1), (0, 10, 1, 11)], 0.0)
+    assert len(hull) == len(set(hull)) == 5
+    area = sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(hull, hull[1:] + hull[:1])) / 2
+    assert area > 0  # counter-clockwise
+    assert worker.pad_hull([], 0.4) == []
+
+
+def test_strip_routing_keeps_the_power_pours(worker: types.ModuleType) -> None:
+    class Zone:
+        def __init__(self, name: str, net: str) -> None:
+            self.name, self.net = name, net
+
+        def GetIsRuleArea(self) -> bool:  # noqa: N802
+            return False
+
+        def GetLayer(self) -> int:  # noqa: N802
+            return F_CU
+
+        def GetZoneName(self) -> str:  # noqa: N802
+            return self.name
+
+        def GetNetname(self) -> str:  # noqa: N802
+            return self.net
+
+    board = Board([])
+    gnd, vbat = Zone("", "GND"), Zone("power:VBAT", "VBAT")
+    board.zones = [gnd, vbat]
+    out = worker.strip_routing(board)
+    assert out["pour_nets"] == ["GND"] and board.zones == [vbat]
+
+
 def test_set_model_replaces_or_adds_the_footprint_model(worker: types.ModuleType) -> None:
     """KiCad ships no model for some packages; an edit points the footprint at one."""
 
@@ -488,6 +524,9 @@ def test_the_edit_moves_rotates_places_and_strips(
 
         def GetNetname(self) -> str:  # noqa: N802
             return "GND"
+
+        def GetZoneName(self) -> str:  # noqa: N802
+            return ""
 
     board = Board([j1, r2, h2])
     board.tracks = [Track(), Track()]

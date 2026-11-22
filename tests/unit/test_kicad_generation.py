@@ -246,6 +246,22 @@ class TestCircuitModel:
         with pytest.raises(ValueError):
             Circuit.model_validate({**LDO_LED, "board": {**board, "edge_clearance_mm": 0}})
 
+    def test_power_zones_name_a_net_and_parts_on_it(self) -> None:
+        """A buck stage's amps need pours, not tracks: each names its net and the
+        parts whose pads on that net it joins."""
+        board = {"width_mm": 50, "height_mm": 40}
+        zone = {"net": "VIN", "refs": ["J1", "U1", "C1"]}
+        ok = Circuit.model_validate({**LDO_LED, "board": {**board, "power_zones": [zone]}})
+        assert ok.board is not None and ok.board.power_zones[0].layer == "F.Cu"
+        assert ok.board.power_zones[0].margin_mm == 0.4
+        for bad, match in (
+            ({"net": "VBUS", "refs": ["J1"]}, "no net named"),
+            ({"net": "VIN", "refs": ["Q9"]}, "unknown component Q9"),
+            ({"net": "VIN", "refs": ["R1"]}, "R1 has no pad on it"),
+        ):
+            with pytest.raises(ValueError, match=match):
+                Circuit.model_validate({**LDO_LED, "board": {**board, "power_zones": [bad]}})
+
     def test_a_component_may_name_its_own_3d_model(self) -> None:
         model = "${KICAD9_3DMODEL_DIR}/Package_DFN_QFN.3dshapes/QFN-24.step"
         comps = [{**LDO_LED["components"][0], "model": model}, *LDO_LED["components"][1:]]

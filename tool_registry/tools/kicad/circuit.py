@@ -116,6 +116,28 @@ class MountingHole(BaseModel):
     )
 
 
+class PowerZone(BaseModel):
+    """A local copper pour joining one high-current net's pads on a few parts.
+
+    A buck stage carrying amps cannot be wired with tracks alone: its power pins
+    are fine-pitch pads a wide track cannot land on without touching the pin
+    beside it. A pour over the hull of the net's pads on the named parts (the
+    regulator's input pins, its capacitors and the input connector, say) carries
+    the current while the router reaches the pads as part of a plane.
+    """
+
+    net: str = Field(..., description="The net to pour, e.g. VBAT, SW or +5V")
+    refs: list[str] = Field(
+        ...,
+        min_length=1,
+        description="Parts whose pads on this net the pour covers, e.g. [U2, C17, J3]",
+    )
+    layer: Literal["F.Cu", "B.Cu"] = "F.Cu"
+    margin_mm: float = Field(
+        default=0.4, ge=0, le=5, description="How far the pour reaches beyond those pads"
+    )
+
+
 class Component(BaseModel):
     ref: str = Field(..., description="Reference designator, e.g. U1")
     symbol: str = Field(..., description="KiCad symbol lib_id, e.g. Device:R")
@@ -225,6 +247,14 @@ class Board(BaseModel):
             "they replace the four corner holes"
         ),
     )
+    power_zones: list[PowerZone] = Field(
+        default_factory=list,
+        description=(
+            "Local pours for high-current nets, in priority order (the first wins where "
+            "two overlap): each covers the hull of its net's pads on the named parts. "
+            "The router sees each as a plane of its net"
+        ),
+    )
     inner_planes: list[str] = Field(
         default_factory=list,
         description=(
@@ -285,6 +315,15 @@ class Circuit(BaseModel):
                         f"{comp.ref}: position ({pos.x_mm}, {pos.y_mm}) is outside the "
                         f"{w} x {h} mm board"
                     )
+            net_nodes = {n.name: {node.split(".", 1)[0] for node in n.nodes} for n in self.nets}
+            for zone in self.board.power_zones:
+                if zone.net not in net_nodes:
+                    raise ValueError(f"power_zones: no net named {zone.net!r}")
+                for ref in zone.refs:
+                    if ref not in known:
+                        raise ValueError(f"power_zones {zone.net}: unknown component {ref}")
+                    if ref not in net_nodes[zone.net]:
+                        raise ValueError(f"power_zones {zone.net}: {ref} has no pad on it")
             for i, hole in enumerate(self.board.mounting_holes, start=1):
                 p = hole.position
                 if not (0 <= p.x_mm <= w and 0 <= p.y_mm <= h):
