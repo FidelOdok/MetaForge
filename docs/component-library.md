@@ -51,7 +51,7 @@ engineering verification. Missing specifications remain unknown.
 ## Real part data on an electronic part
 
 An electronic part, a module or a battery needs more than one sourced number per spec before
-a design can rely on it (FORGE-906). `library.register_component`, `library.update_component`
+a design can rely on it. `library.register_component`, `library.update_component`
 and `component.adopt` take three more fields, each sourced like a spec
 (`twin_core/library/part_data.py`):
 
@@ -99,7 +99,7 @@ to do, read when the thread is shown.
 | --- | --- |
 | `schema_version` | `1` |
 | `model_id`, `version` | Stable model identity and immutable content version |
-| `kind` | `cad`, `physics`, `emulation`, `module`, or `spice` (a vendor circuit model for ngspice, FORGE-906) |
+| `kind` | `cad`, `physics`, `emulation`, `module`, or `spice` (a vendor circuit model for ngspice) |
 | `engine`, `engine_versions` | Required engine and optional exact allowed versions |
 | `entrypoint` | One of the artifact paths |
 | `usage`, `limitations` | How to use it and what it cannot establish |
