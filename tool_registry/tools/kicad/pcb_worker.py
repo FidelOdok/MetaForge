@@ -197,6 +197,8 @@ def _rules(board: Any, spec: dict[str, Any]) -> None:
     ds.m_TrackMinWidth = min(ds.m_TrackMinWidth, MM(float(spec.get("track_mm", 0.25))))
     if spec.get("hole_clearance_mm"):
         ds.m_HoleClearance = MM(float(spec["hole_clearance_mm"]))
+    if spec.get("edge_clearance_mm"):
+        ds.m_CopperEdgeClearance = MM(float(spec["edge_clearance_mm"]))
     power = spec.get("power_track_mm")
     if power and spec.get("power_nets"):
         pc = pcbnew.NETCLASS("Power")

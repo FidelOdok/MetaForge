@@ -310,7 +310,27 @@ async def _create_remote_adapter(adapter_id: str, url: str) -> McpClient:
         )
         client.register_manifest(manifest)
 
+    # The slowest tool the adapter declares sets how long a call may take, with a
+    # minute's margin for the adapter's own start-up and result writing.
+    longest = max(
+        (
+            float((t.get("resource_limits") or {}).get("max_cpu_seconds") or 0)
+            for t in response.get("result", {}).get("tools", [])
+        ),
+        default=0.0,
+    )
+    if longest:
+        transport.extend_timeout(longest + REMOTE_TIMEOUT_MARGIN_S)
+        logger.info(
+            "remote_adapter_timeout",
+            adapter_id=adapter_id,
+            timeout_s=transport.timeout,
+        )
     return client
+
+
+#: Added to an adapter's slowest declared tool time for its HTTP call timeout.
+REMOTE_TIMEOUT_MARGIN_S = 60.0
 
 
 def _create_adapter(adapter_id: str, spec: dict[str, str]) -> Any | None:

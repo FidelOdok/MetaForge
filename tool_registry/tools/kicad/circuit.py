@@ -204,6 +204,14 @@ class Board(BaseModel):
             "what the fab allows when a vendor land pattern sits closer to its own holes"
         ),
     )
+    edge_clearance_mm: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Copper-to-board-edge clearance; KiCad's default (0.5) when omitted. Set it to "
+            "what the fab allows (often 0.3) when connectors or power tracks run along an edge"
+        ),
+    )
     ground_pour: str | None = Field(
         default=None, description="Net to pour on the outer layers, e.g. GND"
     )

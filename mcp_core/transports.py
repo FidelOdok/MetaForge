@@ -96,6 +96,21 @@ class HttpTransport(Transport):
         self._session: Any = None
         self._connected = False
 
+    @property
+    def timeout(self) -> float:
+        """Seconds a call may take before the transport gives up."""
+        return self._timeout
+
+    def extend_timeout(self, seconds: float) -> None:
+        """Let calls run at least ``seconds`` (never shortens the current timeout).
+
+        An adapter declares how long its slowest tool may run (a board's
+        autoroute: 900 s); a flat 120 s cut those calls off while the adapter
+        kept working, and the client got no answer.
+        """
+        if seconds > self._timeout:
+            self._timeout = float(seconds)
+
     async def send(self, message: str) -> str:
         """Post a JSON-RPC message to the remote MCP endpoint and return the response."""
         import aiohttp  # lazy import — not in mcp_core's required deps

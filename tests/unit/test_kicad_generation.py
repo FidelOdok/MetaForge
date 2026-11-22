@@ -236,6 +236,16 @@ class TestCircuitModel:
         assert ok.board is not None and ok.board.inner_planes == ["GND", "+3V3"]
         assert ok.board.hole_clearance_mm == 0.15
 
+    def test_the_edge_clearance_follows_the_fab_or_kicads_default(self) -> None:
+        """Power tracks and edge connectors run along an edge; KiCad's 0.5 mm
+        default failed a flight controller whose fab allows 0.3 mm."""
+        board = {"width_mm": 50, "height_mm": 40}
+        assert Circuit.model_validate({**LDO_LED, "board": board}).board.edge_clearance_mm is None
+        ok = Circuit.model_validate({**LDO_LED, "board": {**board, "edge_clearance_mm": 0.3}})
+        assert ok.board is not None and ok.board.edge_clearance_mm == 0.3
+        with pytest.raises(ValueError):
+            Circuit.model_validate({**LDO_LED, "board": {**board, "edge_clearance_mm": 0}})
+
     def test_a_component_may_name_its_own_3d_model(self) -> None:
         model = "${KICAD9_3DMODEL_DIR}/Package_DFN_QFN.3dshapes/QFN-24.step"
         comps = [{**LDO_LED["components"][0], "model": model}, *LDO_LED["components"][1:]]
