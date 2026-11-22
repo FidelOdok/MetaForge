@@ -172,6 +172,28 @@ _SPECS = (
     "A module, battery or electronic part is length_mm x width_mm x height_mm: its height "
     "is height_mm, never thickness_mm (that is for plates and washers). "
 )
+_PART_DATA = (
+    "Real part data (FORGE-906), each piece sourced like a value: ratings is a list of "
+    "rows copied from the datasheet's tables, {param, kind, min, typ, max (any the "
+    "datasheet gives), unit, conditions (its test conditions, e.g. VIN = 5 V, IOUT = 0.5 "
+    "A), source_kind, source_ref (the datasheet URL and its table or page)}; kind is "
+    "abs_max (Absolute Maximum Ratings), recommended (Recommended Operating Conditions) "
+    "or electrical (Electrical Characteristics); param is one of supply_voltage_v, "
+    "input_voltage_v, output_voltage_v, pin_voltage_v, dropout_voltage_v, "
+    "forward_voltage_v, reverse_voltage_v, voltage_rating_v, esd_hbm_v, esd_cdm_v (V); "
+    "output_current_a, input_current_a, forward_current_a, peak_current_a, "
+    "current_limit_a, quiescent_current_a, leakage_current_a (A); power_dissipation_w, "
+    "power_rating_w (W); junction_temp_c, operating_temp_c, storage_temp_c (degC); "
+    "thermal_resistance_ja_c_per_w, thermal_resistance_jc_c_per_w (degC/W); "
+    "switching_frequency_hz (Hz); capacitance_f (F), resistance_ohm (ohm), inductance_h "
+    "(H), tolerance_pct (%). lifecycle is {status (active, nrnd, eol, obsolete or "
+    "unknown), source_kind, source_ref (the maker's notice or the distributor's page), "
+    "read_on (YYYY-MM-DD), last_time_buy?}. ecad is {symbol, footprint (KiCad ids, "
+    "Library:Name, e.g. Regulator_Linear:AMS1117-3.3 and "
+    "Package_TO_SOT_SMD:SOT-223-3_TabPin2), source_kind, source_ref}. A vendor SPICE "
+    "model is a models entry of kind spice, engine ngspice. Copy only what the datasheet "
+    "states; leave the rest out. The entry's part_data says what is still missing. "
+)
 _PROPERTIES = (
     "properties is an object keyed by name: density_kg_m3 (kg/m3), youngs_modulus_mpa, "
     "youngs_modulus_across_mpa, yield_strength_mpa, yield_strength_across_mpa, "
@@ -455,7 +477,7 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                 "board: the PCB, its connectors and largest chips). A studio places it with "
                 "g.model(name). Register a real part the first time you choose it, "
                 "so later projects find it with library.list_components instead of "
-                "researching it again. " + _SPECS + _SOURCES + " For a standard part, "
+                "researching it again. " + _SPECS + _PART_DATA + _SOURCES + " For a standard part, "
                 "build the entry with library.standard_part and register what it returns. "
                 "Held for the person's approval."
             )
@@ -499,6 +521,52 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                         "Drawing code for g.model(name): the body of a function of g, "
                         "mm, centred, x length, y height, z width. At most 6000 bytes."
                     ),
+                },
+                "ratings": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "param": {"type": "string"},
+                            "kind": {
+                                "type": "string",
+                                "enum": ["abs_max", "recommended", "electrical"],
+                            },
+                            "min": {"type": "number"},
+                            "typ": {"type": "number"},
+                            "max": {"type": "number"},
+                            "unit": {"type": "string"},
+                            "conditions": {"type": "string"},
+                            "source_kind": {"type": "string"},
+                            "source_ref": {"type": "string"},
+                        },
+                        "required": ["param", "kind", "source_kind"],
+                    },
+                    "description": "Rows from the datasheet's rating tables.",
+                },
+                "lifecycle": {
+                    "type": "object",
+                    "properties": {
+                        "status": {
+                            "type": "string",
+                            "enum": ["active", "nrnd", "eol", "obsolete", "unknown"],
+                        },
+                        "source_kind": {"type": "string"},
+                        "source_ref": {"type": "string"},
+                        "read_on": {"type": "string"},
+                        "last_time_buy": {"type": "string"},
+                    },
+                    "required": ["status", "source_kind", "read_on"],
+                },
+                "ecad": {
+                    "type": "object",
+                    "properties": {
+                        "symbol": {"type": "string"},
+                        "footprint": {"type": "string"},
+                        "source_kind": {"type": "string"},
+                        "source_ref": {"type": "string"},
+                    },
+                    "required": ["source_kind"],
                 },
                 "notes": {"type": "string"},
             }
@@ -559,7 +627,9 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                     "component": "title, specs (merged by name), geometry, material, "
                     "suppliers (replaced), manufacturer, manufacturer_org (an organisation "
                     "id or any of its spellings), mpn, datasheet, interfaces "
-                    "(replaced) or notes.",
+                    "(replaced), ratings (replaced: the datasheet's rows as one set), "
+                    "lifecycle, ecad, models (a published version is never changed: add a "
+                    "new version or withdraw it) or notes.",
                     "appearance": "title, finish, colour (replaced), texture, properties "
                     "(merged by name), materials, processes, suppliers (replaced) or notes.",
                     "ergonomic_limit": "title, applies_to, min, max, population, "

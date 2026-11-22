@@ -435,3 +435,97 @@
 .mf-library-owner-filter {
   margin: 8px 0 4px;
 }
+
+/* FORGE-906: real part data. Status pills follow .mf-library-org-status. */
+.mf-part-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 500;
+  vertical-align: middle;
+  color: var(--mf-c-9a9aaa);
+  border: 1px solid var(--mf-r-65-72-90-0p3);
+}
+.mf-part-status[data-status='active'] {
+  color: var(--color-success, #3dd68c);
+  border-color: currentColor;
+}
+.mf-part-status[data-status='nrnd'],
+.mf-part-status[data-status='eol'] {
+  color: var(--color-warning, #f59e0b);
+  border-color: currentColor;
+}
+.mf-part-status[data-status='obsolete'] {
+  color: var(--color-error, #ffb4ab);
+  border-color: currentColor;
+}
+.mf-part-summary {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--color-warning, #f59e0b);
+}
+.mf-part-summary[data-complete='true'] {
+  color: var(--color-success, #3dd68c);
+}
+.mf-part-checklist {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+.mf-part-checklist li {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--mf-r-65-72-90-0p2);
+  color: var(--mf-c-e2e2eb);
+}
+.mf-part-checklist li:last-child {
+  border-bottom: 0;
+}
+.mf-part-check-detail {
+  grid-column: 2 / 4;
+  overflow-wrap: anywhere;
+}
+.mf-part-check-state {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--mf-c-9a9aaa);
+}
+.mf-part-checklist li[data-status='ok'] svg,
+.mf-part-checklist li[data-status='ok'] .mf-part-check-state {
+  color: var(--color-success, #3dd68c);
+}
+.mf-part-checklist li[data-status='review'] svg,
+.mf-part-checklist li[data-status='review'] .mf-part-check-state {
+  color: var(--color-warning, #f59e0b);
+}
+.mf-part-checklist li[data-status='bad'] svg,
+.mf-part-checklist li[data-status='bad'] .mf-part-check-state {
+  color: var(--color-error, #ffb4ab);
+}
+.mf-part-checklist li[data-status='missing'] svg {
+  color: var(--mf-c-9a9aaa);
+}
+.mf-part-ratings {
+  display: grid;
+  gap: 12px;
+  overflow-x: auto;
+}
+.mf-part-ratings caption {
+  padding: 0 8px 4px;
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mf-c-9a9aaa);
+}

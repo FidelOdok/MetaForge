@@ -172,6 +172,18 @@ class ComponentFinderServer(McpToolServer):
                         "datasheet": {"type": "string"},
                         "specs": {"type": "object"},
                         "interfaces": {"type": "array", "items": {"type": "object"}},
+                        "ratings": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                            "description": (
+                                "Rows from the datasheet's rating tables, as "
+                                "library.register_component takes them (FORGE-906)."
+                            ),
+                        },
+                        "ecad": {
+                            "type": "object",
+                            "description": "{symbol, footprint, source_kind, source_ref}",
+                        },
                         "notes": {"type": "string"},
                     },
                     "required": ["mpn", "manufacturer", "distributor", "family"],
@@ -436,6 +448,33 @@ class ComponentFinderServer(McpToolServer):
                 data["specs"] = arguments["specs"]
             if arguments.get("interfaces"):
                 data["interfaces"] = arguments["interfaces"]
+            lifecycle = adopted_lifecycle(part, adapter.name, today)
+            if lifecycle:
+                data["lifecycle"] = lifecycle
+            for key in ("ratings", "ecad"):
+                if arguments.get(key):
+                    data[key] = arguments[key]
             result = await self._library.register_entry("component", data, "component.adopt")
         logger.info("component_adopted", mpn=mpn, distributor=adapter.name)
         return result
+
+
+#: A distributor's lifecycle word, as the library records it (FORGE-906).
+_LIFECYCLE = {"ACTIVE": "active", "NRND": "nrnd", "EOL": "eol", "OBSOLETE": "obsolete"}
+
+
+def adopted_lifecycle(part: Any, distributor: str, today: str) -> dict[str, Any]:
+    """The lifecycle the distributor reported, sourced to it, or nothing.
+
+    UNKNOWN (what a distributor says when it does not know) is left out
+    rather than recorded, so the part shows its lifecycle as missing.
+    """
+    status = _LIFECYCLE.get(str(getattr(part, "lifecycle_status", "") or "").upper())
+    if part is None or status is None:
+        return {}
+    return {
+        "status": status,
+        "source_kind": "supplier",
+        "source_ref": getattr(part, "product_url", "") or f"{distributor} API",
+        "read_on": today,
+    }

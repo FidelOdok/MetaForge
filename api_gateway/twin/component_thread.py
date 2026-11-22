@@ -77,11 +77,13 @@ def _created(node: Any) -> str:
 def library_components() -> list[dict[str, Any]]:
     """The component library the caller may see: ``{id, name, mpn, manufacturer, shared}``."""
     from api_gateway.library.catalog_routes import get_catalog
+    from twin_core.library.part_data import check_part_data
 
     catalog = get_catalog()
     out = []
     for entry in catalog.list("component"):
         data = entry.as_dict() if hasattr(entry, "as_dict") else dict(entry)
+        check = data.get("part_data") or check_part_data(data)
         if isinstance(data.get("shared"), bool):
             # The gateway's view (the MCP sidecar) says so itself.
             shared = bool(data["shared"])
@@ -95,9 +97,25 @@ def library_components() -> list[dict[str, Any]]:
                 "mpn": data.get("mpn") or "",
                 "manufacturer": data.get("manufacturer") or data.get("manufacturer_org") or "",
                 "shared": shared,
+                "part_data": part_data_brief(check),
             }
         )
     return out
+
+
+def part_data_brief(check: dict[str, Any]) -> dict[str, Any] | None:
+    """FORGE-906: a library part's completeness, as a thread row shows it."""
+    if not check or not check.get("applies"):
+        return None
+    return {
+        "complete": bool(check.get("complete")),
+        "summary": str(check.get("summary") or ""),
+        "gaps": [
+            i["label"]
+            for i in check.get("items") or []
+            if i.get("required") and i.get("status") != "ok"
+        ],
+    }
 
 
 #: The library writes a few units its own way; the requirement check reads pint units.
@@ -206,6 +224,10 @@ def selection_of(
     }
     lib_ref = specs.get("library_entry") if isinstance(specs.get("library_entry"), dict) else None
     lib_ref = lib_ref or library_for(mpn, library)
+    if lib_ref:
+        # Completeness is read now, not when the selection was recorded.
+        found = next((e for e in library if e.get("id") == lib_ref.get("id")), None)
+        lib_ref = {**lib_ref, "part_data": (found or {}).get("part_data")}
     if specs_of is not None and lib_ref and lib_ref.get("id"):
         for key, value in specs_of(str(lib_ref["id"])).items():
             numbers.setdefault(key, value)

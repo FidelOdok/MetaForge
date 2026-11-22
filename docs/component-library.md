@@ -48,6 +48,48 @@ engineering verification. Missing specifications remain unknown.
 - `simready.search`, `simready.inspect`, and `simready.import` retrieve upstream
   USD assets. These remain distinct from exact manufacturer-part records.
 
+## Real part data on an electronic part
+
+An electronic part, a module or a battery needs more than one sourced number per spec before
+a design can rely on it (FORGE-906). `library.register_component`, `library.update_component`
+and `component.adopt` take three more fields, each sourced like a spec
+(`twin_core/library/part_data.py`):
+
+| Field | What it holds |
+| --- | --- |
+| `ratings` | Rows copied from the datasheet's tables: `{param, kind, min, typ, max, unit, conditions, source_kind, source_ref}`. `kind` is `abs_max` (Absolute Maximum Ratings, never to be reached), `recommended` (Recommended Operating Conditions, where the part is specified to work) or `electrical` (Electrical Characteristics, what it does there). `param` comes from a closed list with one unit each, such as `input_voltage_v`, `junction_temp_c` (degC) or `thermal_resistance_ja_c_per_w`. A row gives whichever of min, typ and max the datasheet gives, in order, with its test conditions. An update replaces the rows as one set. |
+| `lifecycle` | `{status, source_kind, source_ref, read_on, last_time_buy?}`, the status one of `active`, `nrnd`, `eol`, `obsolete` or `unknown`. `component.adopt` records the distributor's status, sourced to its product page, and leaves out `UNKNOWN`. |
+| `ecad` | `{symbol, footprint, source_kind, source_ref}`: the KiCad library ids the part is drawn with, `Library:Name`. |
+
+A vendor SPICE model is a `models` entry of kind `spice`, engine `ngspice`.
+
+Every read of a component adds `part_data`, worked out then and never stored: an item per
+requirement, each `ok`, `review` (present but assumed, or stale), `missing` or `bad` (an ended
+part), and `complete` when every required item is `ok`. For an electronic part the required
+items are:
+
+- the exact part number and maker;
+- the datasheet;
+- absolute maximum ratings;
+- recommended operating conditions;
+- lifecycle (unknown, assumed or read more than a year ago is `review`);
+- a supplier offer read in the last 30 days;
+- a 3D model;
+- the KiCad symbol and footprint.
+
+A SPICE model is listed as optional. A module or battery skips the symbol, footprint and SPICE
+items. Other families are not checked. The check never fills a gap.
+
+The dashboard's library page shows:
+
+- the lifecycle and the KiCad ids among the part's facts;
+- a Part data checklist;
+- the datasheet ratings as three tables, each row linked to its source;
+- an ended part with a warning, filtered out by Hide discontinued.
+
+In the component thread, Develop's part says `Part data complete` or how many items are still
+to do, read when the thread is shown.
+
 ## Model representations on reusable entries
 
 `library.register_component` and `library.update_component` accept an optional
@@ -57,7 +99,7 @@ engineering verification. Missing specifications remain unknown.
 | --- | --- |
 | `schema_version` | `1` |
 | `model_id`, `version` | Stable model identity and immutable content version |
-| `kind` | `cad`, `physics`, `emulation`, or `module` |
+| `kind` | `cad`, `physics`, `emulation`, `module`, or `spice` (a vendor circuit model for ngspice, FORGE-906) |
 | `engine`, `engine_versions` | Required engine and optional exact allowed versions |
 | `entrypoint` | One of the artifact paths |
 | `usage`, `limitations` | How to use it and what it cannot establish |
@@ -215,8 +257,9 @@ false` searches only the library.
 
 `component.adopt` registers a chosen distributor part in the library: its maker, order code,
 title, datasheet and `family`, and the distributor's live price breaks and stock as a dated
-offer (`read_on` today, `via` the distributor's API). Sizes and interfaces go in only when
-the caller passes them with their source, read from the datasheet; nothing is guessed. A part
+offer (`read_on` today, `via` the distributor's API), and the distributor's lifecycle status
+sourced to its product page. Sizes, interfaces, `ratings` and `ecad` go in only when the caller
+passes them with their source, read from the datasheet; nothing is guessed. A part
 the library already holds is refused, with a pointer to the entry. It is a write, held for
 the person's approval like any library registration.
 
