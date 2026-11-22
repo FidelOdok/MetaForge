@@ -157,6 +157,12 @@ def generate(req: dict[str, Any]) -> dict[str, Any]:
         if anchor is not None:
             fixed[comp["ref"]] = anchor
 
+    # A pour drawn as an outline is occupied before placement: the auto-placer
+    # otherwise drops a pull-up into a VIN pour, where nothing can reach it.
+    for spec in board_spec.get("power_zones") or []:
+        if spec.get("points"):
+            outline = [(x0 + float(p["x_mm"]), y0 + float(p["y_mm"])) for p in spec["points"]]
+            keepouts.extend(polygon_cells(outline))
     power = {*board_spec.get("power_nets", []), *(board_spec.get("inner_planes") or [])}
     if board_spec.get("ground_pour"):
         power.add(board_spec["ground_pour"])
@@ -1163,6 +1169,42 @@ def _fanout_planes(board: Any) -> dict[str, Any]:
 
 #: Zone name prefix that marks a local power pour (kept by strip_routing).
 POWER_ZONE = "power:"
+
+
+def polygon_cells(
+    points: list[tuple[float, float]], cell: float = 0.5
+) -> list[tuple[float, float, float, float]]:
+    """A polygon as horizontal strips ``(x0, y0, x1, y1)``, ``cell`` mm tall.
+
+    Pure geometry for the placer, whose keepouts are rectangles: each row's
+    runs of cells whose centres fall inside the polygon (even-odd rule).
+    """
+    if len(points) < 3:
+        return []
+
+    def inside(x: float, y: float) -> bool:
+        hit = False
+        for (ax, ay), (bx, by) in zip(points, points[1:] + points[:1]):
+            if (ay > y) != (by > y) and x < ax + (y - ay) * (bx - ax) / (by - ay):
+                hit = not hit
+        return hit
+
+    xs, ys = [p[0] for p in points], [p[1] for p in points]
+    cols = max(1, round((max(xs) - min(xs)) / cell + 0.5))
+    rows = max(1, round((max(ys) - min(ys)) / cell + 0.5))
+    strips: list[tuple[float, float, float, float]] = []
+    for r in range(rows):
+        top = min(ys) + r * cell
+        run: float | None = None
+        for c in range(cols + 1):
+            left = min(xs) + c * cell
+            filled = c < cols and inside(left + cell / 2, top + cell / 2)
+            if filled and run is None:
+                run = left
+            elif not filled and run is not None:
+                strips.append((run, top, left, top + cell))
+                run = None
+    return strips
 
 
 def pad_hull(

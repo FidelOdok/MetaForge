@@ -440,6 +440,16 @@ def test_edit_operations_are_checked_before_the_board_is_touched(
     assert worker.edit({"pcb_path": "x", "operations": [{"op": "explode"}]})["ok"] is False
 
 
+def test_a_drawn_pour_is_strips_the_placer_keeps_out_of(worker: types.ModuleType) -> None:
+    # An L: 4 x 2 along the top, 2 x 4 down the left, in 1 mm cells.
+    l_shape = [(0, 0), (4, 0), (4, 2), (2, 2), (2, 4), (0, 4)]
+    strips = worker.polygon_cells(l_shape, cell=1.0)
+    assert sum((x1 - x0) * (y1 - y0) for x0, y0, x1, y1 in strips) == 12
+    assert (0, 0, 4, 1) in strips and (0, 3, 2, 4) in strips
+    assert not any(x0 < 3 < x1 and y0 < 3 < y1 for x0, y0, x1, y1 in strips)  # the notch
+    assert worker.polygon_cells([(0, 0), (1, 1)]) == []
+
+
 def test_a_power_pour_is_the_hull_of_its_pads(worker: types.ModuleType) -> None:
     # Two pads 10 mm apart, grown by 0.5 mm: the hull is the rectangle around both.
     hull = worker.pad_hull([(0, 0, 1, 1), (10, 0, 11, 1)], 0.5)
