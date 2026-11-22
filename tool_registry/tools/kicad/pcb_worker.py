@@ -1281,12 +1281,14 @@ def _pour_keepout(board: Any, pour: Any) -> Any:
     rule.SetDoNotAllowFootprints(False)
     # Copy the points into the rule's own outline: SetOutline takes ownership of
     # a polygon Python still holds, and the worker segfaulted freeing it twice.
+    # A concave pour (a neck, a finger) can deflate into several pieces: keep all.
     outline = rule.Outline()
-    ring = inner.COutline(0)
-    outline.NewOutline()
-    for i in range(ring.PointCount()):
-        p = ring.CPoint(i)
-        outline.Append(p.x, p.y)
+    for k in range(inner.OutlineCount()):
+        ring = inner.COutline(k)
+        outline.NewOutline()
+        for i in range(ring.PointCount()):
+            p = ring.CPoint(i)
+            outline.Append(p.x, p.y, k)
     board.Add(rule)
     return rule
 

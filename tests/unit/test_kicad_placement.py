@@ -529,8 +529,8 @@ def test_a_power_pour_keeps_other_nets_out_of_its_inside(
         def NewOutline(self) -> None:  # noqa: N802
             pass
 
-        def Append(self, x: int, y: int) -> None:  # noqa: N802
-            self.points.append((x, y))
+        def Append(self, x: int, y: int, k: int = 0) -> None:  # noqa: N802
+            self.points.append((x, y, k))
 
     made: list[Poly] = []
 
@@ -569,10 +569,15 @@ def test_a_power_pour_keeps_other_nets_out_of_its_inside(
     assert rule.set["SetDoNotAllowTracks"] is True and rule.set["SetDoNotAllowVias"] is True
     assert rule.set["SetDoNotAllowCopperPour"] is False and rule.set["SetDoNotAllowPads"] is False
     assert made[0].inflated == [-int(worker.POUR_KEEPOUT_INSET_MM * NM)]
-    assert rule.ring.points == [(1, 2), (3, 4)]
+    assert rule.ring.points == [(1, 2, 0), (3, 4, 0)]
+    # A concave pour deflates into pieces: every piece is kept out.
+    outline.count = 2
+    rule = worker._pour_keepout(board, pour)
+    assert rule.ring.points == [(1, 2, 0), (3, 4, 0), (1, 2, 1), (3, 4, 1)]
+    outline.count = 1
     # A pour too narrow to keep anything inside gets no keepout.
     outline.count = 0
-    assert worker._pour_keepout(board, pour) is None and len(added) == 1
+    assert worker._pour_keepout(board, pour) is None and len(added) == 2
 
 
 def test_strip_routing_keeps_the_power_pours(worker: types.ModuleType) -> None:
