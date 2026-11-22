@@ -1279,7 +1279,14 @@ def _pour_keepout(board: Any, pour: Any) -> Any:
     rule.SetDoNotAllowPads(False)
     rule.SetDoNotAllowCopperPour(False)
     rule.SetDoNotAllowFootprints(False)
-    rule.SetOutline(inner)
+    # Copy the points into the rule's own outline: SetOutline takes ownership of
+    # a polygon Python still holds, and the worker segfaulted freeing it twice.
+    outline = rule.Outline()
+    ring = inner.COutline(0)
+    outline.NewOutline()
+    for i in range(ring.PointCount()):
+        p = ring.CPoint(i)
+        outline.Append(p.x, p.y)
     board.Add(rule)
     return rule
 

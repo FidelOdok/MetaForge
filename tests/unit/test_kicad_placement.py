@@ -518,15 +518,41 @@ def test_a_power_pour_keeps_other_nets_out_of_its_inside(
         def OutlineCount(self) -> int:  # noqa: N802
             return self.count
 
+        def COutline(self, i: int) -> Any:  # noqa: N802
+            pts = [types.SimpleNamespace(x=1, y=2), types.SimpleNamespace(x=3, y=4)]
+            return types.SimpleNamespace(PointCount=lambda: len(pts), CPoint=lambda k: pts[k])
+
+    class Ring:
+        def __init__(self) -> None:
+            self.points: list[tuple[int, int]] = []
+
+        def NewOutline(self) -> None:  # noqa: N802
+            pass
+
+        def Append(self, x: int, y: int) -> None:  # noqa: N802
+            self.points.append((x, y))
+
+    made: list[Poly] = []
+
     class Zone:
         def __init__(self, board: Any) -> None:
             self.set: dict[str, Any] = {}
+            self.ring = Ring()
+
+        def Outline(self) -> Ring:  # noqa: N802
+            return self.ring
 
         def __getattr__(self, name: str) -> Any:
+            if name == "SetOutline":
+                raise AssertionError("SetOutline takes ownership and crashed the worker")
             return lambda *a: self.set.__setitem__(name, a[0] if a else None)
 
+    def poly(src: Any) -> Poly:
+        made.append(Poly(src))
+        return made[-1]
+
     for name, value in {
-        "SHAPE_POLY_SET": Poly,
+        "SHAPE_POLY_SET": poly,
         "ZONE": Zone,
         "CORNER_STRATEGY_CHAMFER_ALL_CORNERS": 2,
     }.items():
@@ -542,7 +568,8 @@ def test_a_power_pour_keeps_other_nets_out_of_its_inside(
     assert rule.set["SetIsRuleArea"] is True and rule.set["SetZoneName"] == "power:VBAT:keepout"
     assert rule.set["SetDoNotAllowTracks"] is True and rule.set["SetDoNotAllowVias"] is True
     assert rule.set["SetDoNotAllowCopperPour"] is False and rule.set["SetDoNotAllowPads"] is False
-    assert rule.set["SetOutline"].inflated == [-int(worker.POUR_KEEPOUT_INSET_MM * NM)]
+    assert made[0].inflated == [-int(worker.POUR_KEEPOUT_INSET_MM * NM)]
+    assert rule.ring.points == [(1, 2), (3, 4)]
     # A pour too narrow to keep anything inside gets no keepout.
     outline.count = 0
     assert worker._pour_keepout(board, pour) is None and len(added) == 1
