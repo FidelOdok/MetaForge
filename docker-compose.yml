@@ -1192,7 +1192,7 @@ services:
     image: ghcr.io/fidelodok/metaforge-cadquery-adapter:${METAFORGE_ADAPTER_TAG:-latest}
     stdin_open: true
     ports:
-      - "8101:8101"
+      - "${CADQUERY_PORT:-8101}:8101"
     # Every cadquery.execute_script script runs in a child process isolated by
     # the OS (tool_registry/tools/cadquery/script_runner.py): a uid of its own
     # from CADQUERY_RUNNER_UIDS, resource limits, Landlock (writes only its
