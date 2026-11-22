@@ -128,14 +128,29 @@ class PowerZone(BaseModel):
 
     net: str = Field(..., description="The net to pour, e.g. VBAT, SW or +5V")
     refs: list[str] = Field(
-        ...,
-        min_length=1,
+        default_factory=list,
         description="Parts whose pads on this net the pour covers, e.g. [U2, C17, J3]",
+    )
+    points: list[Position] = Field(
+        default_factory=list,
+        description=(
+            "Or the pour's outline itself, in mm from the board's top-left corner (x right, "
+            "y DOWN), at least three points: when the hull of the pads would reach over "
+            "another net's pins (a regulator's EN beside its VIN)"
+        ),
     )
     layer: Literal["F.Cu", "B.Cu"] = "F.Cu"
     margin_mm: float = Field(
         default=0.4, ge=0, le=5, description="How far the pour reaches beyond those pads"
     )
+
+    @model_validator(mode="after")
+    def _one_shape(self) -> PowerZone:
+        if bool(self.refs) == bool(self.points):
+            raise ValueError(f"power_zones {self.net}: give refs or points, not both or neither")
+        if self.points and len(self.points) < 3:
+            raise ValueError(f"power_zones {self.net}: an outline needs at least three points")
+        return self
 
 
 class Component(BaseModel):
@@ -319,6 +334,11 @@ class Circuit(BaseModel):
             for zone in self.board.power_zones:
                 if zone.net not in net_nodes:
                     raise ValueError(f"power_zones: no net named {zone.net!r}")
+                for p in zone.points:
+                    if not (0 <= p.x_mm <= w and 0 <= p.y_mm <= h):
+                        raise ValueError(
+                            f"power_zones {zone.net}: ({p.x_mm}, {p.y_mm}) is off the board"
+                        )
                 for ref in zone.refs:
                     if ref not in known:
                         raise ValueError(f"power_zones {zone.net}: unknown component {ref}")

@@ -254,10 +254,20 @@ class TestCircuitModel:
         ok = Circuit.model_validate({**LDO_LED, "board": {**board, "power_zones": [zone]}})
         assert ok.board is not None and ok.board.power_zones[0].layer == "F.Cu"
         assert ok.board.power_zones[0].margin_mm == 0.4
+        outline = [{"x_mm": 1, "y_mm": 1}, {"x_mm": 9, "y_mm": 1}, {"x_mm": 9, "y_mm": 5}]
+        drawn = {"net": "VIN", "points": outline}
+        ok = Circuit.model_validate({**LDO_LED, "board": {**board, "power_zones": [drawn]}})
+        assert ok.board is not None and len(ok.board.power_zones[0].points) == 3
         for bad, match in (
             ({"net": "VBUS", "refs": ["J1"]}, "no net named"),
             ({"net": "VIN", "refs": ["Q9"]}, "unknown component Q9"),
             ({"net": "VIN", "refs": ["R1"]}, "R1 has no pad on it"),
+            ({"net": "VIN"}, "refs or points"),
+            ({"net": "VIN", "points": [{"x_mm": 1, "y_mm": 1}] * 2}, "at least three"),
+            (
+                {"net": "VIN", "points": [{"x_mm": 1, "y_mm": 1}] * 2 + [{"x_mm": 60, "y_mm": 1}]},
+                "off the board",
+            ),
         ):
             with pytest.raises(ValueError, match=match):
                 Circuit.model_validate({**LDO_LED, "board": {**board, "power_zones": [bad]}})

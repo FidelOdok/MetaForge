@@ -166,7 +166,7 @@ def generate(req: dict[str, Any]) -> dict[str, Any]:
             entry.update(hinted[entry["ref"]])
     zones = board_spec.get("power_zones") or []
     for rank, spec in enumerate(zones):
-        _power_zone(board, footprints, nets, spec, priority=len(zones) - rank + 1)
+        _power_zone(board, footprints, nets, spec, len(zones) - rank + 1, (x0, y0))
     pcbnew.SaveBoard(out, board)
     return {
         "ok": True,
@@ -1197,11 +1197,16 @@ def _power_zone(
     nets: dict[str, Any],
     spec: dict[str, Any],
     priority: int,
+    origin: tuple[float, float],
 ) -> Any:
-    """A pour of ``spec['net']`` over the hull of its pads on ``spec['refs']``."""
+    """A pour of ``spec['net']``: the outline given, else the hull of its pads on ``refs``."""
     net_name = spec["net"]
+    given = [
+        (origin[0] + float(p["x_mm"]), origin[1] + float(p["y_mm"]))
+        for p in spec.get("points") or []
+    ]
     boxes = []
-    for ref in spec["refs"]:
+    for ref in spec.get("refs") or []:
         fp = footprints.get(ref)
         if fp is None:
             continue
@@ -1211,7 +1216,7 @@ def _power_zone(
                 boxes.append(
                     (_mm(bb.GetX()), _mm(bb.GetY()), _mm(bb.GetRight()), _mm(bb.GetBottom()))
                 )
-    if not boxes:
+    if not (boxes or given):
         return None
     layer = pcbnew.F_Cu if spec.get("layer", "F.Cu") == "F.Cu" else pcbnew.B_Cu
     zone = pcbnew.ZONE(board)
@@ -1223,7 +1228,7 @@ def _power_zone(
     zone.SetPadConnection(pcbnew.ZONE_CONNECTION_FULL)
     outline = zone.Outline()
     outline.NewOutline()
-    for x, y in pad_hull(boxes, float(spec.get("margin_mm", 0.4))):
+    for x, y in given or pad_hull(boxes, float(spec.get("margin_mm", 0.4))):
         outline.Append(MM(x), MM(y))
     board.Add(zone)
     return zone
