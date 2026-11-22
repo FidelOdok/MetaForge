@@ -3728,3 +3728,15 @@ button:disabled {
 .fragment-task > .run-facts {
   margin: 6px 0 12px;
 }
+
+/* Approval holds are off on this MetaForge (METAFORGE_APPROVALS=off): said plainly wherever approvals are. */
+.mf-approvals-off {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-warning, #f59e0b);
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: var(--mf-c-262018);
+}

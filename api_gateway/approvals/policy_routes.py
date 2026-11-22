@@ -52,6 +52,8 @@ class DeploymentLimits(BaseModel):
     hourly_caps: list[dict[str, object]]
     #: How long a held call's approval stays usable, seconds.
     approval_ttl_seconds: float
+    #: Approval holds are off on this MetaForge (METAFORGE_APPROVALS=off).
+    approvals_off: bool = False
     #: Where these are set.
     set_in: str = "the deployment's environment (METAFORGE_AUTO_APPROVE_MAX, ...)"
 
@@ -61,6 +63,7 @@ def deployment_limits() -> DeploymentLimits:
 
     from api_gateway.approvals.delegation import deployment_allows
     from api_gateway.approvals.tool_write_policy import RATE_CAPS, SPEND_CAPS, hourly_cap
+    from mcp_core.guardrails import approvals_off
 
     caps = [
         {"tool": tool, "per_hour": hourly_cap(tool), "set_by": env}
@@ -76,6 +79,7 @@ def deployment_limits() -> DeploymentLimits:
         allow_release=deployment_allows("release"),
         hourly_caps=caps,
         approval_ttl_seconds=min(ttl, 3600.0),
+        approvals_off=approvals_off(),
     )
 
 

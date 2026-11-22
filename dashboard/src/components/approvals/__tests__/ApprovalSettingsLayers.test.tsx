@@ -110,6 +110,21 @@ describe('Approval settings in layers (FORGE-904)', () => {
     expect(within(note).queryByRole('button')).toBeNull();
   });
 
+  it('says plainly when approvals are off on this MetaForge, and stays quiet when they are on', async () => {
+    const { unmount } = render(<ApprovalPolicyPanel projectId="p1" />);
+    await screen.findByTestId('policy-in-force');
+    expect(screen.queryByTestId('approvals-off')).toBeNull();
+    expect(screen.getByTestId('deployment-limits')).toHaveTextContent('Approvals: on');
+    unmount();
+    const off = { ...projectView, deployment: { ...deployment, approvals_off: true } };
+    const { getApprovalPolicy } = await import('../../../api/endpoints/approvals');
+    vi.mocked(getApprovalPolicy).mockResolvedValueOnce(off as never);
+    render(<ApprovalPolicyPanel projectId="p2" />);
+    const notice = await screen.findByTestId('approvals-off');
+    expect(notice).toHaveTextContent("Approvals are off on this MetaForge (METAFORGE_APPROVALS=off)");
+    expect(notice).toHaveTextContent('placing an order still wait for a person');
+  });
+
   it('sets the account’s ceiling and switches, never above the deployment', async () => {
     const user = userEvent.setup();
     render(<AccountApprovalSettings />);

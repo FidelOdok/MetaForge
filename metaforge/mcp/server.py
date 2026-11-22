@@ -2800,6 +2800,12 @@ class UnifiedMcpServer:
                 raise NotDelegatedError(tool_id, detail)
             return delegated_only
         if not decision.requires_approval:
+            if decision.reason.startswith("approvals are off"):
+                logger.info(
+                    "mcp_tool_call_approvals_off",
+                    tool_id=tool_id,
+                    caller=caller.value,
+                )
             return None
 
         # FORGE-827: a human-authority call from an agent that named itself

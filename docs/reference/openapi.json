@@ -7087,6 +7087,11 @@
             "title": "Approval Ttl Seconds",
             "type": "number"
           },
+          "approvals_off": {
+            "default": false,
+            "title": "Approvals Off",
+            "type": "boolean"
+          },
           "hourly_caps": {
             "items": {
               "additionalProperties": true,

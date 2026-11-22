@@ -7,7 +7,7 @@ import {
   type AccountPolicyUpdate,
   type ApprovalMode,
 } from '../../api/endpoints/approvals';
-import { DeploymentLimitsNote, MODE_NAME } from './DeploymentLimitsNote';
+import { ApprovalsOffNotice, DeploymentLimitsNote, MODE_NAME } from './DeploymentLimitsNote';
 
 /**
  * FORGE-904: your account's approval settings, for every project of the account.
@@ -62,6 +62,7 @@ export function AccountApprovalSettings() {
 
   return (
     <form className="space-y-3" onSubmit={onSubmit} aria-label="Account approval settings" data-testid="account-approvals">
+      <ApprovalsOffNotice limits={data.deployment} />
       <p style={{ margin: 0, fontSize: 13 }} data-testid="account-in-force">
         Your projects may use at most <strong>{MODE_NAME[data.max_mode]}</strong>. Agents deciding for you:{' '}
         <strong>{data.allow_human_authority ? 'allowed' : 'not allowed'}</strong>. Agents releasing:{' '}

@@ -46,6 +46,9 @@ services:
       # Let a delegated agent fix the release baseline and approve the
       # manufacturing release for a person (default false).
       - METAFORGE_ALLOW_AGENT_RELEASE=${METAFORGE_ALLOW_AGENT_RELEASE:-false}
+      # off: no write waits for approval, except a person's decision, a release
+      # and an order (default on). See docs/approvals.md.
+      - METAFORGE_APPROVALS=${METAFORGE_APPROVALS:-on}
       # The service that decides Imagine validation (MetaForge-Verification).
       # Unset, the studio reports blocked_external; it never validates locally.
       - METAFORGE_VERIFICATION_URL=${METAFORGE_VERIFICATION_URL:-}
@@ -579,6 +582,9 @@ services:
       # Let a delegated agent fix the release baseline and approve the
       # manufacturing release for a person (default false).
       - METAFORGE_ALLOW_AGENT_RELEASE=${METAFORGE_ALLOW_AGENT_RELEASE:-false}
+      # off: no write waits for approval, except a person's decision, a release
+      # and an order (default on). See docs/approvals.md.
+      - METAFORGE_APPROVALS=${METAFORGE_APPROVALS:-on}
       # The service that decides Imagine validation (MetaForge-Verification).
       # Unset, the studio reports blocked_external; it never validates locally.
       - METAFORGE_VERIFICATION_URL=${METAFORGE_VERIFICATION_URL:-}
