@@ -1376,6 +1376,25 @@ class TestParseInpFaceTable:
         assert s2["centroid_mm"] == [5.0, 5.0, 5.0]
         assert s2["area_mm2"] == pytest.approx(100.0)
 
+    def test_a_second_order_mesh_lists_its_faces_too(self, tmp_path) -> None:
+        """gmsh -order 2 writes 6-node faces (CPS6); the face table was empty for
+        every second-order mesh, so no face could be chosen for a load or fixture."""
+        from tool_registry.tools.freecad.operations import _parse_inp_face_table
+
+        inp = tmp_path / "mesh.inp"
+        inp.write_text(
+            "*NODE\n1, 0, 0, 0\n2, 10, 0, 0\n3, 0, 10, 0\n"
+            "4, 5, 0, 0\n5, 5, 5, 0\n6, 0, 5, 0\n"
+            "*ELEMENT, type=CPS6, ELSET=Surface1\n1, 1, 2, 3, 4, 5, 6\n"
+            "*ELEMENT, type=C3D10, ELSET=Volume1\n1, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4\n",
+            encoding="utf-8",
+        )
+        faces = _parse_inp_face_table(str(inp))
+        assert [f["name"] for f in faces] == ["Surface1"]
+        assert faces[0]["element_type"] == "CPS6" and faces[0]["num_nodes"] == 6
+        # The area is the corner triangle's, not a fan through the mid-side nodes.
+        assert faces[0]["area_mm2"] == pytest.approx(50.0)
+
     def test_line_and_volume_element_sets_are_excluded(self, tmp_path) -> None:
         """Only CPS3/CPS4 (surface) groups are meaningful as a placeable
         face -- a line (T3D2) or the volumetric mesh itself (C3D4) isn't."""
