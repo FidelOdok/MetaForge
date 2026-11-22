@@ -1071,8 +1071,15 @@ def _fanout_planes(board: Any) -> dict[str, Any]:
     ]
     placed: list[Any] = []
     skipped: list[str] = []
+    # Another net's power pour is not free space: a fanout via dropped in a VIN
+    # pour splits it, and the router does not avoid a pour on a signal layer.
+    pours = [z for z in board.Zones() if z.GetZoneName().startswith(POWER_ZONE)]
 
     def free(item: Any, net: int, is_via: bool) -> bool:
+        for z in pours:
+            if z.GetNetCode() != net and (is_via or z.GetLayer() == pcbnew.F_Cu):
+                if z.Outline().Collide(item.GetEffectiveShape(z.GetLayer()), clear):
+                    return False
         for z in keepouts:
             barred = z.GetDoNotAllowVias() if is_via else z.GetDoNotAllowTracks()
             if barred and (is_via or z.IsOnLayer(pcbnew.F_Cu)):
@@ -1230,6 +1237,11 @@ def _power_zone(
         board.GetDesignSettings().m_NetSettings.GetDefaultNetclass().GetClearance()
     )
     zone.SetMinThickness(MM(0.2))
+    # A fragment cut off by a crossing track joins nothing: drop it rather
+    # than leave copper DRC reports as unconnected.
+    always = getattr(pcbnew, "ISLAND_REMOVAL_MODE_ALWAYS", None)
+    if always is not None:
+        zone.SetIslandRemovalMode(always)
     zone.SetPadConnection(pcbnew.ZONE_CONNECTION_FULL)
     outline = zone.Outline()
     outline.NewOutline()
