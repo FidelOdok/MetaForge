@@ -1224,7 +1224,12 @@ def _power_zone(
     zone.SetNetCode(nets[net_name].GetNetCode())
     zone.SetZoneName(f"{POWER_ZONE}{net_name}")
     zone.SetAssignedPriority(priority)
-    zone.SetMinThickness(MM(0.25))
+    # The board's own clearance, not KiCad's zone default (about 0.5 mm): at a
+    # 0.5 mm pitch the default chokes the pour off the very pins it is for.
+    zone.SetLocalClearance(
+        board.GetDesignSettings().m_NetSettings.GetDefaultNetclass().GetClearance()
+    )
+    zone.SetMinThickness(MM(0.2))
     zone.SetPadConnection(pcbnew.ZONE_CONNECTION_FULL)
     outline = zone.Outline()
     outline.NewOutline()

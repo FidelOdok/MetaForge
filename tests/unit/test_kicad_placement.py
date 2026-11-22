@@ -452,6 +452,55 @@ def test_a_power_pour_is_the_hull_of_its_pads(worker: types.ModuleType) -> None:
     assert worker.pad_hull([], 0.4) == []
 
 
+def test_a_power_pour_takes_the_board_clearance(
+    worker: types.ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """KiCad's own zone clearance (about 0.5 mm) cut a buck's VIN pour off its
+    0.5 mm-pitch pins; the pour keeps the board's clearance instead."""
+
+    class Outline:
+        def __init__(self) -> None:
+            self.points: list[tuple[int, int]] = []
+
+        def NewOutline(self) -> None:  # noqa: N802
+            pass
+
+        def Append(self, x: int, y: int) -> None:  # noqa: N802
+            self.points.append((x, y))
+
+    class Zone:
+        def __init__(self, board: Any) -> None:
+            self.outline, self.set = Outline(), {}
+
+        def Outline(self) -> Outline:  # noqa: N802
+            return self.outline
+
+        def __getattr__(self, name: str) -> Any:
+            return lambda *a: self.set.__setitem__(name, a[0] if a else None)
+
+    class Settings:
+        class m_NetSettings:  # noqa: N801
+            @staticmethod
+            def GetDefaultNetclass() -> Any:  # noqa: N802
+                return types.SimpleNamespace(GetClearance=lambda: int(0.127 * NM))
+
+    added: list[Any] = []
+    board = types.SimpleNamespace(GetDesignSettings=lambda: Settings, Add=added.append)
+    monkeypatch.setattr(worker.pcbnew, "ZONE", Zone, raising=False)
+    monkeypatch.setattr(worker.pcbnew, "F_Cu", F_CU, raising=False)
+    monkeypatch.setattr(worker.pcbnew, "ZONE_CONNECTION_FULL", 1, raising=False)
+    net = types.SimpleNamespace(GetNetCode=lambda: 7)
+    spec = {
+        "net": "VBAT",
+        "points": [{"x_mm": 1, "y_mm": 1}, {"x_mm": 5, "y_mm": 1}, {"x_mm": 5, "y_mm": 4}],
+    }
+    zone = worker._power_zone(board, {}, {"VBAT": net}, spec, 3, (100.0, 100.0))
+    assert added == [zone]
+    assert zone.set["SetLocalClearance"] == int(0.127 * NM)
+    assert zone.set["SetZoneName"] == "power:VBAT" and zone.set["SetAssignedPriority"] == 3
+    assert zone.outline.points[0] == (int(101 * NM), int(101 * NM))
+
+
 def test_strip_routing_keeps_the_power_pours(worker: types.ModuleType) -> None:
     class Zone:
         def __init__(self, name: str, net: str) -> None:
