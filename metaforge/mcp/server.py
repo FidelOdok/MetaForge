@@ -2806,6 +2806,15 @@ class UnifiedMcpServer:
                     tool_id=tool_id,
                     caller=caller.value,
                 )
+                # With holds off nobody approves, so a tool that records who
+                # decided (the machine in the manufacturing context, a library
+                # entry) would run with no one named and refuse what only a
+                # person states. An owner-delegated agent still decides it,
+                # recorded as the agent's decision for the person.
+                if records_approver(tool_id) or delegable_library_write(tool_id):
+                    delegated = await self._delegated_approval(tool_id, arguments, caller, call_id)
+                    if delegated is not None:
+                        return delegated
             return None
 
         # FORGE-827: a human-authority call from an agent that named itself
