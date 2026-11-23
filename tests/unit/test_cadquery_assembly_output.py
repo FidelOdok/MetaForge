@@ -351,3 +351,19 @@ def test_an_assembly_keeps_each_parts_own_colours(tmp_path: Path) -> None:
     found = re.findall(r"COLOUR_RGB\('[^']*',([^,]+),([^,]+),([^)]+)\)", text)
     written = {tuple(round(float(v), 2) for v in rgb) for rgb in found}
     assert {rgb for rgb, _x in parts.values()} <= written
+
+
+def test_a_colour_styled_on_the_solid_survives_the_assembly(tmp_path: Path) -> None:
+    """twin.commit_geometry styles a part's colour on its solid; importStep does not see it."""
+    cq = pytest.importorskip("cadquery")
+    from tool_registry.tools.freecad.materials_appearance import apply_step_colours
+
+    plain = tmp_path / "plain.step"
+    cq.exporters.export(cq.Workplane().box(10, 10, 10), str(plain))
+    graphite = (0.278, 0.29, 0.318)
+    (tmp_path / "case.step").write_bytes(apply_step_colours(plain.read_bytes(), graphite))
+    ops = CadqueryOperations(work_dir=str(tmp_path))
+    out = ops.create_assembly([{"name": "case", "file": str(tmp_path / "case.step")}])
+    text = Path(out["assembly_file"]).read_text()
+    found = re.findall(r"COLOUR_RGB\('[^']*',([^,]+),([^,]+),([^)]+)\)", text)
+    assert graphite in {tuple(round(float(v), 3) for v in rgb) for rgb in found}

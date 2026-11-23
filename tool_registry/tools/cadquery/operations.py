@@ -2750,6 +2750,29 @@ def _coloured_import(path: str) -> Any | None:
     return None
 
 
+_COLOUR_RGB = re.compile(r"COLOUR_RGB\(\s*'[^']*'\s*,\s*([^,]+),\s*([^,]+),\s*([^)]+)\)")
+
+
+def _single_step_colour(path: str) -> tuple[float, float, float] | None:
+    """The one colour a STEP gives its part, when it gives exactly one.
+
+    A colour styled on the solid (how twin.commit_geometry writes a part's
+    colour) is not surfaced by ``Assembly.importStep``; the file still says it.
+    """
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            found = {
+                tuple(round(float(v), 4) for v in m.groups())
+                for m in _COLOUR_RGB.finditer(fh.read())
+            }
+    except (OSError, ValueError):
+        return None
+    if len(found) != 1:
+        return None
+    r, g, b = next(iter(found))
+    return (r, g, b)
+
+
 def _coloured_assembly(assy: Any, parts: list[dict[str, Any]]) -> Any | None:
     """``assy`` rebuilt so each STEP part keeps its colours; ``None`` when none has any."""
     objects = getattr(assy, "objects", None)
@@ -2765,6 +2788,11 @@ def _coloured_assembly(assy: Any, parts: list[dict[str, Any]]) -> Any | None:
         sub = None if part_def.get("shape") else _coloured_import(str(part_def["file"]))
         if sub is not None:
             out.add(sub, name=name, loc=child.loc)
+            any_colour = True
+            continue
+        single = None if part_def.get("shape") else _single_step_colour(str(part_def["file"]))
+        if single is not None:
+            out.add(child.obj, name=name, loc=child.loc, color=cq.Color(*single))
             any_colour = True
         else:
             out.add(child.obj, name=name, loc=child.loc, color=child.color)
