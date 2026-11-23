@@ -796,6 +796,9 @@ def test_the_lamp_is_measured_and_leaning_the_arm_out_lowers_the_angle_it_tips_a
     assert 0 < before["overhang_share"] < 1
     assert before["support"]["margin_mm"] > 0 and 0 < before["support"]["tip_angle_deg"] < 90
     assert any("wall thickness" in n for n in before["notes"])
+    # Each drawn part's box, for the form thread: the base is 110 across and 12 high.
+    base = next(z for z in before["sizes"] if z["id"] == "base")
+    assert [round(v) for v in base["size_mm"]] == [110, 12, 110]
     # The arm leans from 40 to 80 mm, so the centre of mass moves toward the edge of the base.
     assert after["support"]["tip_angle_deg"] < before["support"]["tip_angle_deg"]
     moved = result["compare"]["measured_changed"]

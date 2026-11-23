@@ -922,6 +922,11 @@ class ImagineService:
                 metric="accept_form",
                 form_sync={"part": row.get("key"), **stamp},
             )
+            sizes = head.state.get("form_sizes")
+            if not checked and isinstance(sizes, dict) and sizes.get("revision") == head.revision:
+                # The form did not change, so what the page drew still holds for the next
+                # revision: the other rows can be taken without another look.
+                await self.record_form_sizes(project_id, out.revision, sizes.get("sizes") or [])
             logger.info(
                 "imagine_form_accepted",
                 project_id=project_id,

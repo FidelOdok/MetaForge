@@ -198,6 +198,8 @@ def _measured(value: Any) -> dict[str, Any] | None:
     out = {k: value.get(k) for k in keys}
     if value.get("fit") is not None:
         out["fit"] = value.get("fit")  # which parts clash on their drawn shapes (MetaForge)
+    if value.get("sizes") is not None:
+        out["sizes"] = value.get("sizes")  # each drawn part's box, for the form thread
     return out
 
 

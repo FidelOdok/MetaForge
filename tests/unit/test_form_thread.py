@@ -230,3 +230,21 @@ async def test_the_thread_reads_the_studio_sizes_and_the_cad(service: ImagineSer
     assert row["status"] == "differs" and row["develop"]["item_ref"] == "CAD-BASE@2"
     assert row["delta_mm"] == [20.0, 0.0, 20.0]
     assert data["studio"]["revision"] == 1 and not data["warnings"]
+
+
+async def test_taking_a_difference_as_known_keeps_the_sizes_for_the_next_row(
+    service: ImagineService,
+) -> None:
+    await service.record_form_sizes(PROJECT, 1, [{"id": "base", "size_mm": [110, 12, 110]}])
+    out = await service.accept_form(PROJECT, 1, _differs([130, 12, 130]), None, actor="agent")
+    record = await service.get_form_sizes(PROJECT)
+    assert out.revision == 2 and record and record["revision"] == 2
+    # A change to the form draws something else: its sizes wait for the next look.
+    await service.accept_form(
+        PROJECT,
+        2,
+        {**_differs([130, 12, 130]), "develop": {"item_ref": "CAD-BASE@3", "size_mm": [1, 1, 1]}},
+        [{"op": "replace", "path": "/form/params/base_r", "value": 65}],
+        actor="agent",
+    )
+    assert await service.get_form_sizes(PROJECT) is None
