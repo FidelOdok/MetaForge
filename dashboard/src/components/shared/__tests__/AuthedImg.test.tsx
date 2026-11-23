@@ -5,7 +5,8 @@ import type { TwinNode } from '../../../types/twin';
 const get = vi.fn();
 vi.mock('../../../api/client', () => ({ default: { get: (...a: unknown[]) => get(...a) } }));
 
-import { AuthedImg } from '../AuthedImg';
+import { AuthedImg, clientPath } from '../AuthedImg';
+import { apiBase } from '../../../lib/gatewayConfig';
 import { isBoardSheet, isEngineering, isVisual } from '../../create/ProductStage';
 
 describe('AuthedImg', () => {
@@ -31,6 +32,18 @@ describe('AuthedImg', () => {
     });
     // Never the gateway URL itself: an <img> could not send the token.
     expect(img.getAttribute('src')).toBe('blob:test/0');
+  });
+
+  it('does not put the API base in front twice for a URL that already has it', async () => {
+    // Behind the dev proxy or Docker's nginx the base is the relative /api/v1, and
+    // nodeNamedFileUrl() already starts with it: the client used to request
+    // /api/v1/api/v1/twin/... and every board preview showed "HTTP 404".
+    get.mockResolvedValue({ data: new Blob(['<svg/>'], { type: 'image/svg+xml' }) });
+    const src = `${apiBase()}/twin/nodes/n1/files/preview/board-pcb.svg`;
+    render(<AuthedImg src={src} alt="board layout" />);
+    await screen.findByRole('img', { name: 'board layout' });
+    expect(get).toHaveBeenCalledWith('/twin/nodes/n1/files/preview/board-pcb.svg', { responseType: 'blob' });
+    expect(clientPath('https://other.example/v1/x.svg')).toBe('https://other.example/v1/x.svg');
   });
 
   it('says why when the file cannot be loaded, instead of a bare alt text', async () => {

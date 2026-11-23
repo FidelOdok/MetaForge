@@ -1,5 +1,18 @@
 import { useEffect, useState, type ImgHTMLAttributes, type MouseEvent, type ReactNode } from 'react';
 import apiClient from '../../api/client';
+import { apiBase } from '../../lib/gatewayConfig';
+
+/**
+ * The path to hand the API client for a URL that may already carry the API
+ * base. The client puts the base in front of every request, so a URL built
+ * with `apiUrl()` (`/api/v1/twin/...` behind the dev proxy or Docker's nginx)
+ * would go out as `/api/v1/api/v1/twin/...` and 404: every board preview
+ * failed locally. A URL on another origin is passed as it is.
+ */
+export function clientPath(src: string): string {
+  const base = apiBase();
+  return src.startsWith(`${base}/`) ? src.slice(base.length) : src;
+}
 
 /**
  * An `<img>` cannot send the gateway's bearer token, so on a gateway that
@@ -19,7 +32,7 @@ export function useAuthedObjectUrl(src: string | null | undefined): { url: strin
     let cancelled = false;
     let made: string | null = null;
     apiClient
-      .get<Blob>(src, { responseType: 'blob' })
+      .get<Blob>(clientPath(src), { responseType: 'blob' })
       .then(({ data }) => {
         if (cancelled) return;
         made = URL.createObjectURL(data);
@@ -72,7 +85,7 @@ export function AuthedFileLink({ src, download, children, ...rest }: AuthedFileL
     e.preventDefault();
     setError(null);
     try {
-      const { data } = await apiClient.get<Blob>(src, { responseType: 'blob' });
+      const { data } = await apiClient.get<Blob>(clientPath(src), { responseType: 'blob' });
       const url = URL.createObjectURL(data);
       const a = document.createElement('a');
       a.href = url;
