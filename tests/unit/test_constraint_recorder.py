@@ -491,3 +491,43 @@ async def test_bad_expected_evidence_rejected(monkeypatch: pytest.MonkeyPatch) -
             title="t",
             constraints=[{**_MASS_LIMIT, "expected_evidence": "vibes"}],
         )
+
+
+@pytest.mark.asyncio
+async def test_a_new_revision_keeps_unchanged_requirements_and_their_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FORGE-914: re-recording a set used to mint new ids for every requirement."""
+    from uuid import UUID
+
+    from api_gateway.twin.evidence_recorder import make_evidence_recorder
+    from twin_core.consistency.record_pins import record_staleness
+
+    _patch_blob(monkeypatch)
+    twin = InMemoryTwinAPI.create()
+    record = make_constraint_recorder(twin)
+    sf = {"name": "sf", "expression": "True", "severity": "warning", "message": "SF 2"}
+    first = await record(title="Reqs", constraints=[_MASS_LIMIT, sf], project_id=PROJECT_ID)
+    mass_id, sf_id = first["constraint_ids"]
+
+    evidence = make_evidence_recorder(twin)
+    common = {"evidence_type": "calculation", "producer": {"tool": "hand"}, "inputs": {}}
+    on_mass = await evidence(**common, result={"m": 50}, supports=[mass_id], project_id=PROJECT_ID)
+    on_sf = await evidence(**common, result={"sf": 3}, supports=[sf_id], project_id=PROJECT_ID)
+
+    # The next revision changes the safety factor and keeps the mass limit word for word.
+    second = await record(
+        title="Reqs",
+        constraints=[_MASS_LIMIT, {**sf, "message": "SF 2.5"}],
+        project_id=PROJECT_ID,
+    )
+    assert second["constraint_ids"][0] == mass_id
+    assert second["constraint_ids"][1] != sf_id
+    assert second["carried_constraint_ids"] == [mass_id]
+
+    async def staleness(node_id: str) -> str:
+        node = await twin.graph.get_node(UUID(node_id))
+        return record_staleness(node.metadata)  # type: ignore[union-attr]
+
+    assert await staleness(on_mass["node_id"]) == "current"
+    assert await staleness(on_sf["node_id"]) == "stale"
