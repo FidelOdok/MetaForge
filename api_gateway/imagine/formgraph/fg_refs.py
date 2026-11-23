@@ -128,7 +128,18 @@ def _node_matrix(n):
     return r
 
 
-def _glb(path):
+def _srgb_hex(rgb):
+    """A glTF baseColorFactor (linear) as an sRGB hex colour, the way the page reads colours."""
+    out = []
+    for c in rgb[:3]:
+        c = min(1.0, max(0.0, float(c)))
+        c = c * 12.92 if c <= 0.0031308 else 1.055 * c ** (1 / 2.4) - 0.055
+        out.append(round(c * 255))
+    return '#%02x%02x%02x' % tuple(out)
+
+
+def _glb(path, colors=None):
+    """Triangles of a GLB. With ``colors`` (a list), appends each triangle's material colour too."""
     data = open(path, 'rb').read()
     if data[:4] != b'glTF':
         raise ValueError('not a GLB file')
@@ -173,8 +184,15 @@ def _glb(path):
                 pos = read(prim['attributes']['POSITION'])
                 pw = [(m[0] * x + m[4] * y + m[8] * z + m[12], m[1] * x + m[5] * y + m[9] * z + m[13], m[2] * x + m[6] * y + m[10] * z + m[14]) for x, y, z in pos]
                 idx = [i[0] for i in read(prim['indices'])] if 'indices' in prim else list(range(len(pw)))
+                col = None
+                if colors is not None:
+                    mats = js.get('materials') or []
+                    mat = mats[prim['material']] if isinstance(prim.get('material'), int) and prim['material'] < len(mats) else {}
+                    col = _srgb_hex((mat.get('pbrMetallicRoughness') or {}).get('baseColorFactor') or [0.8, 0.8, 0.8])
                 for k in range(0, len(idx) - 2, 3):
                     tris.append((pw[idx[k]], pw[idx[k + 1]], pw[idx[k + 2]]))
+                    if colors is not None:
+                        colors.append(col)
         for c in n.get('children', []):
             walk(c, m)
 
@@ -184,10 +202,14 @@ def _glb(path):
     return tris
 
 
-def read_mesh(path, units=None, up=None):
-    """Triangles in engine axes (y up) and millimetres, plus the defaults used."""
+def read_mesh(path, units=None, up=None, colors=None):
+    """Triangles in engine axes (y up) and millimetres, plus the defaults used.
+
+    With ``colors`` (a list), a GLB's per-triangle material colours are appended to it; STL and
+    OBJ carry none, so it stays empty for them.
+    """
     ext = os.path.splitext(path)[1].lower()
-    tris = _stl(path) if ext == '.stl' else _obj(path) if ext == '.obj' else _glb(path)
+    tris = _stl(path) if ext == '.stl' else _obj(path) if ext == '.obj' else _glb(path, colors)
     units = units or ('m' if ext == '.glb' else 'mm')
     up = up or ('y' if ext == '.glb' else 'z')
     k = UNITS[units]
@@ -217,15 +239,25 @@ def mesh_stats(tris):
             'triangles': len(tris), 'area_cm2': round(area / 100, 1), 'volume_cm3': round(abs(vol) / 1000, 2)}
 
 
-def reduce_mesh(tris, limit=MAX_TRIS):
-    """Indexed mesh for display. Vertex clustering on a grid until it is under the limit."""
+def reduce_mesh(tris, limit=MAX_TRIS, colors=None):
+    """Indexed mesh for display. Vertex clustering on a grid until it is under the limit.
+
+    With ``colors`` (one hex colour per triangle), the triangles are ordered by colour and the
+    result carries ``groups``: ``[colour, first index, index count]`` runs the page draws each in
+    its own colour, so a model's own colours survive the reduction.
+    """
+    if colors is None or not colors or len(colors) != len(tris):
+        colors = None
+    else:
+        order = sorted(range(len(tris)), key=lambda i: colors[i])
+        tris, colors = [tris[i] for i in order], [colors[i] for i in order]
     st = mesh_stats(tris)
     diag = math.sqrt(sum(s * s for s in st['size'])) or 1
     cells = 400
     while True:
         h = diag / cells if len(tris) > limit else 0
-        key, verts, idx = {}, [], []
-        for t in tris:
+        key, verts, idx, groups = {}, [], [], []
+        for n, t in enumerate(tris):
             ids = []
             for p in t:
                 q = (round(p[0] / h), round(p[1] / h), round(p[2] / h)) if h else p
@@ -234,13 +266,21 @@ def reduce_mesh(tris, limit=MAX_TRIS):
                     verts.append(p if not h else (q[0] * h, q[1] * h, q[2] * h))
                 ids.append(key[q])
             if len(set(ids)) == 3:
+                if colors is not None:
+                    if groups and groups[-1][0] == colors[n]:
+                        groups[-1][2] += 3
+                    else:
+                        groups.append([colors[n], len(idx), 3])
                 idx.extend(ids)
         if len(idx) // 3 <= limit or cells < 20:
             break
         cells = int(cells * 0.7)
     pos = struct.pack('<%df' % (len(verts) * 3), *[c for v in verts for c in v])
     ind = struct.pack('<%dI' % len(idx), *idx)
-    return {'pos': base64.b64encode(pos).decode(), 'idx': base64.b64encode(ind).decode(), 'tris': len(idx) // 3, 'reduced': len(idx) // 3 < len(tris)}
+    out = {'pos': base64.b64encode(pos).decode(), 'idx': base64.b64encode(ind).decode(), 'tris': len(idx) // 3, 'reduced': len(idx) // 3 < len(tris)}
+    if colors is not None:
+        out['groups'] = groups
+    return out
 
 
 # ---------------------------------------------------------------- validate and pack
@@ -355,10 +395,11 @@ def pack_refs(refs, folder):
                 q['data'] = f'data:{IMG_TYPES[ext]};base64,' + base64.b64encode(raw).decode()
                 q['px'] = image_size(p)
             elif ext in MESH_TYPES:
-                tris, units, up = read_mesh(p, r.get('units'), r.get('up'))
+                cols = []
+                tris, units, up = read_mesh(p, r.get('units'), r.get('up'), cols)
                 q['units'], q['up'] = units, up
                 q['stats'] = mesh_stats(tris)
-                m = reduce_mesh(tris)
+                m = reduce_mesh(tris, colors=cols)
                 total += len(m['pos']) + len(m['idx'])
                 q['mesh'] = m
         out.append(q)

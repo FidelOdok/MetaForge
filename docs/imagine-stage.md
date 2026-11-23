@@ -687,9 +687,11 @@ draw from primitives: an airframe the product mounts on (`context`), a space it 
 The engine centres the mesh on X and Z, puts its lowest point at Y = 0, then moves it to `at` (mm)
 and turns it by `rotate` (degrees about X, Y and Z). Studio axes are Y up, so a Z-up STEP point
 (x, y, z) is (x, z, -y). The reference records `origin`, the file point that lands on `at`, so an
-offset worked out from the full-resolution model is exact: `at = W - (P - origin)`. `color` (hex)
-and `opacity` replace the role's see-through colour for the whole mesh. The STEP's own face colours
-are not kept: the display reduction merges vertices, so a per-face colour has nowhere to go yet.
+offset worked out from the full-resolution model is exact: `at = W - (P - origin)`. `opacity` sets
+how see-through it is (1 for a solid model). With no `color`, a GLB, or a STEP through the converter,
+keeps its own material colours: the reduction orders the triangles by colour and records the runs in
+`mesh.groups` (`[colour, first index, index count]`), and the page draws each run in its colour. A
+`color` (hex) paints the whole mesh in one colour instead. STL and OBJ carry no colours.
 
 ### Real parts and the component library
 
