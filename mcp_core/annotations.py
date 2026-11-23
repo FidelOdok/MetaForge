@@ -263,6 +263,7 @@ READ_ONLY: frozenset[str] = frozenset(
         # handover itself is a person's decision on the REST route only.
         "twin.imagine_get_studio",
         "twin.component_thread",
+        "twin.form_thread",
         "twin.imagine_handover_status",
         # A dry run of the Imagine gates: reads, writes nothing, so a human
         # is never asked to approve it.
@@ -479,6 +480,7 @@ ADDITIVE: frozenset[str] = frozenset(
         # MetaForge: the same next revision, from a list of changes.
         "twin.imagine_patch_studio",
         "twin.imagine_adopt",
+        "twin.imagine_accept_form",
         # MetaForge: the same next revision, with a twin model as a mesh reference.
         "twin.imagine_add_mesh_reference",
         # FORGE-687: a new design-files node (or the next revision of its

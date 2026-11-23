@@ -1447,6 +1447,17 @@ per-product formgraph config for Create's Imagine stage
   one object per stage (`imagine`, `develop`, `check`, `make`); `adopt` is set
   when Develop's part can be taken into the studio. See
   [Components across the stages](create-view.md#components-across-the-stages).
+- `twin.form_thread` (read-only): `{project_id, studio, rows, summary, warnings,
+  limitations}`. One row per part the studio draws, keyed by the studio part id, with
+  `status` (`same`, `differs`, `accepted`, `unmeasured`, `unpaired`), `studio`
+  `{part_id, size_mm}`, `develop` `{item_ref, node_id, name, size_mm}` and `delta_mm`
+  (Develop minus studio, studio axes). See
+  [Form changes from Develop](imagine-stage.md#form-changes-from-develop).
+- `twin.imagine_accept_form` (additive): takes `base_revision`, a row key as `row`
+  and optional `changes` (each `{op: replace, path: /form/params/<name>, value}`), and
+  writes the next studio revision with the part stamped by the item revision it took.
+  Allowed on a handed-over studio, which stays handed over. Refused for an unknown row,
+  a row that does not differ, a moved head or a change outside the form's parameters.
 - `twin.imagine_adopt` (additive): takes `base_revision` and a thread key as `thread` and
   writes Develop's part into the studio as the next revision, checked as any
   studio write is. Refused for an unknown key, a thread with nothing to adopt,
