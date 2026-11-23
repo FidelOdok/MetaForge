@@ -222,6 +222,8 @@ _RUNTIME_INJECTED_ADAPTER_IDS = frozenset(
     | {"packaging"}
     # FORGE-670: fixed-wing aircraft arithmetic, in-process.
     | {"aircraft"}
+    # FORGE-899: component.find / component.adopt, borrowing the library and distributors.
+    | {"component_finder"}
 )
 
 
