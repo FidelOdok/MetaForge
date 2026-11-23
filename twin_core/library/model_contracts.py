@@ -81,7 +81,8 @@ class ModelRepresentation(BaseModel):
     schema_version: Literal[1] = 1
     model_id: str = Field(min_length=1, max_length=200)
     version: str = Field(min_length=1, max_length=100)
-    kind: Literal["cad", "physics", "emulation", "module"]
+    #: FORGE-906: ``spice`` is a vendor circuit model (.lib / .mod / .cir) for ngspice.
+    kind: Literal["cad", "physics", "emulation", "module", "spice"]
     engine: str = Field(min_length=1)
     engine_versions: list[str] = Field(default_factory=list, max_length=50)
     entrypoint: str

@@ -33,11 +33,56 @@ export interface ModelArtifact {
 export interface ModelRepresentation {
   model_id: string;
   version: string;
+  /** cad, physics, emulation, module or spice (FORGE-906). */
+  kind?: string;
   engine: string;
   usage: string;
   limitations?: string[];
   status?: 'active' | 'deprecated' | 'withdrawn';
   artifacts: ModelArtifact[];
+}
+
+/** FORGE-906: one row from a datasheet's rating tables. */
+export interface RatingRow {
+  param: string;
+  kind: 'abs_max' | 'recommended' | 'electrical';
+  min: number | null;
+  typ: number | null;
+  max: number | null;
+  unit: string;
+  conditions: string;
+  source_kind: string;
+  source_ref: string;
+  needs_review: boolean;
+}
+
+export type LifecycleStatus = 'active' | 'nrnd' | 'eol' | 'obsolete' | 'unknown';
+
+export interface PartLifecycle {
+  status: LifecycleStatus;
+  source_kind: string;
+  source_ref: string;
+  read_on: string;
+  last_time_buy?: string;
+  needs_review: boolean;
+}
+
+export interface PartEcad {
+  symbol?: string;
+  footprint?: string;
+  source_kind: string;
+  source_ref: string;
+  needs_review: boolean;
+}
+
+export type PartDataStatus = 'ok' | 'review' | 'missing' | 'bad';
+
+/** FORGE-906: what a part has and lacks to be relied on in a design; derived by the gateway. */
+export interface PartDataCheck {
+  applies: boolean;
+  complete: boolean | null;
+  summary: string;
+  items: Array<{ key: string; label: string; status: PartDataStatus; detail: string; required: boolean }>;
 }
 
 export interface LibraryComponent {
@@ -58,6 +103,10 @@ export interface LibraryComponent {
   specs: Record<string, SourcedValue>;
   suppliers?: Array<{ supplier: string; sku: string; url?: string; org?: string; offer?: SupplierOffer }>;
   models?: ModelRepresentation[];
+  ratings?: RatingRow[];
+  lifecycle?: PartLifecycle | Record<string, never>;
+  ecad?: PartEcad | Record<string, never>;
+  part_data?: PartDataCheck;
   form_code?: string;
   notes: string;
   version: number;

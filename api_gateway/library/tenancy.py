@@ -37,5 +37,14 @@ def library_tenant(request: Request) -> str | None:
 
 
 def with_ownership(entry: dict[str, Any], owner: str | None) -> dict[str, Any]:
-    """The entry as returned to a caller, saying whether it is shared."""
-    return {**entry, "shared": owner is None}
+    """The entry as returned to a caller, saying whether it is shared.
+
+    A component also carries ``part_data`` (FORGE-906): what it has and still
+    lacks to be relied on in a design. Derived on every read, never stored.
+    """
+    shown = {**entry, "shared": owner is None}
+    if entry.get("kind") == "component":
+        from twin_core.library.part_data import check_part_data
+
+        shown["part_data"] = check_part_data(entry)
+    return shown

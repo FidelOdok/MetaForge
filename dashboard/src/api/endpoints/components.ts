@@ -13,6 +13,8 @@ export interface ThreadLibrary {
   id?: string;
   name?: string;
   shared?: boolean;
+  /** FORGE-906: whether the library part's real part data is complete, read now. */
+  part_data?: { complete: boolean; summary: string; gaps: string[] } | null;
 }
 
 export interface ThreadSelection {

@@ -61,6 +61,21 @@ function developCell(t: ComponentThread): string {
   return parts.length ? parts.join(' · ') : 'Nothing chosen yet';
 }
 
+/** FORGE-906: under Develop's part, whether its library entry is a real part yet. */
+function PartDataNote({ t }: { t: ComponentThread }) {
+  const data = t.develop.selections[0]?.library?.part_data;
+  if (!data) return null;
+  return (
+    <span
+      className={`cv-thread-rel cv-thread-partdata is-${data.complete ? 'ok' : 'warn'}`}
+      title={data.complete ? 'Every required item of real part data is recorded' : `Still to record: ${data.gaps.join(', ')}`}
+      data-testid="thread-part-data"
+    >
+      {data.complete ? 'Part data complete' : `Part data: ${data.gaps.length} to do`}
+    </span>
+  );
+}
+
 function checkCell(t: ComponentThread): string {
   const c = t.check;
   if (c.status === 'violates') return `Misses ${c.violates.join(', ')}`;
@@ -189,6 +204,7 @@ export function ComponentThreadPanel({
                   {STAGES.map(([id]) => (
                     <td key={id} className={`${tone(id, t)}${id === stage ? ' is-current' : ''}`}>
                       {CELL[id](t)}
+                      {id === 'develop' && <PartDataNote t={t} />}
                     </td>
                   ))}
                 </tr>

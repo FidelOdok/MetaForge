@@ -17,6 +17,13 @@ import { useToast } from '../components/ui/Toast';
 import { PartPreview, activeMakerModel } from '../components/library/PartPreview';
 import { OrganisationsTab, OrgStatusBadge } from '../components/library/OrganisationsTab';
 import { LibrarySearch } from '../components/library/LibrarySearch';
+import {
+  LifecycleBadge,
+  PartDataChecklist,
+  RatingsTables,
+  isEnded,
+  lifecycleOf,
+} from '../components/library/PartData';
 import { CATEGORIES, categoryOf, type Category } from '../lib/libraryCategory';
 import { LEVELS, LEVEL_HELP, levelOf, type Level } from '../lib/libraryLevel';
 import { DEMOS, demosOf, type Demo } from '../lib/libraryDemo';
@@ -47,8 +54,9 @@ const TABS: Array<[Tab, string]> = [
 /** A title the research import marked as a part being discontinued. */
 const ENDING = /^\[ENDING[^\]]*\]\s*/;
 
+/** Ended or ending: its recorded lifecycle (FORGE-906), else the research import's title mark. */
 function isEnding(c: LibraryComponent): boolean {
-  return ENDING.test(c.title);
+  return isEnded(c) || ENDING.test(c.title);
 }
 
 function cleanTitle(title: string): string {
@@ -174,6 +182,12 @@ function ComponentDetail({
     ['Level', <span title={LEVEL_HELP[levelOf(part)]}>{levelOf(part)}</span>],
     ['Type', label(part.family)],
   ];
+  const lifecycle = lifecycleOf(part);
+  if (part.part_data?.applies || lifecycle) facts.push(['Lifecycle', <LifecycleBadge lifecycle={lifecycle} />]);
+  const ecad = part.ecad && 'source_kind' in part.ecad ? part.ecad : undefined;
+  if (ecad?.symbol) facts.push(['KiCad symbol', <span className="font-mono mf-library-break">{ecad.symbol}</span>]);
+  if (ecad?.footprint)
+    facts.push(['KiCad footprint', <span className="font-mono mf-library-break">{ecad.footprint}</span>]);
   if (part.material) facts.push(['Material', part.material.split('; library materials')[0]]);
   if (part.datasheet)
     facts.push([
@@ -191,11 +205,19 @@ function ComponentDetail({
           {describe(part)} <OwnerBadge shared={part.shared} />
         </h2>
         <OwnerNote shared={part.shared} />
-        {isEnding(part) && (
-          <p className="mf-library-warning">
-            <AlertTriangle size={13} aria-hidden="true" /> The research found this part being discontinued: check its
-            status before designing it in.
+        {isEnded(part) ? (
+          <p className="mf-library-warning" data-testid="library-ended">
+            <AlertTriangle size={13} aria-hidden="true" /> Its maker lists it as{' '}
+            {lifecycle?.status === 'nrnd' ? 'not for new designs' : lifecycle?.status === 'eol' ? 'end of life' : 'obsolete'}
+            : choose another part for a new design.
           </p>
+        ) : (
+          isEnding(part) && (
+            <p className="mf-library-warning">
+              <AlertTriangle size={13} aria-hidden="true" /> The research found this part being discontinued: check its
+              status before designing it in.
+            </p>
+          )
         )}
         {maker?.status === 'blocked' && (
           <p className="mf-library-warning" data-testid="library-blocked-maker">
@@ -216,6 +238,14 @@ function ComponentDetail({
           </div>
         ))}
       </dl>
+      {part.part_data?.applies && (
+        <Section title="Part data" open>
+          <PartDataChecklist check={part.part_data} />
+        </Section>
+      )}
+      <Section title="Datasheet ratings" count={part.ratings?.length ?? 0} open>
+        <RatingsTables ratings={part.ratings ?? []} />
+      </Section>
       <Section title="Specs" count={specs} open>
         <SourcedTable values={part.specs} />
       </Section>
@@ -245,7 +275,9 @@ function ComponentDetail({
         <ul className="mf-library-list-plain">
           {models.map((m) => (
             <li key={`${m.model_id}-${m.version}`}>
-              <p>{m.usage}</p>
+              <p>
+                {m.kind === 'spice' && <span className="mf-part-status">SPICE</span>} {m.usage}
+              </p>
               <p className="mf-library-muted">Licence: {m.artifacts[0]?.licence}</p>
             </li>
           ))}
