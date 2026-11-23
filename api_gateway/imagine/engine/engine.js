@@ -2741,7 +2741,11 @@ function refMesh(r){if(REFO[r.id])return REFO[r.id];const buf=x=>Uint8Array.from
   g.computeBoundingBox();const bb=g.boundingBox;g.translate(-(bb.min.x+bb.max.x)/2,-bb.min.y,-(bb.min.z+bb.max.z)/2);g.computeVertexNormals();
   const col=/^#[0-9a-f]{6}$/i.test(r.color||'')?r.color:r.role==='envelope'?'#d9534f':r.role==='target'?'#3b82f6':'#9aa3ad';
   const op=typeof r.opacity==='number'&&r.opacity>=.05&&r.opacity<=1?r.opacity:.26;
-  const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:new THREE.Color(col).convertSRGBToLinear(),transparent:op<1,opacity:op,depthWrite:op>=1,roughness:.85,side:THREE.DoubleSide}));
+  const mat=c=>new THREE.MeshStandardMaterial({color:new THREE.Color(c).convertSRGBToLinear(),transparent:op<1,opacity:op,depthWrite:op>=1,roughness:.85,side:THREE.DoubleSide});
+  /* With no colour of its own, a mesh whose file had colours (groups: [colour, first index, count]) draws each run in it. */
+  const grp=!r.color&&Array.isArray(r.mesh.groups)&&r.mesh.groups.length?r.mesh.groups.filter(x=>Array.isArray(x)&&/^#[0-9a-f]{6}$/i.test(x[0])):null;
+  if(grp&&grp.length){const cs=[...new Set(grp.map(x=>x[0].toLowerCase()))];grp.forEach(x=>g.addGroup(x[1],x[2],cs.indexOf(x[0].toLowerCase())));}
+  const m=new THREE.Mesh(g,grp&&grp.length?[...new Set(grp.map(x=>x[0].toLowerCase()))].map(mat):mat(col));
   const at=r.at||[0,0,0],ro=(r.rotate||[0,0,0]).map(d=>d*Math.PI/180);m.position.set(at[0],at[1],at[2]);m.rotation.set(ro[0],ro[1],ro[2]);m.renderOrder=3;scene.add(m);REFO[r.id]=m;return m;}
 const refShown=r=>S.refShow[r.id]!=null?S.refShow[r.id]:r.role!=='look';
 function refVis(){REFS.filter(r=>r.kind==='mesh'&&r.mesh).forEach(r=>{refMesh(r).visible=refShown(r)&&S.view!=='sim';});}

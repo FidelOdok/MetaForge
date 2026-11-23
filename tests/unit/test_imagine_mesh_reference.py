@@ -243,3 +243,118 @@ async def test_a_patch_moves_and_recolours_the_reference(tmp_path: Path) -> None
             [{"op": "add", "path": f"{base}/opacity", "value": 5}],
             actor="test",
         )
+
+
+def _two_colour_glb() -> bytes:
+    """The box as a GLB with two materials, half its faces red and half green."""
+    pos = b"".join(struct.pack("<3f", *v) for v in _V)
+    first = b"".join(struct.pack("<3H", *t) for t in _T[:6])
+    second = b"".join(struct.pack("<3H", *t) for t in _T[6:])
+    gltf = {
+        "asset": {"version": "2.0"},
+        "buffers": [{"byteLength": len(pos) + len(first) + len(second)}],
+        "bufferViews": [
+            {"buffer": 0, "byteOffset": 0, "byteLength": len(pos)},
+            {"buffer": 0, "byteOffset": len(pos), "byteLength": len(first)},
+            {"buffer": 0, "byteOffset": len(pos) + len(first), "byteLength": len(second)},
+        ],
+        "accessors": [
+            {"bufferView": 0, "componentType": 5126, "count": 8, "type": "VEC3"},
+            {"bufferView": 1, "componentType": 5123, "count": 18, "type": "SCALAR"},
+            {"bufferView": 2, "componentType": 5123, "count": 18, "type": "SCALAR"},
+        ],
+        "materials": [
+            {"pbrMetallicRoughness": {"baseColorFactor": [1, 0, 0, 1]}},
+            {"pbrMetallicRoughness": {"baseColorFactor": [0, 0.2140, 0, 1]}},
+        ],
+        "meshes": [{"primitives": [
+            {"attributes": {"POSITION": 0}, "indices": 2, "material": 1},
+            {"attributes": {"POSITION": 0}, "indices": 1, "material": 0},
+        ]}],
+        "nodes": [{"mesh": 0}],
+        "scenes": [{"nodes": [0]}],
+        "scene": 0,
+    }  # fmt: skip
+    bin_ = pos + first + second
+    bin_ += b"\x00" * (-len(bin_) % 4)
+    js = json.dumps(gltf).encode()
+    js += b" " * (-len(js) % 4)
+    body = struct.pack("<I4s", len(js), b"JSON") + js
+    body += struct.pack("<I4s", len(bin_), b"BIN\x00") + bin_
+    return struct.pack("<4sII", b"glTF", 2, 12 + len(body)) + body
+
+
+async def test_a_models_own_colours_survive_as_groups(tmp_path: Path) -> None:
+    svc, wp_id = await _studio_with(tmp_path, "board", "step", b"ISO-10303-21;")
+    out = await svc.add_mesh_reference(
+        PROJECT,
+        step_converter=lambda content, filename: _two_colour_glb(),
+        actor="test",
+        work_product_id=wp_id,
+        ref_id="board",
+        title="Board",
+    )
+    groups = _ref(out, "board")["mesh"]["groups"]
+    # One run per colour, ordered by colour, in sRGB (linear 0.214 green reads as #007f00).
+    assert [g[0] for g in groups] == ["#007f00", "#ff0000"]
+    assert [g[1:] for g in groups] == [[0, 18], [18, 18]]
+
+
+def test_a_mesh_with_no_colours_has_no_groups() -> None:
+    from api_gateway.imagine.formgraph import fg_refs
+
+    tri = ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))
+    assert "groups" not in fg_refs.reduce_mesh([tri])
+    assert fg_refs.reduce_mesh([tri], colors=["#123456"])["groups"] == [["#123456", 0, 3]]
+
+
+async def test_a_board_shows_as_its_3d_preview(tmp_path: Path, monkeypatch: Any) -> None:
+    from api_gateway.twin import blob_store
+
+    twin = InMemoryTwinAPI.create()
+    wp = await twin.create_work_product(
+        WorkProduct(
+            name="Board",
+            type=WorkProductType.PCB_LAYOUT,
+            domain="electronics",
+            file_path="",
+            content_hash="abc",
+            format="kicad_pcb",
+            created_by="test",
+            project_id=PROJECT,
+            metadata={"image_files": {"preview/fc-3d.glb": "work-products/x/preview_fc-3d.glb"}},
+        )
+    )
+    asked: list[str] = []
+    monkeypatch.setattr(
+        blob_store, "fetch_work_product_blob", lambda key: asked.append(key) or _two_colour_glb()
+    )
+    svc = ImagineService(twin)
+    await svc.put_studio(PROJECT, full_config(), actor="test")
+    out = await svc.add_mesh_reference(
+        PROJECT, actor="test", work_product_id=str(wp.id), ref_id="board", title="Board", units="mm"
+    )
+    assert asked == ["work-products/x/preview_fc-3d.glb"]
+    assert len(_ref(out, "board")["mesh"]["groups"]) == 2
+
+
+async def test_a_board_with_no_preview_is_refused(tmp_path: Path) -> None:
+    twin = InMemoryTwinAPI.create()
+    wp = await twin.create_work_product(
+        WorkProduct(
+            name="Board",
+            type=WorkProductType.PCB_LAYOUT,
+            domain="electronics",
+            file_path="",
+            content_hash="abc",
+            format="kicad_pcb",
+            created_by="test",
+            project_id=PROJECT,
+        )
+    )
+    svc = ImagineService(twin)
+    await svc.put_studio(PROJECT, full_config(), actor="test")
+    with pytest.raises(ImagineError, match="no 3D preview"):
+        await svc.add_mesh_reference(
+            PROJECT, actor="test", work_product_id=str(wp.id), ref_id="board", title="Board"
+        )

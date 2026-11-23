@@ -608,6 +608,28 @@ def _mfc_from_config(config: dict[str, Any]) -> dict[str, Any]:
 # ── the service ──────────────────────────────────────────────────────────
 
 
+def _board_preview_glb(wp: Any) -> tuple[bytes, str] | None:
+    """A board's populated 3D model: the GLB twin.record_design_files made as its preview.
+
+    A pcb_layout's own file is the .kicad_pcb, which is no mesh; its preview (kicad.export_3d,
+    with every footprint's 3D model in KiCad's colours) is the board as it will look, so a
+    studio can show the real board. None for any other work product.
+    """
+    import os
+
+    if str(getattr(wp, "type", "")) != "pcb_layout":
+        return None
+    files = (getattr(wp, "metadata", None) or {}).get("image_files") or {}
+    for name, key in files.items():
+        if str(name).lower().endswith("-3d.glb") and isinstance(key, str) and key:
+            from api_gateway.twin.blob_store import fetch_work_product_blob
+
+            return fetch_work_product_blob(key), os.path.basename(str(name))
+    raise ImagineError(
+        f"{wp.name!r} has no 3D preview; record it again with preview on to make one", 404
+    )
+
+
 class ImagineService:
     """The Imagine stage over one twin."""
 
@@ -961,7 +983,8 @@ class ImagineService:
         moves it to ``at`` and turns it by ``rotate`` (degrees, about X, Y, Z). ``origin``
         records which point of the file that is, in studio axes (mm, Y up), so an offset
         worked out from the full-resolution model lands where it was meant to.
-        ``color`` and ``opacity`` replace the role's see-through colour for the whole mesh.
+        ``color`` and ``opacity`` replace the role's see-through colour for the whole mesh; with
+        no ``color``, a GLB (or a converted STEP) keeps its own material colours.
         """
         import os
         import tempfile
@@ -993,7 +1016,10 @@ class ImagineService:
             if wp is None:
                 raise ImagineError(f"no work product {work_product_id!r}", 404)
             try:
-                content, filename = resolve_work_product_blob(wp)
+                board_glb = _board_preview_glb(wp)
+                content, filename = (
+                    board_glb if board_glb is not None else resolve_work_product_blob(wp)
+                )
             except Exception as exc:  # noqa: BLE001 - HTTPException from the resolver
                 detail = getattr(exc, "detail", None) or str(exc)
                 raise ImagineError(
@@ -1039,11 +1065,15 @@ class ImagineService:
                     path = os.path.join(tmp, f"model.{ext}")
                     with open(path, "wb") as fh:
                         fh.write(data)
-                    tris, used_units, used_up = fg_refs.read_mesh(path, units, up)
+                    colors: list[str] = []
+                    tris, used_units, used_up = fg_refs.read_mesh(path, units, up, colors)
                 if not tris:
                     raise ImagineError(f"{wp.name!r} has no triangles to show")
                 return (
-                    {"stats": fg_refs.mesh_stats(tris), "mesh": fg_refs.reduce_mesh(tris)},
+                    {
+                        "stats": fg_refs.mesh_stats(tris),
+                        "mesh": fg_refs.reduce_mesh(tris, colors=colors),
+                    },
                     used_units,
                     used_up,
                 )
