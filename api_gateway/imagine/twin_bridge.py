@@ -74,6 +74,10 @@ def mfc_field(name: str) -> str | None:
     return MFC_FIELD_ALIASES.get(word) or MFC_FIELD_ALIASES.get(head)
 
 
+#: A GLB of either authority shows the concept for the handover's concept assembly.
+CONCEPT_MESH_AUTHORITIES = ("illustrative", "structured")
+
+
 class TwinBridge:
     """The twin writes the Imagine service needs, bound to one twin."""
 
@@ -301,7 +305,13 @@ class TwinBridge:
         return str(stored.ref)
 
     async def has_concept_mesh(self, project_id: str) -> bool:
-        """An illustrative concept mesh (GLB) is recorded for the project."""
+        """A concept mesh (GLB) is recorded for the project.
+
+        Illustrative (a provider's look, ``twin.generate_concept_mesh``) or
+        structured (one node per real part at its read size, built free from the
+        layout by ``twin.render_structured_mesh``). Either shows the concept; a
+        paid provider should not decide whether a design can be handed over.
+        """
         try:
             wps = await self.twin.list_work_products(project_id=UUID(project_id))
         except Exception as exc:  # noqa: BLE001 - a read failure reads as missing
@@ -309,6 +319,7 @@ class TwinBridge:
             return False
         for wp in wps:
             meta = getattr(wp, "metadata", None) or {}
-            if getattr(wp, "format", "") == "glb" and meta.get("authority") == "illustrative":
+            glb = getattr(wp, "format", "") == "glb"
+            if glb and meta.get("authority") in CONCEPT_MESH_AUTHORITIES:
                 return True
         return False

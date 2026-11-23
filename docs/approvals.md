@@ -905,7 +905,9 @@ run stopped there. Now, when all of these hold, the call is not held:
   with 403 otherwise, and the call is held);
 - the MCP HTTP request names the agent in `X-MetaForge-Agent` and the person
   in `X-MetaForge-On-Behalf-Of` (a headless Claude Code agent puts both in its
-  `.mcp.json` headers, beside `Authorization`);
+  `.mcp.json` headers, beside `Authorization`; the `metaforge` plugin sends them
+  from its **Agent name** and **Acting for** settings, which are empty by
+  default and claim nothing until filled in);
 - when the session has a verified principal, the person named is that
   principal.
 

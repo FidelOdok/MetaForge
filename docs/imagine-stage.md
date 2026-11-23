@@ -225,10 +225,13 @@ the person must be the authenticated principal. An agent's "confirm" of an
 assumption is recorded as an acceptance there too.
 
 **The concept mesh without a person.** The checklist's `concept_assembly`
-item is cleared by a person having seen the form, or by an illustrative concept
-mesh in the project. An agent makes a mesh
-with `twin.render_concept_image` and then `twin.generate_concept_mesh` from
-that image (a job; poll `twin.job_status`). Both are illustrative writes, so
+item is cleared by a person having seen the form, or by a concept mesh in the
+project: a GLB whose authority is `illustrative` or `structured`. The free way
+needs no provider: `twin.render_concept_sketch` draws the layout, then
+`twin.render_structured_mesh` builds a GLB with one node per real part at its
+read size. With a mesh provider configured, an agent can instead make an
+illustrative mesh with `twin.render_concept_image` and then
+`twin.generate_concept_mesh` from that image (a job; poll `twin.job_status`). Both are illustrative writes, so
 a project policy of `auto_clean` or `auto` approves them within the spend cap
 (3 meshes an hour by default). Both default to the MCP session's project when
 the call names none, and a mesh made from a concept image inherits the
@@ -349,8 +352,8 @@ alone for now:
 7. `concept_assembly`: a chosen part for every function, and the form seen:
    either a person has said "I have seen this form" for this revision (the
    studio's button; the server stamps the revision, so a form the agent changed
-   since is not covered, and an agent cannot record it), or an illustrative
-   concept mesh exists. The mesh is optional: nothing downstream reads it, it can
+   since is not covered, and an agent cannot record it), or a concept mesh
+   exists, illustrative or structured from the layout. The mesh is optional: nothing downstream reads it, it can
    never be evidence, and a paid provider should not decide whether a design is
    ready.
 8. `interfaces`: interfaces described, so contracts can be proposed.

@@ -287,6 +287,20 @@ Some registered tools (`twin.record_evidence`, `twin.attempt_promotion`, the
 their stores, which the standalone MCP sidecar is not; the skills say what to
 do when one is missing from the client's list.
 
+## A hands-off run: delegation settings
+
+The `metaforge` plugin has two optional settings, **Agent name** (`agent_name`) and
+**Acting for** (`on_behalf_of`), sent on every MCP request as `X-MetaForge-Agent` and
+`X-MetaForge-On-Behalf-Of`. Both are empty by default, and then nothing is claimed: a
+person's decision (accept, hand over, rework, an upload; the release) waits for the person
+as before.
+
+Filled in, on a gateway whose owner set `METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY` (and
+`METAFORGE_ALLOW_AGENT_RELEASE` for the release), those decisions run without a prompt
+and are recorded as the agent's, for that person, never as the person's own. On a gateway
+with sign-in, Acting for must be your signed-in account. Neither is a credential, so sign-in
+works as before. See [delegated holds through MCP](../approvals.md#delegated-holds-through-mcp).
+
 ## Keeping the tool list a size Claude Code can use
 
 The plugin asks for every tool (`tool_profile` is `all`). Claude
