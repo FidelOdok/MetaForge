@@ -86,11 +86,38 @@ async def _policy_mode(project_id: str) -> str:
         return "off"
 
 
+#: Why a rerun runs without a person when the owner turned approvals off.
+APPROVALS_OFF_REASON = "approvals are off on this MetaForge (METAFORGE_APPROVALS=off)"
+
+
+def waits_for_a_person(rerun: ProposedRerun) -> bool:
+    """Whether ``rerun`` waits for a person now.
+
+    Read from the switch at the moment of asking, not only from the disposition
+    stored when the impact was recorded: turning approvals off releases reruns
+    that were already waiting, as it releases tool-call holds.
+    """
+    from mcp_core.guardrails import approvals_off, held_even_with_approvals_off
+
+    if rerun.status != "proposed" or rerun.disposition != "requires_approval":
+        return False
+    return not (approvals_off() and not held_even_with_approvals_off(rerun.tool))
+
+
 def disposition_for(rerun: ProposedRerun, mode: str) -> tuple[str, str]:
     """``(disposition, why)`` for one rerun under the project's policy ``mode``."""
     from mcp_core.annotations import annotations_for
-    from mcp_core.guardrails import never_auto_approved, policy_may_approve
+    from mcp_core.guardrails import (
+        approvals_off,
+        held_even_with_approvals_off,
+        never_auto_approved,
+        policy_may_approve,
+    )
 
+    if approvals_off() and not held_even_with_approvals_off(rerun.tool):
+        # The owner's switch covers every hold a tool call would meet, and a rerun is
+        # a tool call: it runs without a person, as the call itself would.
+        return ("may_run_unattended", APPROVALS_OFF_REASON)
     if rerun.consequential:
         return (
             "requires_approval",
@@ -151,11 +178,7 @@ def rerun_approval_id(impact_id: str, rerun_id: str) -> str:
 
 
 def _waiting(result: ImpactResult) -> list[ProposedRerun]:
-    return [
-        r
-        for r in result.proposed_reruns
-        if r.status == "proposed" and r.disposition == "requires_approval"
-    ]
+    return [r for r in result.proposed_reruns if waits_for_a_person(r)]
 
 
 def _artifact_refs(result: ImpactResult) -> list[dict[str, Any]]:

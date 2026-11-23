@@ -508,3 +508,46 @@ async def test_the_tool_refuses_an_undelegated_call(twin: Any) -> None:
         await _tools(twin).approve_release(
             {"project_id": PROJECT, "reason": "r", APPROVED_BY_ARG: PERSON}
         )
+
+
+# -- approvals off (METAFORGE_APPROVALS=off): the switch approves the held release steps --
+
+SWITCH = "Approvals off (METAFORGE_APPROVALS=off)"
+
+
+async def test_with_approvals_off_a_baseline_approved_through_a_hold_names_the_switch(
+    twin: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("METAFORGE_APPROVALS", "off")
+    await _request(twin)
+    out = await _tools(twin).create_baseline(
+        {
+            "project_id": PROJECT,
+            "reason": "release candidate",
+            "approved_by": ["Someone the model named"],
+            APPROVED_BY_ARG: SWITCH,
+        }
+    )
+    assert out["approved_by"] == [SWITCH]
+    assert "METAFORGE_APPROVALS=off" in out["reason"]
+
+
+async def test_with_approvals_off_the_release_approval_runs_as_the_switch(
+    twin: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("METAFORGE_APPROVALS", "off")
+    entity_id = await _request(twin)
+    out = await _tools(twin).approve_release(
+        {"project_id": PROJECT, "reason": "ship it", APPROVED_BY_ARG: SWITCH}
+    )
+    assert out["approved_by"] == "agent:agent" and out["on_behalf_of"] == SWITCH
+    entity = await twin.get_engineering_entity(UUID(entity_id))
+    assert entity.authority.value == "approved"
+
+
+async def test_with_approvals_on_the_release_approval_still_needs_delegation(twin: Any) -> None:
+    await _request(twin)
+    with pytest.raises(ReleaseNotDelegatedError):
+        await _tools(twin).approve_release(
+            {"project_id": PROJECT, "reason": "r", APPROVED_BY_ARG: SWITCH}
+        )

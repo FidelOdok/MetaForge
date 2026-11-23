@@ -649,3 +649,53 @@ class TestImpactIsHistory:
         )
         with_review = empty.model_copy(update={"review_actions": [review]})
         assert has_downstream_impact(with_review)
+
+
+# -- approvals off (METAFORGE_APPROVALS=off) covers reruns too ------------------------
+
+
+def _held_rerun(tool: str, **extra: Any) -> ProposedRerun:
+    return ProposedRerun(
+        id="r1",
+        tool=tool,
+        check_kind="fea",
+        target_ref="ASM-FC@4",
+        label=f"Re-run {tool}",
+        reason="the assembly moved",
+        **extra,
+    )
+
+
+def test_with_approvals_off_a_rerun_runs_without_a_person(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("METAFORGE_APPROVALS", "off")
+    # Consequential, and a producing tool no policy approves: still unattended.
+    disposition, why = impact_service.disposition_for(_held_rerun("calculix.run_fea"), "off")
+    assert disposition == "may_run_unattended" and "METAFORGE_APPROVALS=off" in why
+    disposition, _ = impact_service.disposition_for(_held_rerun("firmware.run_emulated"), "off")
+    assert disposition == "may_run_unattended"
+
+
+def test_with_approvals_on_a_consequential_rerun_waits(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("METAFORGE_APPROVALS", raising=False)
+    disposition, _ = impact_service.disposition_for(_held_rerun("calculix.run_fea"), "off")
+    assert disposition == "requires_approval"
+
+
+def test_a_step_held_even_with_approvals_off_still_waits(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("METAFORGE_APPROVALS", "off")
+    disposition, _ = impact_service.disposition_for(_held_rerun("vendor.place_order"), "off")
+    assert disposition == "requires_approval"
+
+
+def test_turning_approvals_off_releases_reruns_already_waiting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    waiting = _held_rerun("calculix.run_fea")  # stored as requires_approval, proposed
+    monkeypatch.delenv("METAFORGE_APPROVALS", raising=False)
+    assert impact_service.waits_for_a_person(waiting)
+    monkeypatch.setenv("METAFORGE_APPROVALS", "off")
+    assert not impact_service.waits_for_a_person(waiting)
+    decided = _held_rerun("calculix.run_fea", status="approved")
+    assert not impact_service.waits_for_a_person(decided)

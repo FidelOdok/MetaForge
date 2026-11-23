@@ -122,7 +122,7 @@ describe('Approval settings in layers (FORGE-904)', () => {
     render(<ApprovalPolicyPanel projectId="p2" />);
     const notice = await screen.findByTestId('approvals-off');
     expect(notice).toHaveTextContent("Approvals are off on this MetaForge (METAFORGE_APPROVALS=off)");
-    expect(notice).toHaveTextContent('placing an order still wait for a person');
+    expect(notice).toHaveTextContent('Placing an order, and a gate whose own checks fail, still wait');
   });
 
   it('sets the account’s ceiling and switches, never above the deployment', async () => {
