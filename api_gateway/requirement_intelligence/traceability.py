@@ -46,6 +46,7 @@ from pydantic import BaseModel
 
 from api_gateway.requirement_intelligence.models import AgentResult
 from twin_core.api import TwinAPI
+from twin_core.models.engineering_entity import EngineeringEntity
 from twin_core.models.enums import ConstraintSeverity, EdgeType, WorkProductType
 
 # Any of these counts as "this entity traces to something" -- the exact
@@ -144,7 +145,9 @@ class TraceabilityAgent:
         # not-yet-reviewed proposal, which isn't a traceability gap.
         requirements = [c for c in constraints if not c.metadata.get("candidate")]
         needs = [e for e in entities if e.entity_type == "stakeholder_need"]
-        verifications = [e for e in entities if e.entity_type == "verification_case"]
+        verifications = _newest_per_title(
+            [e for e in entities if e.entity_type == "verification_case"]
+        )
         evidence_entities = [e for e in entities if e.entity_type == "evidence"]
 
         findings: list[TraceabilityFinding] = []
@@ -282,3 +285,30 @@ class TraceabilityAgent:
 
 def _finding(category: TraceabilityCategory, subject_id: UUID, label: str) -> TraceabilityFinding:
     return TraceabilityFinding(category=category, subject_id=subject_id, subject_label=label)
+
+
+def _newest_per_title(cases: list[EngineeringEntity]) -> list[EngineeringEntity]:
+    """The cases that are current: for each title, only the newest.
+
+    A verification case is a record, not a revisioned item, so recording it
+    again under the same title (to point it at a new requirement revision, or
+    to attach new evidence) leaves the older one in the graph. It is history,
+    and counting it held coverage down for cases whose newest record has
+    evidence. Untitled cases are each their own.
+    """
+    newest: dict[str, EngineeringEntity] = {}
+    out: list[EngineeringEntity] = []
+    for case in cases:
+        title = " ".join((case.title or "").split()).lower()
+        if not title:
+            out.append(case)
+            continue
+        held = newest.get(title)
+        if held is None or _created(case) >= _created(held):
+            newest[title] = case
+    return out + list(newest.values())
+
+
+def _created(entity: EngineeringEntity) -> str:
+    stamp = getattr(entity, "created_at", None)
+    return stamp.isoformat() if stamp is not None else ""
