@@ -179,6 +179,55 @@ def _render_markdown(title: str, entries: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+#: The fields that make two statements of a requirement the same requirement.
+_SAME_FIELDS = (
+    "expression",
+    "message",
+    "acceptance_criteria",
+    "verification_method",
+    "expected_evidence",
+    "metric",
+    "operator",
+    "limit",
+    "unit",
+    "target_node_type",
+)
+
+
+async def _prior_constraints(twin: Any, plan: Any) -> dict[str, Constraint]:
+    """The previous revision's requirements by name; empty for a first revision."""
+    prior_id = getattr(plan, "prior_node_id", None) if plan is not None else None
+    if prior_id is None:
+        return {}
+    out: dict[str, Constraint] = {}
+    try:
+        edges = await twin.get_edges(
+            prior_id, direction="outgoing", edge_type=EdgeType.CONSTRAINED_BY
+        )
+        for edge in edges:
+            node = await twin.graph.get_node(edge.target_id)
+            if isinstance(node, Constraint):
+                out.setdefault(node.name, node)
+    except Exception as exc:  # noqa: BLE001 - nothing carried is the old behaviour
+        logger.warning("constraint_prior_unreadable", prior=str(prior_id), error=str(exc))
+        return {}
+    return out
+
+
+def _unchanged(prior: Constraint, entry: dict[str, Any], parent_ids: list[Any]) -> bool:
+    """Whether ``entry`` states ``prior`` exactly: same values, source and parents."""
+    severity = getattr(prior.severity, "value", prior.severity)
+    if str(severity) != str(entry["severity"]) or prior.domain != entry["domain"]:
+        return False
+    for field in _SAME_FIELDS:
+        if getattr(prior, field, None) != entry.get(field):
+            return False
+    meta = prior.metadata or {}
+    if meta.get("limit_source") != entry.get("limit_source"):
+        return False
+    return sorted(meta.get("parent_refs") or []) == sorted(str(p) for p in parent_ids)
+
+
 def make_constraint_recorder(twin: Any, project_backend: Any = None) -> Any:
     """Return an async ``record(...)`` that persists a constraint set."""
     record_document = make_document_recorder(twin, project_backend)
@@ -258,7 +307,29 @@ def make_constraint_recorder(twin: Any, project_backend: Any = None) -> Any:
                 )
             constraint_ids: list[str] = []
             constraint_parents: dict[str, list[str]] = {}
+            carried: list[str] = []
+            # FORGE-914: a requirement the new revision states exactly as the
+            # previous one did keeps its node (and id): it is bound to this
+            # revision too, so evidence and verification cases that name it stay
+            # linked. Only a changed or new requirement gets a new node.
+            prior = await _prior_constraints(twin, plan)
             for e, parent_ids in zip(entries, resolved_parents, strict=True):
+                same = prior.get(e["name"])
+                if same is not None and set_wp_id and _unchanged(same, e, parent_ids):
+                    await twin.add_edge(
+                        UUID(str(set_wp_id)),
+                        same.id,
+                        EdgeType.CONSTRAINED_BY,
+                        metadata={"scope": "local", "carried": True},
+                    )
+                    meta = dict(same.metadata or {})
+                    meta["constraint_set_wp"] = str(set_wp_id)
+                    await twin.graph.update_node(same.id, {"metadata": meta})
+                    constraint_ids.append(str(same.id))
+                    carried.append(str(same.id))
+                    if parent_ids:
+                        constraint_parents[str(same.id)] = [str(p) for p in parent_ids]
+                    continue
                 metadata: dict[str, Any] = {
                     "project_id": project_id,
                     "session_id": session_id,
@@ -308,9 +379,11 @@ def make_constraint_recorder(twin: Any, project_backend: Any = None) -> Any:
                 if parent_ids:
                     constraint_parents[str(created.id)] = [str(p) for p in parent_ids]
 
+            span.set_attribute("constraints.carried", len(carried))
             result: dict[str, Any] = {
                 "node_id": set_wp_id,
                 "constraint_ids": constraint_ids,
+                "carried_constraint_ids": carried,
                 "constraint_parents": constraint_parents,
                 "minio_object_key": doc.get("minio_object_key"),
                 "content_hash": doc.get("content_hash"),
