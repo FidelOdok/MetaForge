@@ -35,6 +35,7 @@ from api_gateway.twin.item_revisions import (
 )
 from api_gateway.twin.thread_links import infer_upstream, link_thread
 from observability.tracing import get_tracer
+from twin_core.model_roles import role_of
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.twin.geometry_recorder")
@@ -235,10 +236,16 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
                 prior_step = await _find_current_work_product(
                     twin, WorkProductType.CAD_MODEL, name, project_id
                 )
+            # Same geometry with a different role (a part re-marked as a
+            # component's own model, say) is a real change: a new revision.
+            role_changed = prior_step is not None and role_of(
+                dict(getattr(prior_step, "metadata", None) or {})
+            ) != role_of(extra_metadata or {})
             if (
                 script_source is None
                 and prior_step is not None
                 and prior_step.content_hash == content_hash
+                and not role_changed
             ):
                 existing_id = str(prior_step.id)
                 logger.info(

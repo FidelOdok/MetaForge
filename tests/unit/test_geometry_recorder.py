@@ -473,6 +473,38 @@ class TestDuplicateContentIsANoOp:
         cad_models = await twin.list_work_products(project_id=UUID(project_id))
         assert len(cad_models) == 1
 
+    async def test_same_geometry_with_a_new_role_is_a_new_revision(
+        self, patched_blob_store: dict
+    ) -> None:
+        """Re-marking a part as a component's own model changes what it is."""
+        from uuid import UUID
+
+        from twin_core.api import InMemoryTwinAPI
+
+        twin = InMemoryTwinAPI.create()
+        record = make_geometry_recorder(twin, None)
+        project_id = "77777777-7777-7777-7777-777777777777"
+
+        v1 = await record(step_base64=_STEP_B64, name="Inductor", project_id=project_id)
+        v2 = await record(
+            step_base64=_STEP_B64,
+            name="Inductor",
+            project_id=project_id,
+            extra_metadata={"model_role": "component"},
+        )
+        assert "already_committed" not in v2
+        assert v2["node_id"] != v1["node_id"]
+        node = await twin.get_work_product(UUID(v2["node_id"]))
+        assert node.metadata["model_role"] == "component"
+        # The same role again is still a no-op.
+        v3 = await record(
+            step_base64=_STEP_B64,
+            name="Inductor",
+            project_id=project_id,
+            extra_metadata={"model_role": "component"},
+        )
+        assert v3["already_committed"] is True
+
     async def test_already_committed_message_names_the_existing_node(
         self, patched_blob_store: dict
     ) -> None:
