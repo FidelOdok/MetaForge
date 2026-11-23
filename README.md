@@ -475,7 +475,8 @@ METAFORGE_LLM_PROVIDER=anthropic    # anthropic | openai | openrouter | openai-c
 METAFORGE_LLM_API_KEY=              # your provider key; none for openai-codex
 
 # Optional services (each adapter turns itself off when its key is absent)
-BRAVE_API_KEY=                  # web.search and web.fetch
+BRAVE_API_KEY=                  # web.search (Brave); web.fetch needs no key
+TAVILY_API_KEY=                 # web.search (Tavily), used first when set
 OPEN_ROUTER_API_KEY=            # knowledge property extraction
 DIGIKEY_CLIENT_ID=
 DIGIKEY_CLIENT_SECRET=
@@ -495,7 +496,8 @@ METAFORGE_MCP_API_KEY=          # guards the HTTP MCP endpoint; set before expos
 |---|---|---|
 | `NEO4J_PASSWORD`, `POSTGRES_PASSWORD`, `MINIO_SECRET_KEY`, `TEMPORAL_POSTGRES_PASSWORD`, `GRAFANA_PASSWORD` | Protect the services MetaForge runs for you | You generate them |
 | `METAFORGE_LLM_API_KEY` | Calls to your model provider | Anthropic, OpenAI or OpenRouter |
-| `BRAVE_API_KEY` | Web search | [brave.com/search/api](https://brave.com/search/api/) |
+| `BRAVE_API_KEY` | Web search (Brave) | [brave.com/search/api](https://brave.com/search/api/) |
+| `TAVILY_API_KEY` | Web search (Tavily; preferred when set, see `WEB_SEARCH_PROVIDER`) | [tavily.com](https://tavily.com) |
 | Distributor keys | Live stock and price | Each distributor's developer portal |
 | `METAFORGE_MCP_API_KEY` | Bearer key for the HTTP MCP endpoint | You generate it |
 

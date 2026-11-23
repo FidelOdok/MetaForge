@@ -199,6 +199,8 @@ services:
       # keys above: without this, web.search / web.fetch are not registered
       # at all rather than registered-but-always-empty.
       - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - WEB_SEARCH_PROVIDER=${WEB_SEARCH_PROVIDER:-auto}
       # Cloud adapters: an API key in place of a local tool container.
       # Unset, that adapter's tools are not registered.
       - MESHY_API_KEY=${MESHY_API_KEY:-}
@@ -659,6 +661,8 @@ services:
       # sidecar never did, so the web adapter always skipped with
       # "missing env vars: BRAVE_API_KEY" here regardless of .env.
       - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - WEB_SEARCH_PROVIDER=${WEB_SEARCH_PROVIDER:-auto}
       # Cloud adapters, same passthrough as the gateway above.
       - MESHY_API_KEY=${MESHY_API_KEY:-}
       - ZOO_API_TOKEN=${ZOO_API_TOKEN:-}
