@@ -2461,7 +2461,13 @@ class CadqueryOperations:
             )
             span.set_attribute("assembly.interferences", len(interferences))
 
-            assy.save(output_path)
+            # importStep reads geometry only, so the parts above carry no
+            # colour. The file written keeps each part's own colours: a part
+            # whose STEP has them goes in as its coloured import, at the
+            # placement the parts above ended at (after any constraint solve).
+            coloured = _coloured_assembly(assy, parts)
+            (coloured if coloured is not None else assy).save(output_path)
+            span.set_attribute("assembly.coloured", coloured is not None)
             # Assembly.save ignores the STEP writer's status: check the file.
             size = require_written(output_path, _ASSEMBLY_TOOL)
 
@@ -2731,6 +2737,38 @@ def _part_location(loc: dict[str, Any]) -> Any:
         if angle:
             rotation = cq.Location(cq.Vector(0, 0, 0), cq.Vector(*axis), angle) * rotation
     return location * rotation
+
+
+def _coloured_import(path: str) -> Any | None:
+    """The STEP at ``path`` as an assembly with its own colours, or ``None`` when it has none."""
+    try:
+        sub = cq.Assembly.importStep(path)
+        if any(child.color is not None for _name, child in sub.traverse()):
+            return sub
+    except Exception as exc:  # noqa: BLE001 - an uncoloured import is the fallback
+        logger.debug("cadquery_coloured_import_skipped", path=path, error=str(exc))
+    return None
+
+
+def _coloured_assembly(assy: Any, parts: list[dict[str, Any]]) -> Any | None:
+    """``assy`` rebuilt so each STEP part keeps its colours; ``None`` when none has any."""
+    objects = getattr(assy, "objects", None)
+    if not isinstance(objects, dict):
+        return None
+    out = cq.Assembly()
+    any_colour = False
+    for part_def in parts:
+        name = part_def["name"]
+        child = objects.get(name)
+        if child is None:
+            continue
+        sub = None if part_def.get("shape") else _coloured_import(str(part_def["file"]))
+        if sub is not None:
+            out.add(sub, name=name, loc=child.loc)
+            any_colour = True
+        else:
+            out.add(child.obj, name=name, loc=child.loc, color=child.color)
+    return out if any_colour else None
 
 
 def _pairwise_interferences(assy: Any, names: list[str]) -> list[dict[str, Any]]:

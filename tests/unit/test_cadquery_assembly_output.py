@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -333,3 +334,20 @@ async def test_the_http_transport_names_a_non_json_http_error() -> None:
             await transport.disconnect()
     assert "HTTP 413" in exc.value.message
     assert "Maximum request body size" in exc.value.message
+
+
+def test_an_assembly_keeps_each_parts_own_colours(tmp_path: Path) -> None:
+    """importStep reads geometry only: the assembly used to be written with no colour at all."""
+    cq = pytest.importorskip("cadquery")
+    parts = {"orange": ((0.8, 0.2, 0.1), 0), "steel": ((0.1, 0.3, 0.7), 20)}
+    for name, (rgb, x) in parts.items():
+        part = cq.Assembly()
+        body = cq.Workplane().box(10, 10, 10).translate((x, 0, 0))
+        part.add(body, name="body", color=cq.Color(*rgb))
+        part.save(str(tmp_path / f"{name}.step"))
+    ops = CadqueryOperations(work_dir=str(tmp_path))
+    out = ops.create_assembly([{"name": n, "file": str(tmp_path / f"{n}.step")} for n in parts])
+    text = Path(out["assembly_file"]).read_text()
+    found = re.findall(r"COLOUR_RGB\('[^']*',([^,]+),([^,]+),([^)]+)\)", text)
+    written = {tuple(round(float(v), 2) for v in rgb) for rgb in found}
+    assert {rgb for rgb, _x in parts.values()} <= written
