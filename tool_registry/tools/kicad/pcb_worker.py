@@ -1047,6 +1047,17 @@ def _name_unnamed_footprints(board: Any) -> int:
     return named
 
 
+def fanout_hole_gap(ds: Any) -> int:
+    """The gap a fanout via's hole keeps from every other hole, in board units.
+
+    Two rules bound it and DRC checks both: hole clearance (a hole to other
+    copper) and the minimum hole to hole (drill wall to drill wall). Fanout
+    vias beside 0.5 mm pitch pins used to sit 0.5 mm apart, 0.2 mm between
+    0.3 mm drills, which passed the first and broke the second.
+    """
+    return max(int(ds.m_HoleClearance), int(getattr(ds, "m_HoleToHoleMin", 0)))
+
+
 def _fanout_planes(board: Any) -> dict[str, Any]:
     """A via beside every SMD pad on an inner-plane net, joined by a short track.
 
@@ -1067,7 +1078,7 @@ def _fanout_planes(board: Any) -> dict[str, Any]:
     nc = board.GetDesignSettings().m_NetSettings.GetDefaultNetclass()
     clear, track_w = nc.GetClearance(), nc.GetTrackWidth()
     via_d, drill = nc.GetViaDiameter(), nc.GetViaDrill()
-    hole_clear = board.GetDesignSettings().m_HoleClearance
+    hole_clear = fanout_hole_gap(board.GetDesignSettings())
     edge = board.GetBoardEdgesBoundingBox()
     margin = via_d // 2 + clear + MM(0.3)
     pads = [p for fp in board.GetFootprints() for p in fp.Pads()]
