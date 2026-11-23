@@ -199,6 +199,11 @@ def read_step_colours(step: bytes | str) -> dict[str, RGB]:
         return {}
     by_product = _product_solids(ents)
     solid_to_product = {sid: name for name, sids in by_product.items() for sid in sids}
+    # A colour on a solid's face counts for it too: KiCad's board export styles
+    # every face and leaves most solids unstyled.
+    for sid, name in list(solid_to_product.items()):
+        for face in _faces_of(ents, sid):
+            solid_to_product.setdefault(face, name)
     out: dict[str, RGB] = {}
     for _i, (t, a) in sorted(ents.items()):
         if t not in ("STYLED_ITEM", "OVER_RIDING_STYLED_ITEM"):
@@ -222,6 +227,24 @@ def read_step_colours(step: bytes | str) -> dict[str, RGB]:
         for n in names:
             out.setdefault(n, rgb)
     return out
+
+
+def _faces_of(ents: dict[int, tuple[str, str]], solid: int) -> list[int]:
+    """The face ids of a solid: its shells' faces (a brep's outer and inner shells)."""
+    rep = ents.get(solid)
+    if rep is None:
+        return []
+    faces: list[int] = []
+    for ref in _REF_RE.findall(rep[1]):
+        shell = ents.get(int(ref))
+        if shell is None or "SHELL" not in shell[0]:
+            continue
+        faces += [
+            int(f)
+            for f in _REF_RE.findall(shell[1])
+            if (ents.get(int(f)) or ("",))[0].endswith("FACE")
+        ]
+    return faces
 
 
 def step_part_names(step: bytes | str) -> list[str]:

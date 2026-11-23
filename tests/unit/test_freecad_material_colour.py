@@ -306,3 +306,30 @@ class TestFallbackPartColours:
     def test_fallback_naming_parts_not_in_this_step_is_a_noop(self) -> None:
         data = _STEP.encode()
         assert apply_step_colours(data, fallback_part_rgb={"Elsewhere": (1.0, 0.0, 0.0)}) == data
+
+
+def test_a_colour_on_a_face_counts_for_its_part() -> None:
+    """KiCad's board STEP styles faces, not solids; its parts are coloured all the same."""
+    import re as _re
+
+    from tool_registry.tools.freecad.materials_appearance import (
+        apply_step_colours,
+        read_step_colours,
+        uncoloured_products,
+    )
+
+    one = _STEP.replace(
+        "#12 = CLOSED_SHELL('',());",
+        "#12 = CLOSED_SHELL('',(#13));\n#13 = ADVANCED_FACE('',(),#10,.T.);",
+    )
+    one = one.replace(
+        "#26 = MANIFOLD_SOLID_BREP('',#12);",
+        "#26 = MANIFOLD_SOLID_BREP('',#27);\n#27 = CLOSED_SHELL('',());",
+    )
+    assert uncoloured_products(one.encode()) == ["Board", "Bracket"]
+    styled = apply_step_colours(one.encode(), None, {"Board": (0.1, 0.5, 0.2)}).decode()
+    # Move the style from the Board's solid (#11) onto its face (#13), as KiCad writes it.
+    moved = _re.sub(r"(STYLED_ITEM\('[^']*',\(#\d+\),)#11\)", r"\g<1>#13)", styled)
+    assert moved != styled
+    assert set(read_step_colours(moved)) == {"Board"}
+    assert uncoloured_products(moved.encode()) == ["Bracket"]
