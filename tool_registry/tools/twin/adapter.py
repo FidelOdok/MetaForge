@@ -29,6 +29,7 @@ from mcp_core.guardrails import (
     REQUIRE_PART_COLOURS_ARG,
     HumanAuthorityRequiredError,
     ReleaseNotDelegatedError,
+    approvals_off,
     reject_caller_supplied_approver,
 )
 from mcp_core.live_events import publish_live_event
@@ -8512,6 +8513,16 @@ class TwinServer(McpToolServer):
         if entity_id is not None and (not isinstance(entity_id, str) or not entity_id.strip()):
             raise ValueError(f"{tool}: 'entity_id' must be a node id")
         delegated = _release_delegate(arguments)
+        held_by = arguments.get(APPROVED_BY_ARG)
+        if delegated is None and approvals_off() and isinstance(held_by, str) and held_by.strip():
+            # With approvals off the dispatcher held the call and the switch approved it.
+            from mcp_core.context import current_context
+
+            try:
+                caller_agent = (current_context().agent or "").strip()
+            except Exception:  # noqa: BLE001 - no context: the agent is not named
+                caller_agent = ""
+            delegated = (caller_agent or "agent", held_by.strip())
         if delegated is None:
             # The dispatcher refuses first; this is the tool's own guard for a
             # path that reaches it without a delegation (a local session).
@@ -9192,6 +9203,16 @@ class TwinServer(McpToolServer):
                     f"{reason} (fixed by agent {agent} on behalf of {person}; the owner "
                     "delegates the release baseline, METAFORGE_ALLOW_AGENT_RELEASE)"
                 ),
+                name=name if isinstance(name, str) else None,
+            )
+        held_by = arguments.get(APPROVED_BY_ARG)
+        if approvals_off() and isinstance(held_by, str) and held_by.strip():
+            # Approved through a hold the switch approved: the record names the switch,
+            # and whatever approved_by the model wrote is not used.
+            return await self._baseline_creator(
+                project_id=project_id,
+                approved_by=[held_by.strip()],
+                reason=f"{reason} (approved automatically: METAFORGE_APPROVALS=off)",
                 name=name if isinstance(name, str) else None,
             )
         approved_by = arguments.get("approved_by")

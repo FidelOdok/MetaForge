@@ -81,6 +81,7 @@ from mcp_core.guardrails import (
     HumanAuthorityRequiredError,
     NotDelegatedError,
     ReleaseNotDelegatedError,
+    approvals_off,
     decide,
     delegable_library_write,
     human_authority_delegated,
@@ -2780,7 +2781,11 @@ class UnifiedMcpServer:
             # on its own upload), or nothing. No hold: a person who approved
             # one would still not make it run.
             delegated_only = await self._delegated_approval(tool_id, arguments, caller, call_id)
-            if delegated_only is None:
+            if delegated_only is None and approvals_off() and requires_release_delegation(tool_id):
+                # With approvals off a release approval is held like any call, and the
+                # gateway approves the hold as the switch, so the record names it.
+                logger.info("mcp_release_held_approvals_off", tool_id=tool_id, caller=caller.value)
+            elif delegated_only is None:
                 release = requires_release_delegation(tool_id)
                 flag_on = release_delegated() if release else human_authority_delegated()
                 logger.info(
@@ -2798,7 +2803,8 @@ class UnifiedMcpServer:
                 if release:
                     raise ReleaseNotDelegatedError(tool_id, detail)
                 raise NotDelegatedError(tool_id, detail)
-            return delegated_only
+            else:
+                return delegated_only
         if not decision.requires_approval:
             if decision.reason.startswith("approvals are off"):
                 logger.info(
@@ -3855,6 +3861,9 @@ class UnifiedMcpServer:
         if approver is not None and (
             requires_human_authority(tool_id)
             or records_approver(tool_id)
+            # A release step approved through a hold (approvals off) records who
+            # approved the hold.
+            or requires_release_delegation(tool_id)
             # FORGE-834: a delegated release step records the person the
             # agent acted for; the agent's name is already in the arguments.
             or DELEGATED_AGENT_ARG in arguments

@@ -634,32 +634,32 @@ What is not isolated:
 
 ### Turning approvals off
 
-`METAFORGE_APPROVALS=off` in a deployment's environment turns held tool calls off on that
+`METAFORGE_APPROVALS=off` in a deployment's environment turns approvals off on that
 MetaForge, in any environment (local, staging or production). It is on by default. With it
-off:
+off, nothing waits for a person, with two exceptions below:
 
-- a write that would wait for a person runs at once, over MCP (`guardrails.decide`) and in
-  the dashboard chat (`HarnessRuntime._await_approval`); this includes writes no project
-  policy approves, such as library, project and flow tools;
-- each one is logged, `mcp_tool_call_approvals_off` on the MCP server and
-  `approval_skipped_approvals_off` in the chat, and appears in the session capture like any
-  other call;
-- three kinds of call still wait, because running them with nobody deciding would record a
-  decision nobody made or spend money that cannot be taken back:
-  - a step whose record is a person's decision (accept, hand over, rework, an upload
-    decision);
-  - fixing the release baseline and approving a release;
-  - placing an order (`vendor.place_order`).
+- an ordinary write that would be held runs at once, over MCP (`guardrails.decide`) and in
+  the dashboard chat (`HarnessRuntime._await_approval`); each is logged,
+  `mcp_tool_call_approvals_off` on the MCP server and `approval_skipped_approvals_off` in the
+  chat;
+- a re-check that a cross-domain change proposes (an FEA, a firmware emulation run after a
+  head move) runs without a person, and re-checks already waiting are released;
+- everything else that reaches `/v1/approvals` is approved by the gateway within about two
+  seconds (`METAFORGE_APPROVALS_OFF_SWEEP_S`): steps whose record is a person's decision
+  (accept, hand over, rework, upload decisions), the release baseline and release approval,
+  design-flow gates, flow proposals and patches, design-change proposals, sketch and drawing
+  approvals, design-loop winners and staged uploads. Each is decided through its own route,
+  so its effect happens as if a person had approved it, and the record names
+  `system:approvals-off` ("Approvals off (METAFORGE_APPROVALS=off)") as the approver, never a
+  person. The sweep is `api_gateway/approvals/approvals_off.py` and logs
+  `approvals_off_approved` for each item.
 
-  These keep their own routes: a person, or the owner's delegation switches
-  ([delegating approvals to an agent](#delegating-approvals-to-an-agent)).
+Two things still wait:
 
-A re-check that a cross-domain change proposes (an FEA, a firmware emulation run after a
-head move) is a tool call too, so it follows the switch: with approvals off it runs without a
-person unless its tool is one of the three kinds above. Turning approvals off also releases
-re-checks that were already waiting; one a person already decided keeps its decision.
-
-Design-flow proposals, gates and waivers are not tool-call holds and still go to a person.
+- a gate whose own checks fail (a violated constraint, a missing deliverable). It does not
+  offer approve, so the switch does not override it: fix what it found, retry or rework;
+- placing an order (`vendor.place_order`), which spends money outside MetaForge and cannot
+  be taken back.
 
 The deployment's limits report `approvals_off`. The dashboard says so plainly on the
 Approvals page, on a project's approval policy and in Settings, Approvals, while it is off.

@@ -28,8 +28,9 @@ export function ApprovalsOffNotice({ limits }: { limits?: DeploymentLimits | nul
   if (!limits?.approvals_off) return null;
   return (
     <p role="status" data-testid="approvals-off" className="mf-approvals-off">
-      Approvals are off on this MetaForge (METAFORGE_APPROVALS=off): agents' writes run without waiting for anyone.
-      Steps that record a person's decision, approving a release and placing an order still wait for a person.
+      Approvals are off on this MetaForge (METAFORGE_APPROVALS=off): nothing waits for anyone. Each approval is
+      approved automatically and recorded as approved by the switch. Placing an order, and a gate whose own checks
+      fail, still wait.
     </p>
   );
 }
