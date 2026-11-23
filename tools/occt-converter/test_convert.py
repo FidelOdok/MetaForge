@@ -295,3 +295,27 @@ class TestColourChain:
         displayed = [self._linear_to_srgb(c) for c in linear]
         for got, want in zip(displayed, self.TABLE_SRGB, strict=True):
             assert got == pytest.approx(want, abs=0.01)
+
+
+class TestStepColours:
+    """A part keeps the colour its STEP gives it, wherever XDE stores it (needs pythonocc)."""
+
+    def test_face_and_solid_colours_reach_the_parts(self, tmp_path: Path) -> None:
+        pytest.importorskip("OCC.Core.STEPCAFControl")
+        cq = pytest.importorskip("cadquery")
+        sys.path.insert(0, str(CONVERTER.parent))
+        from convert import _read_step_coloured
+
+        assy = cq.Assembly()
+        assy.add(cq.Workplane().box(10, 10, 2), name="case", color=cq.Color(0.28, 0.29, 0.32))
+        assy.add(
+            cq.Workplane().box(4, 4, 4).translate((20, 0, 0)),
+            name="part",
+            color=cq.Color(0.1, 0.6, 0.2),
+        )
+        path = tmp_path / "pair.step"
+        assy.save(str(path))
+        found = {name: colour for _shape, name, colour in _read_step_coloured(str(path))}
+        assert set(found) == {"case", "part"}
+        assert all(colour is not None for colour in found.values())
+        assert tuple(round(c, 2) for c in found["part"]) == (0.1, 0.6, 0.2)

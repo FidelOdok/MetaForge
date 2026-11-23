@@ -869,6 +869,18 @@ part name the STEP does not have is refused rather than skipped.
 finish from the library (the `colour-material-finish` skill) and to ask the
 person when none is chosen.
 
+**The viewer shows the colours wherever the STEP keeps them.** The OCCT
+converter that turns a STEP into the viewer's GLB reads each leaf part through
+XDE: the colour on its assembly instance, on the part it refers to, or on a
+coloured assembly above it, and failing those the area-weighted dominant
+colour of its coloured faces (how KiCad's board export stores every
+component). A part with no colour in the STEP is reported `colorSource: none`
+and drawn in the viewer's default; the converter no longer passes off
+pythonocc's fallback grey as the model's own colour. An assembly built with
+`twin.build_assembly` keeps each part's colours: a part is added from its
+coloured import, or with the one colour its STEP gives it when that colour is
+styled on the solid.
+
 **Ergonomic limits.** A fifth kind holds design limits for the
 features people touch, press, reach or lift, in `check_ergonomics`' own
 vocabulary and units (grip diameter and width, handle length, finger
