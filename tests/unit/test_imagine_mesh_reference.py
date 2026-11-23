@@ -306,3 +306,55 @@ def test_a_mesh_with_no_colours_has_no_groups() -> None:
     tri = ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))
     assert "groups" not in fg_refs.reduce_mesh([tri])
     assert fg_refs.reduce_mesh([tri], colors=["#123456"])["groups"] == [["#123456", 0, 3]]
+
+
+async def test_a_board_shows_as_its_3d_preview(tmp_path: Path, monkeypatch: Any) -> None:
+    from api_gateway.twin import blob_store
+
+    twin = InMemoryTwinAPI.create()
+    wp = await twin.create_work_product(
+        WorkProduct(
+            name="Board",
+            type=WorkProductType.PCB_LAYOUT,
+            domain="electronics",
+            file_path="",
+            content_hash="abc",
+            format="kicad_pcb",
+            created_by="test",
+            project_id=PROJECT,
+            metadata={"image_files": {"preview/fc-3d.glb": "work-products/x/preview_fc-3d.glb"}},
+        )
+    )
+    asked: list[str] = []
+    monkeypatch.setattr(
+        blob_store, "fetch_work_product_blob", lambda key: asked.append(key) or _two_colour_glb()
+    )
+    svc = ImagineService(twin)
+    await svc.put_studio(PROJECT, full_config(), actor="test")
+    out = await svc.add_mesh_reference(
+        PROJECT, actor="test", work_product_id=str(wp.id), ref_id="board", title="Board", units="mm"
+    )
+    assert asked == ["work-products/x/preview_fc-3d.glb"]
+    assert len(_ref(out, "board")["mesh"]["groups"]) == 2
+
+
+async def test_a_board_with_no_preview_is_refused(tmp_path: Path) -> None:
+    twin = InMemoryTwinAPI.create()
+    wp = await twin.create_work_product(
+        WorkProduct(
+            name="Board",
+            type=WorkProductType.PCB_LAYOUT,
+            domain="electronics",
+            file_path="",
+            content_hash="abc",
+            format="kicad_pcb",
+            created_by="test",
+            project_id=PROJECT,
+        )
+    )
+    svc = ImagineService(twin)
+    await svc.put_studio(PROJECT, full_config(), actor="test")
+    with pytest.raises(ImagineError, match="no 3D preview"):
+        await svc.add_mesh_reference(
+            PROJECT, actor="test", work_product_id=str(wp.id), ref_id="board", title="Board"
+        )
