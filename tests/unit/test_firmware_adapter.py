@@ -679,6 +679,34 @@ class TestRunEmulatedHandler:
         )
         assert bad["verdict"] == "fail"
 
+    async def test_a_custom_board_names_the_uart_it_prints_on(
+        self, tmp_path: Path, fake_renode: str
+    ) -> None:
+        """A flight controller on the H743 model prints on USART1 (its GPS port), not
+        the Nucleo's USART3 console; the run captures the UART it names."""
+        (tmp_path / "fw.elf").write_bytes(b"\x7fELF")
+        server = _server(tmp_path, renode=fake_renode)
+        out = await server.run_emulated(
+            {
+                "elf_path": "fw.elf",
+                "board": "nucleo_h743zi",
+                "uart": "USART1",
+                "uart_expect": ["MetaForge boot"],
+            }
+        )
+        script = (tmp_path / out["run_dir"] / "run.resc").read_text()
+        assert "sysbus.usart1 CreateFileBackend" in script
+        assert "platforms/boards/nucleo_h753zi.repl" in script
+        with pytest.raises(ValueError, match="names a peripheral"):
+            await server.run_emulated(
+                {
+                    "elf_path": "fw.elf",
+                    "board": "nucleo_h743zi",
+                    "uart": "gpio",
+                    "uart_expect": ["x"],
+                }
+            )
+
     async def test_esp32_without_bins_is_not_established(
         self, tmp_path: Path, fake_qemu: str
     ) -> None:

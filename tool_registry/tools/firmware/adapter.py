@@ -63,6 +63,14 @@ RENODE_BOARDS: dict[str, dict[str, str]] = {
         "repl": "platforms/boards/nucleo_f767zi.repl",
         "uart": "sysbus.usart3",
     },
+    # STM32H743ZI (LQFP-144): Renode has no H743 board, and its H753 one is the same
+    # die, pinout and peripherals plus the crypto and hash blocks the H743 lacks, so a
+    # firmware built for the H743 runs on it as on the real part (firmware that probes
+    # for CRYP/HASH would find them here and not on the board).
+    "nucleo_h743zi": {
+        "repl": "platforms/boards/nucleo_h753zi.repl",
+        "uart": "sysbus.usart3",
+    },
     "nucleo_h753zi": {
         "repl": "platforms/boards/nucleo_h753zi.repl",
         "uart": "sysbus.usart3",
@@ -1079,6 +1087,9 @@ class FirmwareServer(McpToolServer):
         sim_seconds = float(arguments.get("sim_time_s", 2.0))
         if not 0 < sim_seconds <= 600:
             raise ValueError("sim_time_s must be in (0, 600]")
+        uart = str(arguments.get("uart") or "").strip().lower() or None
+        if uart is not None and not re.fullmatch(r"(usart|uart|lpuart)\d{1,2}", uart):
+            raise ValueError("uart names a peripheral, e.g. usart1, uart4 or lpuart1")
         clock = arguments.get("core_clock_hz")
         core_clock_hz = int(clock) if clock is not None else None
         if core_clock_hz is not None and not 32_768 <= core_clock_hz <= 2_000_000_000:
@@ -1091,7 +1102,7 @@ class FirmwareServer(McpToolServer):
             chip = _esp_chip(board, elf)
             if board in RENODE_BOARDS:
                 result = await self._run_renode(
-                    board, elf, run_dir, sim_seconds, memory, core_clock_hz
+                    board, elf, run_dir, sim_seconds, memory, core_clock_hz, uart
                 )
             elif chip in ESP_QEMU:
                 result = await self._run_esp_qemu(chip, elf, run_dir, sim_seconds)
@@ -1157,6 +1168,7 @@ class FirmwareServer(McpToolServer):
         sim_seconds: float,
         memory: list[dict[str, Any]],
         core_clock_hz: int | None = None,
+        uart: str | None = None,
     ) -> dict[str, Any]:
         renode = shutil.which(self.config.renode)
         if renode is None:
@@ -1172,7 +1184,7 @@ class FirmwareServer(McpToolServer):
             renode_script(
                 spec["repl"],
                 str(elf),
-                spec["uart"],
+                f"sysbus.{uart}" if uart else spec["uart"],
                 str(uart_log),
                 sim_seconds,
                 reads,
@@ -1541,6 +1553,13 @@ _EMULATE_SCHEMA: dict[str, Any] = {
             "type": "number",
             "default": 2.0,
             "description": "Emulated seconds (Renode); ESP32 QEMU gets ~5x this in wall time",
+        },
+        "uart": {
+            "type": "string",
+            "description": (
+                "Renode only: the UART the firmware prints on, e.g. usart1, when it is not "
+                "the board's default console (a custom board on a Nucleo model)"
+            ),
         },
         "core_clock_hz": {
             "type": "integer",
