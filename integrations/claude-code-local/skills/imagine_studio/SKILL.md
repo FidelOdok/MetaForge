@@ -374,11 +374,12 @@ it with `twin.record_decision` and say which depth you chose and why.
   assumptions, scenarios, requirements, one part per function, interfaces,
   manufacturing and wiring. The studio draws the size limit as one box, a person does
   not need to have seen a form before handover, and form screening does not apply.
-  After handover, add Develop's assembly as a followed mesh reference
-  (`twin.imagine_add_mesh_reference` with `follow: true`), and read `twin.form_thread`
-  to see whether Develop's design still fits the size limit (`within` or `exceeds`).
-  To take a larger size, call `twin.imagine_accept_form` with
-  `{op: replace, path: /form/brief/envelope_mm, value: [L, W, H]}`.
+  After handover, an agent that has the studio's reference and form tools (an MCP
+  client sees them all; the in-app chat's stages do not) adds Develop's assembly as a
+  mesh reference that follows its item, and reads the form thread to see whether
+  Develop's design still fits the size limit (`within` or `exceeds`). A larger size is
+  taken by accepting that row with `{op: replace, path: /form/brief/envelope_mm,
+  value: [L, W, H]}`.
 - **Full**, for a product where look and handling are the point (a lamp, a handheld,
   a speaker, anything with industrial design): author the form as below.
 
