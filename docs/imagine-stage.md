@@ -495,11 +495,13 @@ than one item fits, nothing is paired. Both sizes are boxes on the studio's axes
 (millimetres, Y up). The studio side is what `twin.imagine_look` last drew, kept for
 that revision even after handover. The CAD side is the head revision's validated
 bounding box. Each row is `same` (every side within 0.5 mm), `differs`, `accepted`
-(the studio took that item revision's difference), `unmeasured` or `unpaired`.
+(the studio took that item revision's difference), `unmeasured` or `unpaired`. A brief
+studio's size limit is `within` or `exceeds` instead ([Brief studios](#brief-studios)).
 Openings and mounts are not compared yet.
 
-`twin.imagine_accept_form` takes one `differs` row into the studio. Its `changes`
-replace form parameters only (`/form/params/<name>`, numbers); the caller picks them so
+`twin.imagine_accept_form` takes one `differs` or `exceeds` row into the studio. Its
+`changes` replace form parameters only (`/form/params/<name>`, numbers, or a brief
+studio's `/form/brief/envelope_mm`); the caller picks them so
 the studio draws Develop's size. With no changes, the difference is recorded as known
 and the form stays as it is. The part is stamped `develop_form` with the item revision
 it took, and the studio keeps a list of these syncs. This is the one change allowed on a
@@ -600,6 +602,44 @@ in CI) and `dashboard/e2e/imagine-engine.spec.ts`, which hosts the real engine
 files in a sandboxed frame in Chromium and checks the empty state, the
 labels, the bounding-box fit through a resize, the one-column layout and the
 bounded height (`npx playwright test imagine-engine`).
+
+## Brief studios
+
+A studio has a depth. A **full** studio authors its form (the next section). A **brief**
+studio is for a product led by its electronics or function, where the form Develop
+designs is the real one and a drawn concept of it would only need keeping in step. Its
+form is a size limit:
+
+```json
+"form": {"template": "brief", "envelope_mm": [130, 52, 22]}
+```
+
+`envelope_mm` is `[length, width, height]` in millimetres, Z up, as CAD gives it.
+Every other part of the config is the same as a full studio's: ledger, assumptions,
+scenarios, requirements, one chosen part per function, interfaces, manufacturing
+context and wiring, which is everything Develop is seeded from.
+
+Before a brief config is checked or stored, the gateway expands it into an authored
+form with one generated part, `size-limit`, a box drawn from params `env_l`, `env_w`
+and `env_h`. The stored form keeps `brief: {envelope_mm}` and `template: "authored"`,
+so the formgraph checks, the page, the look and the verification service work
+unchanged. Every write expands again from `brief.envelope_mm`, so patching
+`/form/brief/envelope_mm` resizes the box, and the box cannot drift from the limit. A
+brief form without a usable `envelope_mm` is refused with the formgraph errors (422).
+
+At handover, a brief studio's concept item needs only a chosen part for every function.
+A person does not need to have seen the form, and no concept mesh is needed. The
+screening item is `assumed`, not blocking, because there is no drawn form to screen and
+Develop's CAD is checked instead.
+
+After handover, the studio shows Develop's real design through a followed mesh
+reference ([A supplier's model as a reference](#a-suppliers-model-as-a-reference)). The
+form thread pairs the size limit with Develop's newest assembly (or with its only CAD
+item when it has no assembly) and reports `within` or `exceeds`. To take a larger size,
+`twin.imagine_accept_form` replaces `/form/brief/envelope_mm` with
+`[length, width, height]`.
+
+Choose brief when unsure: a rework can turn a brief studio into a full one.
 
 ## Authored forms
 

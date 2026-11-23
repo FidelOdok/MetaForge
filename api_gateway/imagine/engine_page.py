@@ -162,6 +162,14 @@ def validate_config(config: dict[str, Any]) -> ValidatedConfig:
     names.
     """
     with tracer.start_as_current_span("imagine.validate_config") as span:
+        from api_gateway.imagine import brief
+
+        try:
+            # A brief studio's size limit becomes its one drawn part (FORGE-918).
+            config = brief.expand(config)
+        except brief.BriefError as exc:
+            raise ConfigError([str(exc)]) from exc
+        span.set_attribute("config.brief", brief.is_brief(config))
         size = len(json.dumps(config, ensure_ascii=False))
         span.set_attribute("config.bytes", size)
         if size > MAX_CONFIG_BYTES:
