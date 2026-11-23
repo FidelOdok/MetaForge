@@ -654,6 +654,11 @@ off:
   These keep their own routes: a person, or the owner's delegation switches
   ([delegating approvals to an agent](#delegating-approvals-to-an-agent)).
 
+A re-check that a cross-domain change proposes (an FEA, a firmware emulation run after a
+head move) is a tool call too, so it follows the switch: with approvals off it runs without a
+person unless its tool is one of the three kinds above. Turning approvals off also releases
+re-checks that were already waiting; one a person already decided keeps its decision.
+
 Design-flow proposals, gates and waivers are not tool-call holds and still go to a person.
 
 The deployment's limits report `approvals_off`. The dashboard says so plainly on the

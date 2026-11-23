@@ -585,7 +585,7 @@ def rerun_item(impact: Any, rerun: Any) -> ApprovalItem:
 
 async def _rerun_items(app: Any) -> list[ApprovalItem]:
     """Every rerun that waited, or waits, for a person."""
-    from api_gateway.twin.impact_service import all_impacts
+    from api_gateway.twin.impact_service import all_impacts, waits_for_a_person
 
     twin = _twin_of(app)
     if twin is None:
@@ -600,6 +600,8 @@ async def _rerun_items(app: Any) -> list[ApprovalItem]:
         for impact in impacts
         for rerun in impact.proposed_reruns
         if rerun.disposition == "requires_approval"
+        # A rerun decided before stays in the list; one approvals-off released does not.
+        and (rerun.status != "proposed" or waits_for_a_person(rerun))
     ]
 
 
