@@ -1125,3 +1125,9 @@ p.cv-muted {
   border-color: var(--cv-warn);
   color: var(--cv-warn);
 }
+/* FORGE-906: the part data note sits on its own line under Develop's part. */
+.cv-thread-partdata {
+  display: table;
+  margin-top: 4px;
+  margin-left: 0;
+}

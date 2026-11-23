@@ -142,6 +142,33 @@ describe('Component thread', () => {
     expect(within(row).queryByRole('button')).toBeNull();
   });
 
+  it('says under Develop’s part whether its library entry is a real part yet (FORGE-906)', async () => {
+    const sel = DRIVER.develop.selections[0]!;
+    getComponentThreads.mockResolvedValue(
+      threads(
+        {
+          ...DRIVER,
+          develop: {
+            ...DRIVER.develop,
+            selections: [
+              {
+                ...sel,
+                library: {
+                  ...sel.library,
+                  part_data: { complete: false, summary: '', gaps: ['KiCad footprint', 'Lifecycle'] },
+                },
+              },
+            ],
+          },
+        },
+      ),
+    );
+    render(<ComponentThreadPanel projectId={P} stage="develop" open />);
+    const note = await screen.findByTestId('thread-part-data');
+    expect(note).toHaveTextContent('Part data: 2 to do');
+    expect(note).toHaveAttribute('title', 'Still to record: KiCad footprint, Lifecycle');
+  });
+
   it('renders nothing for a project with no components', async () => {
     getComponentThreads.mockResolvedValue(threads());
     render(<ComponentThreadPanel projectId={P} stage="make" />);

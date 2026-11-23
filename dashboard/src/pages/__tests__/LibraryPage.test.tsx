@@ -100,6 +100,55 @@ describe('LibraryPage', () => {
     expect(screen.getByTestId('preview')).toHaveTextContent('samsung_lm301b');
   });
 
+  it('shows a part’s real part data: lifecycle, KiCad ids, what it lacks and its datasheet ratings (FORGE-906)', async () => {
+    api.listComponents.mockResolvedValue([
+      part('ti_lm1117mpx_3_3', {
+        title: 'TI LM1117MPX-3.3: LDO',
+        mpn: 'LM1117MPX-3.3/NOPB',
+        lifecycle: { status: 'nrnd', source_kind: 'supplier', source_ref: 'Mouser', read_on: '2026-11-22', needs_review: false },
+        ecad: {
+          symbol: 'Regulator_Linear:LM1117-3.3',
+          footprint: 'Package_TO_SOT_SMD:SOT-223-3_TabPin2',
+          source_kind: 'standard',
+          source_ref: 'KiCad 9',
+          needs_review: false,
+        },
+        ratings: [
+          {
+            param: 'input_voltage_v',
+            kind: 'abs_max',
+            min: null,
+            typ: null,
+            max: 20,
+            unit: 'V',
+            conditions: '',
+            source_kind: 'datasheet',
+            source_ref: 'https://www.ti.com/lit/ds/symlink/lm1117.pdf',
+            needs_review: false,
+          },
+        ],
+        part_data: {
+          applies: true,
+          complete: false,
+          summary: '1 of 9 to do: Recommended operating conditions',
+          items: [
+            { key: 'ratings_recommended', label: 'Recommended operating conditions', status: 'missing', detail: '', required: true },
+          ],
+        },
+      }),
+    ]);
+    render(<LibraryPage />);
+    const detail = await screen.findByTestId('library-detail');
+    expect(within(detail).getByTestId('part-lifecycle')).toHaveTextContent('Not for new designs');
+    expect(within(detail).getByTestId('library-ended')).toHaveTextContent('not for new designs');
+    expect(detail).toHaveTextContent('Package_TO_SOT_SMD:SOT-223-3_TabPin2');
+    expect(within(detail).getByTestId('part-data')).toHaveTextContent('Not ready: 1 of 9 to do');
+    expect(within(detail).getByTestId('part-ratings-abs_max')).toHaveTextContent('input voltage');
+    // A recorded NRND part counts as discontinued for the list's filter too.
+    fireEvent.click(screen.getByRole('button', { name: /Hide discontinued/ }));
+    expect(screen.getByTestId('library-count')).toHaveTextContent('0 of 1');
+  });
+
   it('loads an export file and says what was added and what was left alone', async () => {
     api.importLibrary.mockResolvedValue({ added: { component: 2 }, skipped: { component: 500 }, failed: [] });
     render(

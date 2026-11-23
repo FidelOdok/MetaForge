@@ -605,6 +605,13 @@ def parse_stock(raw: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _part_data() -> Any:
+    """``twin_core.library.part_data``, imported late: it builds on this module."""
+    from twin_core.library import part_data
+
+    return part_data
+
+
 def parse_interfaces(raw: Any) -> list[dict[str, str]]:
     """A part's interfaces: [{id, bus, dir}], dir one of in, out or bi."""
     if raw in (None, []):
@@ -855,6 +862,13 @@ class ComponentEntry:
     mpn: str = ""
     datasheet: str = ""
     interfaces: list[dict[str, str]] = field(default_factory=list)
+    #: FORGE-906: rows from the datasheet's absolute maximum, recommended operating
+    #: and electrical tables, each sourced (``part_data.parse_ratings``).
+    ratings: list[dict[str, Any]] = field(default_factory=list)
+    #: FORGE-906: active, NRND, EOL or obsolete, with its source and the day read.
+    lifecycle: dict[str, Any] = field(default_factory=dict)
+    #: FORGE-906: the KiCad symbol and footprint the part is drawn with.
+    ecad: dict[str, Any] = field(default_factory=dict)
     #: The body of a function of g that draws the part in mm, centred on it: x its length,
     #: y its height, z its width. A studio places it with g.model(name). "" for none.
     form_code: str = ""
@@ -1324,6 +1338,9 @@ class SqliteCatalog:
                 mpn=str(data.get("mpn") or "").strip(),
                 datasheet=parse_link("datasheet", data.get("datasheet")),
                 interfaces=parse_interfaces(data.get("interfaces")),
+                ratings=_part_data().parse_ratings(data.get("ratings")),
+                lifecycle=_part_data().parse_lifecycle(data.get("lifecycle")),
+                ecad=_part_data().parse_ecad(data.get("ecad")),
                 form_code=parse_form_code(data.get("form_code")),
                 material=str(data.get("material") or "").strip().lower(),
                 suppliers=parse_suppliers(data.get("suppliers")),
@@ -1477,6 +1494,9 @@ class SqliteCatalog:
                 "datasheet",
                 "interfaces",
                 "form_code",
+                "ratings",
+                "lifecycle",
+                "ecad",
             }
         elif isinstance(entry, ErgonomicLimitEntry):
             allowed = {
@@ -1591,6 +1611,13 @@ class SqliteCatalog:
                 entry.datasheet = parse_link("datasheet", changes["datasheet"])
             if "interfaces" in changes:
                 entry.interfaces = parse_interfaces(changes["interfaces"])
+            if "ratings" in changes:
+                # Replaced as a whole, like suppliers: the datasheet's tables are one set.
+                entry.ratings = _part_data().parse_ratings(changes["ratings"])
+            if "lifecycle" in changes:
+                entry.lifecycle = _part_data().parse_lifecycle(changes["lifecycle"])
+            if "ecad" in changes:
+                entry.ecad = _part_data().parse_ecad(changes["ecad"])
             if "form_code" in changes:
                 entry.form_code = parse_form_code(changes["form_code"])
             if "geometry" in changes:
@@ -1775,6 +1802,11 @@ def summarize_material(entry: MaterialEntry) -> str:
 def summarize_component(entry: ComponentEntry) -> str:
     """One line: the part, its standard and size, its key specs."""
     parts = [f"{k} {_fmt(v.value)} {v.unit}" for k, v in list(entry.specs.items())[:6]]
+    if entry.ratings:
+        parts.append(f"{len(entry.ratings)} datasheet ratings")
+    status = entry.lifecycle.get("status")
+    if status and status != "active":
+        parts.append(f"lifecycle {status.upper()}")
     head = f"{entry.title or entry.name} [{entry.id}] {entry.family}" + (
         f" {entry.standard} {entry.size}".rstrip() if entry.standard or entry.size else ""
     )

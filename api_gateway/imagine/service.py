@@ -2220,7 +2220,8 @@ class ImagineService:
             )
 
         # 7. concept assembly, and the form seen. A person having seen this revision of the form
-        # satisfies it, or an illustrative concept mesh does (spec 5.1, concept.form_seen). The mesh
+        # satisfies it, or a concept mesh does, illustrative or structured from the layout (spec
+        # 5.1, concept.form_seen). The mesh
         # is optional: nothing downstream reads it and it can never be evidence.
         is_brief = brief.is_brief(config)
         mesh = await self.bridge.has_concept_mesh(project_id)
@@ -2241,10 +2242,10 @@ class ImagineService:
             how = (
                 f"a person has seen this form (revision {head.revision})"
                 if seen
-                else "an illustrative concept mesh exists"
+                else "a concept mesh exists"
             )
             if seen and mesh:
-                how += "; an illustrative concept mesh also exists"
+                how += "; a concept mesh also exists"
             add(
                 "concept_assembly",
                 "Concept assembly and concept mesh",
@@ -2258,7 +2259,8 @@ class ImagineService:
             if not (mesh or seen or is_brief):
                 missing.append(
                     "a person to have seen the form (use 'I have seen this form' in the studio), "
-                    "or an illustrative concept mesh"
+                    "or a concept mesh: twin.render_structured_mesh builds one free from the "
+                    "layout, twin.generate_concept_mesh an illustrative one"
                 )
             add(
                 "concept_assembly",

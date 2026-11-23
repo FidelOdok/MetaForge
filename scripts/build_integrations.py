@@ -280,6 +280,36 @@ def plugin_manifest(*, default_gateway_url: str) -> dict:
                 # flow.await_gate or knowledge.extract.
                 "default": "all",
             },
+            # Delegation (FORGE-827): an agent may take a person's decisions
+            # (accept, hand over, rework, uploads; with the release switch, the
+            # release) only when the gateway's owner allows it and the request
+            # names the agent and the person it acts for. These two fields are
+            # those names. Left empty, nothing is claimed and those calls wait
+            # for the person, as before. The record always says the agent
+            # decided for the person, never that the person did.
+            "agent_name": {
+                "type": "string",
+                "title": "Agent name (delegation)",
+                "description": (
+                    "Only for a hands-off run on a gateway whose owner delegates "
+                    "decisions to agents (METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY). "
+                    "The name this agent is recorded under, e.g. claude-code. "
+                    "Leave empty to keep every person's decision with the person."
+                ),
+                "default": "",
+                "required": False,
+            },
+            "on_behalf_of": {
+                "type": "string",
+                "title": "Acting for (delegation)",
+                "description": (
+                    "The person this agent decides for, as the gateway knows them "
+                    "(on a gateway with sign-in, your signed-in account). Used "
+                    "with Agent name; empty keeps decisions with the person."
+                ),
+                "default": "",
+                "required": False,
+            },
         },
         "mcpServers": {
             "metaforge": {
@@ -290,6 +320,13 @@ def plugin_manifest(*, default_gateway_url: str) -> dict:
                 # sees no profile and serves everything, which is the previous
                 # behaviour rather than a failure.
                 "url": "${user_config.gateway_url}?profile=${user_config.tool_profile}",
+                # Never an Authorization header (FORGE-659, above): these name
+                # the agent and the person only, and the gateway ignores them
+                # unless its owner delegates. Empty values claim nothing.
+                "headers": {
+                    "X-MetaForge-Agent": "${user_config.agent_name}",
+                    "X-MetaForge-On-Behalf-Of": "${user_config.on_behalf_of}",
+                },
             }
         },
     }
