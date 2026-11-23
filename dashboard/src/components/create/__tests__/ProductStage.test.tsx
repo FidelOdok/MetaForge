@@ -12,7 +12,7 @@ vi.mock('../../preview/PreviewHost', () => ({
 }));
 vi.mock('../../preview/ParametricStage', () => ({ ParametricStage: () => <div data-testid="parametric-stage" /> }));
 
-import { ProductStage } from '../ProductStage';
+import { ProductStage, defaultStageNode } from '../ProductStage';
 
 const P = 'proj-stage';
 
@@ -73,5 +73,14 @@ describe('ProductStage (the twin model, read only)', () => {
   it('is calm when there is no model yet', () => {
     stage([]);
     expect(screen.getByRole('heading', { name: 'No model yet' })).toBeInTheDocument();
+  });
+});
+
+describe('models that serve the product', () => {
+  it('never shows a component or analysis model as the product', () => {
+    const inductor = node('Inductor model', { wp_type: 'cad_model', format: 'step', model_role: 'component' }, '2026-11-06T10:00:00Z');
+    const fea = node('Board FEA model', { wp_type: 'cad_model', format: 'step', model_role: 'analysis' }, '2026-11-07T10:00:00Z');
+    expect(defaultStageNode([CAD, inductor, fea])?.id).toBe('Bracket');
+    expect(defaultStageNode([inductor, fea])).toBeUndefined();
   });
 });

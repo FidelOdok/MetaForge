@@ -55,6 +55,7 @@ import structlog
 
 from observability.tracing import get_tracer
 from twin_core.dfm.release_checklist import ChecklistItem
+from twin_core.model_roles import is_product_geometry
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("twin_core.dfm.release_fit")
@@ -360,7 +361,7 @@ async def product_parts(twin: Any, project_id: UUID) -> tuple[list[_Part], list[
     for item in await list_items(twin, project_id=project_id, item_type="cad_model"):
         node = await twin.get_work_product(item.head_node_id) if item.head_node_id else None
         meta = _meta(node)
-        if node is None or str(meta.get("model_role") or "") == "analysis" or _is_board_body(meta):
+        if node is None or not is_product_geometry(meta) or _is_board_body(meta):
             continue
         parts.append(_Part(item.key, f"{item.key}@{item.head_revision}", item.name))
     boards = [

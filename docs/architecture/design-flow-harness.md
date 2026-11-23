@@ -213,7 +213,11 @@ last). A `cad_model` committed with `model_role: "analysis"` (and `idealises`,
 the design part it stands for), such as an FEA idealisation with simplified
 supports, is left out of both geometry checks: it is not product geometry, so
 it is neither a loose design part nor held to the product's size, stock or
-material limits.
+material limits. `model_role: "component"` marks the same for a bought
+component's own 3D model, made so a board's 3D export shows it (a footprint
+model): it is part of the board's model, so the release checklist, DFM, the
+assembly check and the release package leave it out, and Develop never shows it
+as the product (`twin_core/model_roles.py`).
 
 A size limit is measured on what it names. A metric that names a part
 (`seat_width_min`, `leg_height_max`) is compared only with the cad_models whose

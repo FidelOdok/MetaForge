@@ -50,6 +50,7 @@ from uuid import UUID
 import structlog
 
 from observability.tracing import get_tracer
+from twin_core.model_roles import is_product_geometry
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("twin_core.geometry_state")
@@ -330,9 +331,9 @@ class CadReadiness:
 
 
 def readiness_of(*, item_key: str, name: str, head_revision: int, node: Any) -> CadReadiness | None:
-    """One head revision's readiness; ``None`` for an analysis model (not released)."""
+    """One head revision's readiness; ``None`` for an analysis or component model (not released)."""
     meta = dict(getattr(node, "metadata", None) or {})
-    if str(meta.get("model_role") or "") == "analysis":
+    if not is_product_geometry(meta):
         return None
     wp_type = getattr(getattr(node, "type", None), "value", getattr(node, "type", None))
     state = geometry_state_of(str(wp_type or "cad_model"), meta) or GeometryState.EXACT_READY

@@ -41,6 +41,7 @@ import structlog
 from observability.tracing import get_tracer
 from twin_core.component_identity import project_identity
 from twin_core.geometry_state import GeometryState, geometry_state_of
+from twin_core.model_roles import is_product_geometry
 from twin_core.representation import (
     COMPONENT_ID_KEY,
     PART_COMPONENT_IDS_KEY,
@@ -275,7 +276,7 @@ async def compute_maturity(twin: Any, project_id: UUID | str) -> dict[str, Any]:
                     if node is None:
                         continue
                     meta = dict(getattr(node, "metadata", None) or {})
-                    if str(meta.get("model_role") or "") == "analysis":
+                    if not is_product_geometry(meta):
                         continue
                     ref = f"{item.key}@{item.head_revision}"
                     targets: list[tuple[str, str]] = []
