@@ -1597,7 +1597,7 @@ class ImagineService:
         attention = [r for r in rules if r.get("status") not in ("pass", "na", None)]
         product = ((head.state.get("config") or {}).get("product") or {}).get("name") or "product"
         engine = str(data.get("engine") or "formgraph")
-        return await self.bridge.record_entity(
+        ref = await self.bridge.record_entity(
             project_id,
             entity_type="evidence",
             statement=(
@@ -1620,6 +1620,49 @@ class ImagineService:
             },
             reason="screening results from the Imagine studio",
         )
+        await self._supersede_screenings(project_id, ref)
+        return ref
+
+    async def _supersede_screenings(self, project_id: str, ref: str) -> None:
+        """Mark the project's earlier studio screenings superseded by this one.
+
+        A screening carries no item pin, only ``studio_ref``, so the pin-based
+        re-run logic never replaced an older one: each rework left the last
+        screening stale for good, and the release gate counted it as
+        outstanding. The newest screening is the studio's; the rest are history.
+        """
+        from twin_core.consistency.record_pins import record_staleness, set_record_status
+        from twin_core.consistency.staleness import StalenessStatus
+
+        _kind, _, node = ref.partition(":")
+        try:
+            new_id = UUID(node)
+            pid = UUID(str(project_id))
+            entities = await self.twin.list_engineering_entities(
+                project_id=pid, entity_type="evidence"
+            )
+        except Exception as exc:  # noqa: BLE001 - superseding never blocks a screening
+            logger.debug("imagine_screening_supersede_skipped", error=str(exc))
+            return
+        for ent in entities:
+            meta = getattr(ent, "metadata", None) or {}
+            if ent.id == new_id or meta.get("evidence_kind") != "screening":
+                continue
+            if meta.get("recorded_from") != "imagine.studio":
+                continue
+            if record_staleness(meta) in ("superseded", "invalid"):
+                continue
+            try:
+                await set_record_status(
+                    self.twin,
+                    ent.id,
+                    StalenessStatus.SUPERSEDED,
+                    f"superseded by the newer studio screening {new_id}",
+                )
+            except Exception as exc:  # noqa: BLE001 - one record never stops the rest
+                logger.warning(
+                    "imagine_screening_supersede_failed", ref=str(ent.id), error=str(exc)
+                )
 
     # -- handover ---------------------------------------------------------
 

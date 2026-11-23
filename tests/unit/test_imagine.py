@@ -1753,3 +1753,25 @@ async def test_a_rehandover_never_puts_a_candidate_over_what_develop_chose(
     lte = [i for i in await twin.list_bom_items() if i.part_number.startswith("LTE-A")]
     assert [i.part_number for i in lte] == ["LTE-A-01X"]
     assert lte[0].specifications["selection"] == "selected"
+
+
+async def test_a_new_screening_supersedes_the_last(
+    client: httpx.AsyncClient, twin: InMemoryTwinAPI
+) -> None:
+    """A screening has no item pin, so nothing else ever replaced the previous one."""
+    from twin_core.consistency.record_pins import record_staleness
+
+    await _put(client)
+    first = await _event(client, "screening", {"id": "latest", "rules": []}, event_id="s1")
+    second = await _event(
+        client,
+        "screening",
+        {"id": "latest", "rules": [{"id": "fit", "status": "warn"}]},
+        event_id="s2",
+    )
+    (old,) = first.json()["mapped_to"]
+    (new,) = second.json()["mapped_to"]
+    old_node = await twin.graph.get_node(UUID(old.split(":", 1)[1]))
+    new_node = await twin.graph.get_node(UUID(new.split(":", 1)[1]))
+    assert record_staleness(old_node.metadata) == "superseded"  # type: ignore[union-attr]
+    assert record_staleness(new_node.metadata) == "current"  # type: ignore[union-attr]
