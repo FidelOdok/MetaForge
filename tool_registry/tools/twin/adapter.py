@@ -9703,6 +9703,7 @@ class TwinServer(McpToolServer):
                     "to put file point P at studio point W, set at = W - (P - origin). "
                     "With no 'color', a GLB or STEP keeps its own colours; 'color' (hex) "
                     "paints it in one, and 'opacity' (1 for solid) sets how see-through. "
+                    "follow: true keeps it live: the page shows the item's current revision. "
                     "Change any of these later with twin.imagine_patch_studio at "
                     "/context/references/references/<id>/at (or rotate, color, opacity)."
                 ),
@@ -9748,6 +9749,14 @@ class TwinServer(McpToolServer):
                         },
                         "color": {"type": "string", "description": "Hex colour, e.g. #3A5F7D."},
                         "opacity": {"type": "number", "minimum": 0.05, "maximum": 1},
+                        "follow": {
+                            "type": "boolean",
+                            "description": (
+                                "Keep the reference linked to the work product's item: the "
+                                "studio page then shows the item's current revision (a newer "
+                                "assembly or board) without reworking the studio."
+                            ),
+                        },
                     },
                     "required": ["work_product_id", "id", "title"],
                 },
@@ -10262,6 +10271,7 @@ class TwinServer(McpToolServer):
                 rotate=arguments.get("rotate"),
                 color=arguments.get("color"),
                 opacity=arguments.get("opacity"),
+                follow=bool(arguments.get("follow")),
                 actor=actor,
             )
         except Exception as exc:

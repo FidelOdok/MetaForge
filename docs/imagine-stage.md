@@ -696,6 +696,14 @@ keeps its own material colours: the reduction orders the triangles by colour and
 made with every footprint's model in KiCad's colours (in metres, Y up); a board recorded with
 preview off has none and is refused.
 
+With `follow: true` the reference stays linked to the work product's item (a CAD part, an assembly
+or a board). Each time the engine page is built, the gateway checks the item's current revision;
+when Develop has moved it on, the page shows the new head, packed the same way, and moves `at` by
+the change in `origin` so the model's own frame stays where it was. The title says which revision is
+shown (`(live: ASM-...@3)`). The stored studio is not rewritten, so a handed-over studio stays
+frozen while its picture follows the design. A head that cannot be read leaves the packed copy on
+the page, labelled as such.
+
 ### Real parts and the component library
 
 A real part in `context.components.parts` can name its entry in the component library with

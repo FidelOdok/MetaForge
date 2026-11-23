@@ -641,6 +641,8 @@ class ImagineService:
         verification: Any = None,
     ) -> None:
         self.twin = twin
+        #: Packed meshes of followed items, by the head revision's node id (FORGE-913).
+        self._live_cache: dict[str, dict[str, Any]] = {}
         self.project_backend = project_backend
         self.bridge = bridge if bridge is not None else TwinBridge(twin, project_backend)
         self._verification = verification
@@ -952,6 +954,72 @@ class ImagineService:
             )
             return out
 
+    async def _pack_model(
+        self, wp: Any, *, units: str | None, up: str | None, step_converter: Any, span: Any
+    ) -> tuple[dict[str, Any], str, str, str]:
+        """A work product's model, packed for the page: ``(packed, units, up, file name)``."""
+        import os
+        import tempfile
+
+        from api_gateway.imagine.formgraph import fg_refs
+        from api_gateway.twin.blob_store import resolve_work_product_blob
+
+        try:
+            board_glb = _board_preview_glb(wp)
+            content, filename = (
+                board_glb if board_glb is not None else resolve_work_product_blob(wp)
+            )
+        except Exception as exc:  # noqa: BLE001 - HTTPException from the resolver
+            detail = getattr(exc, "detail", None) or str(exc)
+            raise ImagineError(f"{wp.name!r} has no readable model file: {detail}", 404) from exc
+        ext = os.path.splitext(filename)[1].lower().lstrip(".") or str(wp.format or "").lower()
+        span.set_attribute("reference.source_format", ext)
+        if ext in ("step", "stp"):
+            from api_gateway.twin.render_recorder import RenderError, convert_step_to_glb
+
+            convert = step_converter or convert_step_to_glb
+            try:
+                content = await asyncio.to_thread(convert, content, filename)
+            except RenderError as exc:
+                raise ImagineError(str(exc), 502) from exc
+            # Measured: the converter keeps the STEP's millimetres and its Z-up axes.
+            ext, units, up = "glb", units or "mm", up or "z"
+        elif ext not in ("glb", "stl", "obj"):
+            raise ImagineError(
+                f"{wp.name!r} is a {ext or 'format-less'} file; a mesh reference needs a "
+                "STEP, GLB, STL or OBJ"
+            )
+        if units is not None and units not in fg_refs.UNITS:
+            raise ImagineError(f"units must be one of {', '.join(sorted(fg_refs.UNITS))}")
+        if up is not None and up not in ("y", "z"):
+            raise ImagineError("up must be y or z")
+
+        def _read(data: bytes) -> tuple[Any, str, str]:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, f"model.{ext}")
+                with open(path, "wb") as fh:
+                    fh.write(data)
+                colors: list[str] = []
+                tris, used_units, used_up = fg_refs.read_mesh(path, units, up, colors)
+            if not tris:
+                raise ImagineError(f"{wp.name!r} has no triangles to show")
+            return (
+                {
+                    "stats": fg_refs.mesh_stats(tris),
+                    "mesh": fg_refs.reduce_mesh(tris, colors=colors),
+                },
+                used_units,
+                used_up,
+            )
+
+        try:
+            packed, used_units, used_up = await asyncio.to_thread(_read, content)
+        except ImagineError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - a malformed mesh is the caller's input
+            raise ImagineError(f"{wp.name!r} could not be read as a mesh: {exc}") from exc
+        return packed, used_units, used_up, filename
+
     async def add_mesh_reference(
         self,
         project_id: str,
@@ -967,6 +1035,7 @@ class ImagineService:
         rotate: list[float] | None = None,
         color: str | None = None,
         opacity: float | None = None,
+        follow: bool = False,
         actor: str,
         step_converter: Any = None,
     ) -> StudioResponse:
@@ -985,12 +1054,13 @@ class ImagineService:
         worked out from the full-resolution model lands where it was meant to.
         ``color`` and ``opacity`` replace the role's see-through colour for the whole mesh; with
         no ``color``, a GLB (or a converted STEP) keeps its own material colours.
+
+        With ``follow`` the reference stays linked to the work product's item: the engine
+        page shows the item's current revision whenever it is built (see
+        :meth:`_live_references`), so Develop's changes appear without reworking the studio.
         """
-        import os
-        import tempfile
 
         from api_gateway.imagine.formgraph import fg_refs
-        from api_gateway.twin.blob_store import resolve_work_product_blob
 
         with tracer.start_as_current_span("imagine.add_mesh_reference") as span:
             span.set_attribute("project_id", project_id)
@@ -1015,37 +1085,6 @@ class ImagineService:
                 raise ImagineError(f"invalid work_product_id {work_product_id!r}") from exc
             if wp is None:
                 raise ImagineError(f"no work product {work_product_id!r}", 404)
-            try:
-                board_glb = _board_preview_glb(wp)
-                content, filename = (
-                    board_glb if board_glb is not None else resolve_work_product_blob(wp)
-                )
-            except Exception as exc:  # noqa: BLE001 - HTTPException from the resolver
-                detail = getattr(exc, "detail", None) or str(exc)
-                raise ImagineError(
-                    f"{wp.name!r} has no readable model file: {detail}", 404
-                ) from exc
-            ext = os.path.splitext(filename)[1].lower().lstrip(".") or str(wp.format or "").lower()
-            span.set_attribute("reference.source_format", ext)
-            if ext in ("step", "stp"):
-                from api_gateway.twin.render_recorder import RenderError, convert_step_to_glb
-
-                convert = step_converter or convert_step_to_glb
-                try:
-                    content = await asyncio.to_thread(convert, content, filename)
-                except RenderError as exc:
-                    raise ImagineError(str(exc), 502) from exc
-                # Measured: the converter keeps the STEP's millimetres and its Z-up axes.
-                ext, units, up = "glb", units or "mm", up or "z"
-            elif ext not in ("glb", "stl", "obj"):
-                raise ImagineError(
-                    f"{wp.name!r} is a {ext or 'format-less'} file; a mesh reference needs a "
-                    "STEP, GLB, STL or OBJ"
-                )
-            if units is not None and units not in fg_refs.UNITS:
-                raise ImagineError(f"units must be one of {', '.join(sorted(fg_refs.UNITS))}")
-            if up is not None and up not in ("y", "z"):
-                raise ImagineError("up must be y or z")
             for name, vec in (("at", at), ("rotate", rotate)):
                 if vec is not None and not (
                     isinstance(vec, list)
@@ -1059,31 +1098,20 @@ class ImagineService:
                 numeric = isinstance(opacity, (int, float)) and not isinstance(opacity, bool)
                 if not numeric or not 0.05 <= float(opacity) <= 1:
                     raise ImagineError("opacity must be between 0.05 and 1")
+            followed: dict[str, Any] | None = None
+            if follow:
+                from twin_core.items import item_for_node
 
-            def _read(data: bytes) -> tuple[Any, str, str]:
-                with tempfile.TemporaryDirectory() as tmp:
-                    path = os.path.join(tmp, f"model.{ext}")
-                    with open(path, "wb") as fh:
-                        fh.write(data)
-                    colors: list[str] = []
-                    tris, used_units, used_up = fg_refs.read_mesh(path, units, up, colors)
-                if not tris:
-                    raise ImagineError(f"{wp.name!r} has no triangles to show")
-                return (
-                    {
-                        "stats": fg_refs.mesh_stats(tris),
-                        "mesh": fg_refs.reduce_mesh(tris, colors=colors),
-                    },
-                    used_units,
-                    used_up,
-                )
-
-            try:
-                packed, used_units, used_up = await asyncio.to_thread(_read, content)
-            except ImagineError:
-                raise
-            except Exception as exc:  # noqa: BLE001 - a malformed mesh is the caller's input
-                raise ImagineError(f"{wp.name!r} could not be read as a mesh: {exc}") from exc
+                found = await item_for_node(self.twin, wp.id)
+                if found is None:
+                    raise ImagineError(
+                        f"{wp.name!r} is not a revision of an item, so there is nothing to follow"
+                    )
+                item, revision = found
+                followed = {"item_key": item.key, "revision": revision, "node_id": str(wp.id)}
+            packed, used_units, used_up, filename = await self._pack_model(
+                wp, units=units, up=up, step_converter=step_converter, span=span
+            )
             ref: dict[str, Any] = {
                 "id": ref_id,
                 "kind": "mesh",
@@ -1097,6 +1125,8 @@ class ImagineService:
             }
             if note:
                 ref["note"] = note
+            if followed is not None:
+                ref["follow"] = followed
             lo, hi = packed["stats"]["min"], packed["stats"]["max"]
             ref["origin"] = [round((lo[0] + hi[0]) / 2, 2), lo[1], round((lo[2] + hi[2]) / 2, 2)]
             for key, value in (
@@ -1328,9 +1358,82 @@ class ImagineService:
                     "is authored now. Write a new studio with form.template authored.",
                     410,
                 )
+            config = await self._live_references(project_id, config)
             checked = engine_page.validate_config(config)
             _count("engine", "ok")
             return engine_page.render_engine(checked.compiled)
+
+    async def _live_references(self, project_id: str, config: dict[str, Any]) -> dict[str, Any]:
+        """The config with every followed reference showing its item's current revision.
+
+        A reference added with ``follow`` records the item and the revision it was
+        packed from. When the item has moved on, the page shows the new head instead,
+        packed the same way and placed so the model's own frame stays where it was
+        (``at`` moves by the change in ``origin``). The stored studio is untouched, so
+        a handed-over studio stays frozen while its picture stays current. A head that
+        cannot be read leaves the packed copy on the page, marked as such.
+        """
+        refs = (((config.get("context") or {}).get("references") or {}).get("references")) or []
+        if not any(isinstance(r, dict) and isinstance(r.get("follow"), dict) for r in refs):
+            return config
+        from twin_core.items import find_item
+
+        out = copy.deepcopy(config)
+        for ref in out["context"]["references"]["references"]:
+            follow = ref.get("follow") if isinstance(ref, dict) else None
+            if not isinstance(follow, dict) or not follow.get("item_key"):
+                continue
+            try:
+                item = await find_item(self.twin, str(follow["item_key"]), UUID(project_id))
+                head_id = getattr(item, "head_node_id", None) if item is not None else None
+                if head_id is None or str(head_id) == str(follow.get("node_id")):
+                    continue
+                packed = self._live_cache.get(str(head_id))
+                if packed is None:
+                    wp = await self.twin.get_work_product(head_id)
+                    with tracer.start_as_current_span("imagine.live_reference") as span:
+                        span.set_attribute("reference.item_key", str(follow["item_key"]))
+                        mesh, _units, _up, filename = await self._pack_model(
+                            wp,
+                            units=ref.get("units"),
+                            up=ref.get("up"),
+                            step_converter=None,
+                            span=span,
+                        )
+                    lo, hi = mesh["stats"]["min"], mesh["stats"]["max"]
+                    origin = [round((lo[0] + hi[0]) / 2, 2), lo[1], round((lo[2] + hi[2]) / 2, 2)]
+                    packed = {**mesh, "origin": origin, "fileName": filename}
+                    self._live_cache[str(head_id)] = packed
+                old_origin = ref.get("origin") or packed["origin"]
+                at = ref.get("at") or [0.0, 0.0, 0.0]
+                ref["at"] = [
+                    round(a + n - o, 3)
+                    for a, n, o in zip(at, packed["origin"], old_origin, strict=True)
+                ]
+                ref.update({k: packed[k] for k in ("mesh", "stats", "origin", "fileName")})
+                revision = getattr(item, "head_revision", None)
+                ref["title"] = (
+                    f"{ref.get('title') or ref.get('id')} (live: {follow['item_key']}@{revision})"
+                )
+                logger.info(
+                    "imagine_live_reference_shown",
+                    project_id=project_id,
+                    reference=ref.get("id"),
+                    item=follow["item_key"],
+                    packed_from=follow.get("revision"),
+                    showing=revision,
+                )
+            except Exception as exc:  # noqa: BLE001 - the packed copy still shows
+                logger.warning(
+                    "imagine_live_reference_failed",
+                    project_id=project_id,
+                    reference=ref.get("id"),
+                    error=str(exc),
+                )
+                ref["title"] = (
+                    f"{ref.get('title') or ref.get('id')} (packed copy; live view failed)"
+                )
+        return out
 
     # -- events -----------------------------------------------------------
 
