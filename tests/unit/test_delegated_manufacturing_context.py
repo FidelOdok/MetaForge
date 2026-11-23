@@ -344,3 +344,40 @@ async def test_dfm_then_assesses_the_part_against_the_machine(
         twin, PROJECT, node_id=str(node_id), service=FakeCad(measured())
     )
     assert out["status"] == "analysis_passed" and out["complete"], out
+
+
+@pytest.mark.asyncio
+async def test_with_approvals_off_a_delegated_machine_is_still_stated_for_the_person(
+    gateway: httpx.AsyncClient,
+    twin: InMemoryTwinAPI,
+    machine_library: SqliteMachineLibrary,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Holds off used to skip delegation, so the machine was refused as never assumed."""
+    monkeypatch.setenv(FLAG, "true")
+    monkeypatch.setenv("METAFORGE_APPROVALS", "off")
+    async with gateway as http:
+        server = await _server(http, twin)
+        reply = await _state(server, HEADERS)
+    assert "error" not in reply, reply
+    field = await _machine_field(twin)
+    assert field is not None and field.authority.value == "user_stated"
+    assert field.provenance.actor == "agent:claude-code-e2e"
+    assert field.provenance.on_behalf_of == "fidel"
+    (run,) = [r for r in _runs() if r.request.get("route") == "delegated"]
+    assert run.request["tool"] == TOOL
+
+
+@pytest.mark.asyncio
+async def test_with_approvals_off_and_no_delegation_the_machine_is_still_refused(
+    gateway: httpx.AsyncClient,
+    twin: InMemoryTwinAPI,
+    machine_library: SqliteMachineLibrary,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("METAFORGE_APPROVALS", "off")
+    async with gateway as http:
+        server = await _server(http, twin)
+        reply = await _state(server, HEADERS)
+    assert "never assumed" in json.dumps(reply), reply
+    assert await _machine_field(twin) is None

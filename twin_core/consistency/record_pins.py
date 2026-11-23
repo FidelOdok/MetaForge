@@ -629,6 +629,46 @@ async def on_head_moved(
     return marked
 
 
+def _head_node(history: list[Any], head_revision: int) -> UUID | None:
+    for rev in history:
+        if rev.revision == head_revision:
+            return rev.node_id
+    return None
+
+
+async def _set_requirements(twin: Any, set_node_id: UUID | None) -> set[UUID]:
+    """The requirement (Constraint) ids a constraint-set revision binds."""
+    if set_node_id is None:
+        return set()
+    edges = await twin.get_edges(
+        set_node_id, direction="outgoing", edge_type=EdgeType.CONSTRAINED_BY
+    )
+    return {edge.target_id for edge in edges}
+
+
+async def _requirements_carried(
+    twin: Any, record: Any, pinned_reqs: set[UUID], head_reqs: set[UUID]
+) -> bool:
+    """Whether a constraint-set revision move leaves ``record`` valid (FORGE-914).
+
+    A record that names requirements of the revision it is pinned to stays
+    valid when the new revision carries every one of them unchanged (the same
+    node). A record that names none was judged against the whole set, so it
+    stays valid only when the new revision carries the set unchanged.
+    """
+    if not pinned_reqs:
+        return False
+    named: set[UUID] = set()
+    for direction in ("outgoing", "incoming"):
+        for edge in await twin.get_edges(record.id, direction=direction):
+            other = edge.target_id if direction == "outgoing" else edge.source_id
+            if other in pinned_reqs:
+                named.add(other)
+    if named:
+        return named <= head_reqs
+    return pinned_reqs == head_reqs
+
+
 async def mark_dependents_stale(twin: Any, item: Any, head_revision: int) -> list[StaleRecord]:
     """``item``'s head is now ``@head_revision``: every record pinned to an older
     revision of it, still valid, becomes ``STALE``. Never raises.
@@ -644,15 +684,25 @@ async def mark_dependents_stale(twin: Any, item: Any, head_revision: int) -> lis
         span.set_attribute("item.key", item.key)
         span.set_attribute("item.head_revision", head_revision)
         try:
-            for rev in await item_history(twin, item, include_drafts=True):
+            history = await item_history(twin, item, include_drafts=True)
+            is_set = str(getattr(item, "item_type", "") or "") == "constraint_set"
+            head_reqs = (
+                await _set_requirements(twin, _head_node(history, head_revision))
+                if is_set
+                else set()
+            )
+            for rev in history:
                 if rev.revision >= head_revision:
                     continue
+                rev_reqs = await _set_requirements(twin, rev.node_id) if is_set else set()
                 for edge, node in await _pinned_records(twin, rev.node_id):
                     meta = _node_metadata(node)
                     if record_staleness(meta) not in VALID_STATUSES:
                         continue
                     pinned = int((edge.metadata or {}).get("revision") or rev.revision)
                     if pinned >= head_revision:
+                        continue
+                    if is_set and await _requirements_carried(twin, node, rev_reqs, head_reqs):
                         continue
                     pinned_ref = f"{item.key}@{pinned}"
                     current_ref = f"{item.key}@{head_revision}"

@@ -80,13 +80,7 @@ def generate(req: dict[str, Any]) -> dict[str, Any]:
             continue
         fp.SetReference(comp["ref"])
         if comp.get("model"):
-            models = fp.Models()
-            if len(models):
-                models[0].m_Filename = comp["model"]
-            else:
-                m = pcbnew.FP_3DMODEL()
-                m.m_Filename = comp["model"]
-                models.append(m)
+            set_model(fp, comp["model"])
         fp.SetValue(comp["value"])
         fp.SetFPID(pcbnew.LIB_ID(lib, name))
         for key, val in (comp.get("fields") or {}).items():
@@ -163,6 +157,12 @@ def generate(req: dict[str, Any]) -> dict[str, Any]:
         if anchor is not None:
             fixed[comp["ref"]] = anchor
 
+    # A pour drawn as an outline is occupied before placement: the auto-placer
+    # otherwise drops a pull-up into a VIN pour, where nothing can reach it.
+    for spec in board_spec.get("power_zones") or []:
+        if spec.get("points"):
+            outline = [(x0 + float(p["x_mm"]), y0 + float(p["y_mm"])) for p in spec["points"]]
+            keepouts.extend(polygon_cells(outline))
     power = {*board_spec.get("power_nets", []), *(board_spec.get("inner_planes") or [])}
     if board_spec.get("ground_pour"):
         power.add(board_spec["ground_pour"])
@@ -170,6 +170,11 @@ def generate(req: dict[str, Any]) -> dict[str, Any]:
     for entry in placement["placements"]:
         if entry["ref"] in hinted:
             entry.update(hinted[entry["ref"]])
+    zones = board_spec.get("power_zones") or []
+    for rank, spec in enumerate(zones):
+        pour = _power_zone(board, footprints, nets, spec, len(zones) - rank + 1, (x0, y0))
+        if pour is not None:
+            _pour_keepout(board, pour)
     pcbnew.SaveBoard(out, board)
     return {
         "ok": True,
@@ -197,6 +202,8 @@ def _rules(board: Any, spec: dict[str, Any]) -> None:
     ds.m_TrackMinWidth = min(ds.m_TrackMinWidth, MM(float(spec.get("track_mm", 0.25))))
     if spec.get("hole_clearance_mm"):
         ds.m_HoleClearance = MM(float(spec["hole_clearance_mm"]))
+    if spec.get("edge_clearance_mm"):
+        ds.m_CopperEdgeClearance = MM(float(spec["edge_clearance_mm"]))
     power = spec.get("power_track_mm")
     if power and spec.get("power_nets"):
         pc = pcbnew.NETCLASS("Power")
@@ -732,7 +739,34 @@ def _placement_entry(
 # -- edit --------------------------------------------------------------------------
 
 #: The operations ``edit`` takes, in the order given.
-EDIT_OPS = ("move", "rotate", "place", "set_mounting_hole", "remove_mounting_hole", "strip_routing")
+EDIT_OPS = (
+    "move",
+    "rotate",
+    "place",
+    "set_mounting_hole",
+    "remove_mounting_hole",
+    "set_model",
+    "strip_routing",
+)
+
+#: 3D model files KiCad's STEP export can read.
+MODEL_SUFFIXES = (".step", ".stp", ".wrl")
+
+
+def set_model(fp: Any, path: str) -> None:
+    """Point a footprint's first 3D model at ``path``, adding one if it has none.
+
+    For a library footprint whose model is wrong or missing (KiCad ships no
+    model for some packages, e.g. TI's WQFN-30 RNP0030B). Only the model
+    reference changes: pads, copper and placement stay as they are.
+    """
+    models = fp.Models()
+    if len(models):
+        models[0].m_Filename = path
+    else:
+        m = pcbnew.FP_3DMODEL()
+        m.m_Filename = path
+        models.append(m)
 
 
 def check_operations(ops: list[dict[str, Any]]) -> list[str]:
@@ -744,7 +778,9 @@ def check_operations(ops: list[dict[str, Any]]) -> list[str]:
         if kind not in EDIT_OPS:
             errors.append(f"operations[{i}]: op must be one of {', '.join(EDIT_OPS)}")
             continue
-        if kind in ("move", "rotate", "place", "remove_mounting_hole") and not op.get("ref"):
+        if kind in ("move", "rotate", "place", "remove_mounting_hole", "set_model") and not op.get(
+            "ref"
+        ):
             errors.append(f"{where}: needs ref")
         if kind == "move" and not op.get("position"):
             errors.append(f"{where}: needs position")
@@ -759,6 +795,8 @@ def check_operations(ops: list[dict[str, Any]]) -> list[str]:
             errors.append(f"{where}: needs position, rotation_deg, side or edge_mount")
         if kind == "set_mounting_hole" and not op.get("position"):
             errors.append(f"{where}: needs position")
+        if kind == "set_model" and not str(op.get("model") or "").lower().endswith(MODEL_SUFFIXES):
+            errors.append(f"{where}: needs model, a {', '.join(MODEL_SUFFIXES)} path")
     return errors
 
 
@@ -786,7 +824,11 @@ def _board_frame(board: Any) -> tuple[float, float, float, float]:
 
 
 def strip_routing(board: Any) -> dict[str, Any]:
-    """Remove every track and via, and the outer-layer copper pours; inner planes stay."""
+    """Remove every track and via, and the outer-layer copper pours.
+
+    Inner planes stay, and so do local power pours (``power:<net>``): they are
+    part of the layout the circuit asked for, not the router's output.
+    """
     tracks = list(board.GetTracks())
     vias = sum(1 for t in tracks if t.GetClass() == "PCB_VIA")
     for t in tracks:
@@ -794,7 +836,9 @@ def strip_routing(board: Any) -> dict[str, Any]:
     pours = [
         z
         for z in list(board.Zones())
-        if not z.GetIsRuleArea() and z.GetLayer() in (pcbnew.F_Cu, pcbnew.B_Cu)
+        if not z.GetIsRuleArea()
+        and z.GetLayer() in (pcbnew.F_Cu, pcbnew.B_Cu)
+        and not z.GetZoneName().startswith(POWER_ZONE)  # part of the design, not routing
     ]
     nets = sorted({z.GetNetname() for z in pours if z.GetNetname()})
     for z in pours:
@@ -855,6 +899,10 @@ def edit(req: dict[str, Any]) -> dict[str, Any]:
                 return {"ok": False, "errors": [f"{ref} is not a mounting hole"]}
             board.Delete(fp)
             applied.append({"op": kind, "ref": ref})
+            continue
+        if kind == "set_model":
+            set_model(fp, str(op["model"]))
+            applied.append({"op": kind, "ref": ref, "model": str(op["model"])})
             continue
         touched.add(ref)
         if kind == "move":
@@ -999,6 +1047,17 @@ def _name_unnamed_footprints(board: Any) -> int:
     return named
 
 
+def fanout_hole_gap(ds: Any) -> int:
+    """The gap a fanout via's hole keeps from every other hole, in board units.
+
+    Two rules bound it and DRC checks both: hole clearance (a hole to other
+    copper) and the minimum hole to hole (drill wall to drill wall). Fanout
+    vias beside 0.5 mm pitch pins used to sit 0.5 mm apart, 0.2 mm between
+    0.3 mm drills, which passed the first and broke the second.
+    """
+    return max(int(ds.m_HoleClearance), int(getattr(ds, "m_HoleToHoleMin", 0)))
+
+
 def _fanout_planes(board: Any) -> dict[str, Any]:
     """A via beside every SMD pad on an inner-plane net, joined by a short track.
 
@@ -1019,7 +1078,7 @@ def _fanout_planes(board: Any) -> dict[str, Any]:
     nc = board.GetDesignSettings().m_NetSettings.GetDefaultNetclass()
     clear, track_w = nc.GetClearance(), nc.GetTrackWidth()
     via_d, drill = nc.GetViaDiameter(), nc.GetViaDrill()
-    hole_clear = board.GetDesignSettings().m_HoleClearance
+    hole_clear = fanout_hole_gap(board.GetDesignSettings())
     edge = board.GetBoardEdgesBoundingBox()
     margin = via_d // 2 + clear + MM(0.3)
     pads = [p for fp in board.GetFootprints() for p in fp.Pads()]
@@ -1031,8 +1090,15 @@ def _fanout_planes(board: Any) -> dict[str, Any]:
     ]
     placed: list[Any] = []
     skipped: list[str] = []
+    # Another net's power pour is not free space: a fanout via dropped in a VIN
+    # pour splits it, and the router does not avoid a pour on a signal layer.
+    pours = [z for z in board.Zones() if z.GetZoneName().startswith(POWER_ZONE)]
 
     def free(item: Any, net: int, is_via: bool) -> bool:
+        for z in pours:
+            if z.GetNetCode() != net and (is_via or z.GetLayer() == pcbnew.F_Cu):
+                if z.Outline().Collide(item.GetEffectiveShape(z.GetLayer()), clear):
+                    return False
         for z in keepouts:
             barred = z.GetDoNotAllowVias() if is_via else z.GetDoNotAllowTracks()
             if barred and (is_via or z.IsOnLayer(pcbnew.F_Cu)):
@@ -1110,6 +1176,174 @@ def _fanout_planes(board: Any) -> dict[str, Any]:
             if not done:
                 skipped.append(f"{fp.GetReference()}.{pad.GetNumber()}")
     return {"vias": len(placed) // 2, "skipped": skipped}
+
+
+#: Zone name prefix that marks a local power pour (kept by strip_routing).
+POWER_ZONE = "power:"
+
+
+def polygon_cells(
+    points: list[tuple[float, float]], cell: float = 0.5
+) -> list[tuple[float, float, float, float]]:
+    """A polygon as horizontal strips ``(x0, y0, x1, y1)``, ``cell`` mm tall.
+
+    Pure geometry for the placer, whose keepouts are rectangles: each row's
+    runs of cells whose centres fall inside the polygon (even-odd rule).
+    """
+    if len(points) < 3:
+        return []
+
+    def inside(x: float, y: float) -> bool:
+        hit = False
+        for (ax, ay), (bx, by) in zip(points, points[1:] + points[:1]):
+            if (ay > y) != (by > y) and x < ax + (y - ay) * (bx - ax) / (by - ay):
+                hit = not hit
+        return hit
+
+    xs, ys = [p[0] for p in points], [p[1] for p in points]
+    cols = max(1, round((max(xs) - min(xs)) / cell + 0.5))
+    rows = max(1, round((max(ys) - min(ys)) / cell + 0.5))
+    strips: list[tuple[float, float, float, float]] = []
+    for r in range(rows):
+        top = min(ys) + r * cell
+        run: float | None = None
+        for c in range(cols + 1):
+            left = min(xs) + c * cell
+            filled = c < cols and inside(left + cell / 2, top + cell / 2)
+            if filled and run is None:
+                run = left
+            elif not filled and run is not None:
+                strips.append((run, top, left, top + cell))
+                run = None
+    return strips
+
+
+def pad_hull(
+    boxes: list[tuple[float, float, float, float]], margin: float
+) -> list[tuple[float, float]]:
+    """The convex hull, counter-clockwise, of rectangles grown by ``margin`` on every side.
+
+    Pure geometry, so it is tested without KiCad: the outline of a power pour
+    over a net's pads.
+    """
+    pts = sorted(
+        {
+            (x, y)
+            for x0, y0, x1, y1 in boxes
+            for x in (x0 - margin, x1 + margin)
+            for y in (y0 - margin, y1 + margin)
+        }
+    )
+    if len(pts) <= 2:
+        return pts
+
+    def cross(o: tuple[float, float], a: tuple[float, float], b: tuple[float, float]) -> float:
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower: list[tuple[float, float]] = []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    upper: list[tuple[float, float]] = []
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return lower[:-1] + upper[:-1]
+
+
+def _power_zone(
+    board: Any,
+    footprints: dict[str, Any],
+    nets: dict[str, Any],
+    spec: dict[str, Any],
+    priority: int,
+    origin: tuple[float, float],
+) -> Any:
+    """A pour of ``spec['net']``: the outline given, else the hull of its pads on ``refs``."""
+    net_name = spec["net"]
+    given = [
+        (origin[0] + float(p["x_mm"]), origin[1] + float(p["y_mm"]))
+        for p in spec.get("points") or []
+    ]
+    boxes = []
+    for ref in spec.get("refs") or []:
+        fp = footprints.get(ref)
+        if fp is None:
+            continue
+        for pad in fp.Pads():
+            if pad.GetNetname() == net_name:
+                bb = pad.GetBoundingBox()
+                boxes.append(
+                    (_mm(bb.GetX()), _mm(bb.GetY()), _mm(bb.GetRight()), _mm(bb.GetBottom()))
+                )
+    if not (boxes or given):
+        return None
+    layer = pcbnew.F_Cu if spec.get("layer", "F.Cu") == "F.Cu" else pcbnew.B_Cu
+    zone = pcbnew.ZONE(board)
+    zone.SetLayer(layer)
+    zone.SetNetCode(nets[net_name].GetNetCode())
+    zone.SetZoneName(f"{POWER_ZONE}{net_name}")
+    zone.SetAssignedPriority(priority)
+    # The board's own clearance, not KiCad's zone default (about 0.5 mm): at a
+    # 0.5 mm pitch the default chokes the pour off the very pins it is for.
+    zone.SetLocalClearance(
+        board.GetDesignSettings().m_NetSettings.GetDefaultNetclass().GetClearance()
+    )
+    zone.SetMinThickness(MM(0.2))
+    # A fragment cut off by a crossing track joins nothing: drop it rather
+    # than leave copper DRC reports as unconnected.
+    always = getattr(pcbnew, "ISLAND_REMOVAL_MODE_ALWAYS", None)
+    if always is not None:
+        zone.SetIslandRemovalMode(always)
+    zone.SetPadConnection(pcbnew.ZONE_CONNECTION_FULL)
+    outline = zone.Outline()
+    outline.NewOutline()
+    for x, y in given or pad_hull(boxes, float(spec.get("margin_mm", 0.4))):
+        outline.Append(MM(x), MM(y))
+    board.Add(zone)
+    return zone
+
+
+#: How far inside a power pour's edge its keepout starts: the band left open is
+#: where the router ties the net's outside parts to the pour.
+POUR_KEEPOUT_INSET_MM = 0.6
+
+
+def _pour_keepout(board: Any, pour: Any) -> Any:
+    """A no-tracks, no-vias rule area just inside a power pour.
+
+    Freerouting treats a pour on a signal layer as a plane of its net (pads in
+    it count as joined) but lets other nets' tracks run straight through it,
+    cutting it into islands. The keepout makes them go round; the band at the
+    edge stays open so the pour's own net can still be reached from outside.
+    """
+    inner = pcbnew.SHAPE_POLY_SET(pour.Outline())
+    inner.Inflate(-MM(POUR_KEEPOUT_INSET_MM), pcbnew.CORNER_STRATEGY_CHAMFER_ALL_CORNERS, MM(0.01))
+    if inner.OutlineCount() == 0:  # too narrow to keep anything out
+        return None
+    rule = pcbnew.ZONE(board)
+    rule.SetIsRuleArea(True)
+    rule.SetLayer(pour.GetLayer())
+    rule.SetZoneName(f"{pour.GetZoneName()}:keepout")
+    rule.SetDoNotAllowTracks(True)
+    rule.SetDoNotAllowVias(True)
+    rule.SetDoNotAllowPads(False)
+    rule.SetDoNotAllowCopperPour(False)
+    rule.SetDoNotAllowFootprints(False)
+    # Copy the points into the rule's own outline: SetOutline takes ownership of
+    # a polygon Python still holds, and the worker segfaulted freeing it twice.
+    # A concave pour (a neck, a finger) can deflate into several pieces: keep all.
+    outline = rule.Outline()
+    for k in range(inner.OutlineCount()):
+        ring = inner.COutline(k)
+        outline.NewOutline()
+        for i in range(ring.PointCount()):
+            p = ring.CPoint(i)
+            outline.Append(p.x, p.y, k)
+    board.Add(rule)
+    return rule
 
 
 def _pour(board: Any, net_name: str) -> None:

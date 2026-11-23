@@ -330,6 +330,12 @@ kind of record (`api_gateway/imagine/twin_bridge.py`):
 | Connections (at handover) | A wiring decision: the wiring table, the harness BOM lines and the numbered wiring sequence (see [Wiring at handover](#wiring-at-handover)) |
 | Screening results | An `evidence` record at V2: `dfm_status: preliminary_guidance`, the rule version, every rule's result |
 
+A handover after a rework writes `CS-IMAGINE`'s next revision. A requirement stated exactly as
+before (same name, values, wording, source and parents) keeps its node and id: it is bound to the
+new revision too, so evidence and verification cases that name it stay linked and current. Only a
+changed or new requirement gets a new node, and only records that name a changed or removed
+requirement go stale; a record that names none goes stale only when the set itself changed.
+
 ## The handover gate
 
 `GET /handover` (and `twin.imagine_handover_status`) checks, in order. The gateway

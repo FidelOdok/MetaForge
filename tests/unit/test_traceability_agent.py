@@ -318,3 +318,31 @@ class TestCoverageAccessor:
         await agent.coverage(str(project_id))
         constraints = await twin.list_constraints(project_id=project_id)
         assert len(constraints) == 1
+
+
+async def test_only_the_newest_case_of_a_title_counts(twin, project_id, agent):
+    """Re-recording a case under the same title replaces it; the older record is history."""
+    from api_gateway.twin.engineering_entity_recorder import make_engineering_entity_recorder
+
+    record = make_engineering_entity_recorder(twin)
+    pid = str(project_id)
+    ev = await record(
+        entity_type="evidence", statement="Bench test passed.", title="EV bench", project_id=pid
+    )
+    await record(
+        entity_type="verification_case",
+        statement="Not run yet.",
+        title="VC bench",
+        project_id=pid,
+    )
+    before = await agent.coverage(pid)
+    assert before.verification_to_evidence == 0.0
+    await record(
+        entity_type="verification_case",
+        statement="Run on the bench.",
+        title="VC bench",
+        project_id=pid,
+        parent_refs=[ev["node_id"]],
+    )
+    after = await agent.coverage(pid)
+    assert after.verification_to_evidence == 100.0

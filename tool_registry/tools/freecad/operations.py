@@ -370,7 +370,10 @@ def _parse_inp_mesh_counts(inp_path: str) -> tuple[int, dict[str, int]]:
 # assign) from "the face at x=0", the model guessed wrong and clamped the
 # ENTIRE long side of a cantilever instead of just its fixed end, giving an
 # FEA result ~10x too stiff.
-_SURFACE_ELEMENT_TYPES = ("CPS3", "CPS4")
+_SURFACE_ELEMENT_TYPES = ("CPS3", "CPS4", "CPS6", "CPS8")
+#: Corner nodes of each surface element: a second-order mesh (gmsh -order 2)
+#: writes its faces as 6-node triangles and 8-node quads, corners first.
+_SURFACE_CORNERS = {"CPS3": 3, "CPS4": 4, "CPS6": 3, "CPS8": 4}
 
 
 def _triangle_area_and_normal(
@@ -474,8 +477,9 @@ def _parse_inp_face_table(inp_path: str) -> list[dict[str, Any]]:
 
         total_area = 0.0
         normal_sum = [0.0, 0.0, 0.0]
+        corners = _SURFACE_CORNERS.get(etype, len(elements[0]) if elements else 3)
         for conn in elements:
-            pts = [nodes[n] for n in conn if n in nodes]
+            pts = [nodes[n] for n in conn[:corners] if n in nodes]
             # A quad (CPS4) is split fan-wise from its first corner; any
             # element with fewer than 3 resolvable corners contributes no
             # area (e.g. a dangling/unresolved node id) rather than guessing.

@@ -265,5 +265,7 @@ def _parse_lead_time(lead_time: str) -> int | None:
         return None
 
 
-def _map_lifecycle(status: str) -> LifecycleStatus:
-    return _LIFECYCLE_MAP.get(status, LifecycleStatus.UNKNOWN)
+def _map_lifecycle(status: str | None) -> LifecycleStatus:
+    # The API sends "LifecycleStatus": null for an active part, not "", so a
+    # .get(key, "") default never applies: treat null as the blank it means.
+    return _LIFECYCLE_MAP.get((status or "").strip(), LifecycleStatus.UNKNOWN)

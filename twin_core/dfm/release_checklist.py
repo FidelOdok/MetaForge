@@ -55,6 +55,7 @@ from uuid import UUID
 import structlog
 
 from observability.tracing import get_tracer
+from twin_core.model_roles import is_product_geometry
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("twin_core.dfm.release_checklist")
@@ -411,6 +412,27 @@ async def _no_process_component_ids(twin: Any, pid: UUID) -> set[str]:
     return out
 
 
+async def _service_model_ids(twin: Any, pid: UUID) -> set[str]:
+    """``item:KEY`` of every CAD item whose head is not product geometry.
+
+    An analysis or component model (``twin_core.model_roles``) may carry a
+    finding set from before it was marked as one; the product is not judged by it.
+    """
+    from twin_core.items import list_items, supports_items
+
+    if not supports_items(twin):
+        return set()
+    out: set[str] = set()
+    try:
+        for item in await list_items(twin, project_id=pid, item_type="cad_model"):
+            node = await twin.graph.get_node(item.head_node_id) if item.head_node_id else None
+            if node is not None and not is_product_geometry(getattr(node, "metadata", None)):
+                out.add(f"item:{item.key}")
+    except Exception as exc:  # noqa: BLE001 - unreadable items exclude nothing
+        logger.debug("checklist_service_models_unavailable", error=str(exc))
+    return out
+
+
 async def manufacturing_checklist(
     twin: Any, project_id: UUID | str
 ) -> ManufacturingChecklist | None:
@@ -422,6 +444,8 @@ async def manufacturing_checklist(
     with tracer.start_as_current_span("twin.dfm.release_checklist") as span:
         span.set_attribute("project.id", str(pid))
         sets, applies = await _current_sets(twin, pid)
+        service = await _service_model_ids(twin, pid)
+        sets = {cid: entry for cid, entry in sets.items() if cid not in service}
         if not applies:
             span.set_attribute("checklist.applies", False)
             return None

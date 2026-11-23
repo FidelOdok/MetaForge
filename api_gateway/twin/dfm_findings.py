@@ -69,6 +69,7 @@ from twin_core.dfm import (
 from twin_core.dfm.heuristics import VariantGuidance
 from twin_core.manufacturing import DFM_STATUS_LABELS, Authority, DfmStatus
 from twin_core.manufacturing.context import CONTEXT_FIELDS
+from twin_core.model_roles import is_product_geometry
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.twin.dfm_findings")
@@ -386,7 +387,7 @@ async def gather_components(twin: Any, project_id: str | UUID) -> list[Gathered]
                     continue
                 node = await twin.graph.get_node(item.head_node_id)
                 meta = dict(getattr(node, "metadata", None) or {})
-                if node is None or str(meta.get("model_role") or "") == "analysis":
+                if node is None or not is_product_geometry(meta):
                     continue
                 cid = meta.get(COMPONENT_ID_KEY)
                 if not cid and item_type == "assembly":

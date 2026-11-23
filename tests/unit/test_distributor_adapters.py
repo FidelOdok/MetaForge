@@ -652,6 +652,9 @@ class TestMouserAdapter:
         assert _map_lifecycle("End of Life") == LifecycleStatus.EOL
         assert _map_lifecycle("Obsolete") == LifecycleStatus.OBSOLETE
         assert _map_lifecycle("SomethingElse") == LifecycleStatus.UNKNOWN
+        # Mouser sends null, not "", for an active part.
+        assert _map_lifecycle(None) == LifecycleStatus.ACTIVE
+        assert _map_lifecycle("") == LifecycleStatus.ACTIVE
 
     async def test_stock_parsing(self, adapter, mock_client):
         from tool_registry.tools.mouser.adapter import _parse_stock

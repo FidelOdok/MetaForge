@@ -976,3 +976,21 @@ async def test_render_work_product_does_not_store_by_default() -> None:
 
 # keep the import used by the DFM helpers this module shares
 _ = (_project, _run, measured)
+
+
+async def test_the_component_selection_holder_is_not_a_fabrication_output(twin: Any) -> None:
+    """twin.record_component_selection keeps its selections under a hidden bom node."""
+    await twin.create_work_product(
+        WorkProduct(
+            name="Bill of Materials",
+            type=WorkProductType.BOM,
+            domain="electronics",
+            file_path="",
+            content_hash="",
+            format="json",
+            created_by="twin.record_component_selection",
+            project_id=PID,
+            metadata={"kind": "component_selection_container"},
+        )
+    )
+    assert await output_sources(twin, PID) == []

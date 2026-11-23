@@ -124,6 +124,132 @@ def _read_step_named(path: str) -> list[tuple]:
     return named
 
 
+def _read_step_coloured(path: str) -> list[tuple]:
+    """Read a STEP through XDE: [(placed shape, part name, colour), ...], one per leaf part.
+
+    ``read_step_file_with_names_colors`` only finds a colour set on the shape's own
+    label, so two common layouts came out grey: a colour on an assembly instance or
+    the part it refers to (how CadQuery and FreeCAD write part colours), and colours
+    on faces only (how KiCad writes every component in a board export). Here a part
+    takes the colour of its instance, its referred shape or the nearest coloured
+    assembly above it; failing those, its area-weighted dominant face colour. STEP
+    colours stay the only source: a part with none is returned with ``None``.
+
+    Each leaf is named after its part: the top-level component it sits under (the
+    assembly's own part names), else its own label. Returns [] on any failure so
+    the caller falls back to the previous reader.
+    """
+    try:
+        from OCC.Core.BRepGProp import brepgprop
+        from OCC.Core.GProp import GProp_GProps
+        from OCC.Core.Quantity import Quantity_Color
+        from OCC.Core.STEPCAFControl import STEPCAFControl_Reader
+        from OCC.Core.TDF import TDF_Label, TDF_LabelSequence
+        from OCC.Core.TDocStd import TDocStd_Document
+        from OCC.Core.TopLoc import TopLoc_Location
+        from OCC.Core.XCAFDoc import (
+            XCAFDoc_ColorGen,
+            XCAFDoc_ColorSurf,
+            XCAFDoc_ColorTool,
+            XCAFDoc_DocumentTool,
+        )
+    except Exception as exc:  # noqa: BLE001 - this build lacks XDE
+        logger.warning("XDE colour read unavailable (%s)", exc)
+        return []
+
+    try:
+        doc = TDocStd_Document("pythonocc-doc")
+        reader = STEPCAFControl_Reader()
+        reader.SetColorMode(True)
+        reader.SetNameMode(True)
+        if reader.ReadFile(path) != 1 or not reader.Transfer(doc):
+            return []
+        shapes = XCAFDoc_DocumentTool.ShapeTool(doc.Main())
+        colours = XCAFDoc_DocumentTool.ColorTool(doc.Main())
+
+        def rgb(c) -> tuple[float, float, float]:
+            return (c.Red(), c.Green(), c.Blue())
+
+        # This pythonocc build only takes the static form for a label's colour.
+        def label_colour(label):
+            for kind in (XCAFDoc_ColorSurf, XCAFDoc_ColorGen):
+                c = Quantity_Color()
+                try:
+                    if XCAFDoc_ColorTool.GetColor(label, kind, c):
+                        return rgb(c)
+                except Exception:  # noqa: BLE001 - no colour readable on this label
+                    return None
+            return None
+
+        def instance_colour(shape):
+            for kind in (XCAFDoc_ColorSurf, XCAFDoc_ColorGen):
+                c = Quantity_Color()
+                try:
+                    if colours.GetInstanceColor(shape, kind, c):
+                        return rgb(c)
+                except Exception:  # noqa: BLE001
+                    return None
+            return None
+
+        def face_colour(label):
+            """The area-weighted dominant colour of the part's coloured sub-shapes."""
+            area: dict[tuple[float, float, float], float] = {}
+            subs = TDF_LabelSequence()
+            shapes.GetSubShapes(label, subs)
+            for i in range(subs.Length()):
+                sub = subs.Value(i + 1)
+                colour = label_colour(sub)
+                if colour is None:
+                    continue
+                props = GProp_GProps()
+                brepgprop.SurfaceProperties(shapes.GetShape(sub), props)
+                area[colour] = area.get(colour, 0.0) + props.Mass()
+            return max(area, key=area.get) if area else None
+
+        def name_of(label) -> str:
+            try:
+                return str(label.GetLabelName() or "").strip()
+            except Exception:  # noqa: BLE001 - an unnamed label
+                return ""
+
+        out: list[tuple] = []
+
+        def walk(label, loc, colour, part_name, depth) -> None:
+            if shapes.IsAssembly(label):
+                comps = TDF_LabelSequence()
+                shapes.GetComponents(label, comps)
+                for i in range(comps.Length()):
+                    comp = comps.Value(i + 1)
+                    ref = TDF_Label()
+                    if not shapes.GetReferredShape(comp, ref):
+                        ref = comp
+                    here = (
+                        label_colour(comp)
+                        or instance_colour(shapes.GetShape(comp))
+                        or label_colour(ref)
+                        or colour
+                    )
+                    name = part_name or (name_of(ref) or name_of(comp) if depth == 0 else "")
+                    walk(ref, loc.Multiplied(shapes.GetLocation(comp)), here, name, depth + 1)
+                return
+            shape = shapes.GetShape(label)
+            if shape is None or shape.IsNull():
+                return
+            colour = label_colour(label) or face_colour(label) or colour
+            name = part_name or name_of(label)
+            out.append((shape.Moved(loc), name, colour))
+
+        roots = TDF_LabelSequence()
+        shapes.GetFreeShapes(roots)
+        for i in range(roots.Length()):
+            root = roots.Value(i + 1)
+            walk(root, TopLoc_Location(), label_colour(root), "", 0)
+        return [(s, n, c) for s, n, c in out if n]
+    except Exception as exc:  # noqa: BLE001 - fall back to the previous reader
+        logger.warning("XDE colour read failed (%s)", exc)
+        return []
+
+
 def _get_sub_shapes(shape):
     """Extract child solids/shells from a compound shape."""
     from OCC.Core.TopAbs import TopAbs_SOLID
@@ -220,7 +346,7 @@ def convert(input_path: str, quality: str, output_dir: str) -> dict:
     # Prefer named parts from the STEP product structure; fall back to
     # anonymous solid enumeration (IGES, unnamed STEP, or XDE failure).
     is_step = Path(input_path).suffix.lower() in (".step", ".stp")
-    named = _read_step_named(input_path) if is_step else []
+    named = (_read_step_coloured(input_path) or _read_step_named(input_path)) if is_step else []
     if named:
         enumerated = named
         logger.info("Recovered %d named parts from STEP product structure", len(named))
