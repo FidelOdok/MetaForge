@@ -40,10 +40,21 @@ export function isBoardSheet(node: TwinNode): boolean {
   return (t === 'pcb_layout' || t === 'pcb') && Boolean(node.designFiles?.board);
 }
 
+/**
+ * A model made to serve the product, not the product itself: an analysis
+ * idealisation (an FEA model) or a bought component's own 3D model (a
+ * footprint model). Neither is shown as what the person is making.
+ */
+export function isServiceModel(node: TwinNode): boolean {
+  const role = String(node.properties?.model_role ?? '');
+  return role === 'analysis' || role === 'component';
+}
+
 export function isVisual(node: TwinNode): boolean {
   const t = wpTypeOf(node);
   if (SKETCH_TYPES.has(t)) return false;
   if (isBoardSheet(node)) return false;
+  if (isServiceModel(node)) return false;
   if (ENGINEERING_TYPES.has(t) || CONCEPT_TYPES.has(t)) return true;
   const { engine } = previewEngineFor(node);
   return is3dEngine(engine) || engine === 'image';

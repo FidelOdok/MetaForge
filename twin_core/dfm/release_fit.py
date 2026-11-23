@@ -55,6 +55,7 @@ import structlog
 
 from observability.tracing import get_tracer
 from twin_core.dfm.release_checklist import ChecklistItem
+from twin_core.model_roles import is_product_geometry
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("twin_core.dfm.release_fit")
@@ -360,7 +361,7 @@ async def product_parts(twin: Any, project_id: UUID) -> tuple[list[_Part], list[
     for item in await list_items(twin, project_id=project_id, item_type="cad_model"):
         node = await twin.get_work_product(item.head_node_id) if item.head_node_id else None
         meta = _meta(node)
-        if node is None or str(meta.get("model_role") or "") == "analysis" or _is_board_body(meta):
+        if node is None or not is_product_geometry(meta) or _is_board_body(meta):
             continue
         parts.append(_Part(item.key, f"{item.key}@{item.head_revision}", item.name))
     boards = [
@@ -596,6 +597,11 @@ async def source_of(twin: Any, meta: dict[str, Any]) -> str | None:
     return None
 
 
+#: ``twin.record_component_selection``'s hidden bom node that holds the
+#: selections (api_gateway/twin/component_recorder.py): not a fabrication output.
+SELECTION_CONTAINER_KIND = "component_selection_container"
+
+
 async def output_sources(twin: Any, project_id: UUID) -> list[OutputSource]:
     """Every current fabrication output with its source pin, superseded ones marked."""
     from twin_core.items import find_item, item_for_node, list_items, parse_item_ref, supports_items
@@ -624,6 +630,8 @@ async def output_sources(twin: Any, project_id: UUID) -> list[OutputSource]:
             if own is not None and own[0].head_node_id not in (None, node.id):
                 continue  # an older revision of an output item
             meta = _meta(node)
+            if meta.get("kind") == SELECTION_CONTAINER_KIND:
+                continue  # the holder of component selections, not a file to fabricate from
             source = await source_of(twin, meta)
             current_ref = None
             status = "unpinned"

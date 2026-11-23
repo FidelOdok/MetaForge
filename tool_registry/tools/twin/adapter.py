@@ -3237,13 +3237,16 @@ class TwinServer(McpToolServer):
                         },
                         "model_role": {
                             "type": "string",
-                            "enum": ["design", "analysis"],
+                            "enum": ["design", "analysis", "component"],
                             "description": (
                                 "FORGE-596: 'design' (default) is product geometry. "
                                 "'analysis' is a model built only to analyse the design, "
                                 "e.g. an FEA idealisation of a part with simplified "
-                                "supports. Analysis models are left out of the gate's "
-                                "geometry and assembly checks, which judge the product."
+                                "supports. 'component' is a bought component's own 3D "
+                                "model, made so a board's 3D export shows it (a "
+                                "footprint model). Analysis and component models are "
+                                "left out of the gate's geometry, DFM, assembly and "
+                                "release checks, which judge the product."
                             ),
                         },
                         "idealises": {
@@ -3627,9 +3630,13 @@ class TwinServer(McpToolServer):
         # FORGE-596: an analysis model (an FEA idealisation) is not product
         # geometry; the gate's geometry and assembly checks skip it.
         role = arguments.get("model_role")
-        if role not in (None, "", "design", "analysis"):
-            raise ValueError("twin.commit_geometry: 'model_role' must be 'design' or 'analysis'")
+        if role not in (None, "", "design", "analysis", "component"):
+            raise ValueError(
+                "twin.commit_geometry: 'model_role' must be 'design', 'analysis' or 'component'"
+            )
         idealises = arguments.get("idealises")
+        if role == "component":
+            extra_metadata["model_role"] = "component"
         if role == "analysis":
             extra_metadata["model_role"] = "analysis"
             if isinstance(idealises, str) and idealises.strip():

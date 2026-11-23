@@ -55,6 +55,7 @@ import structlog
 
 from observability.tracing import get_tracer
 from twin_core.consistency.gates import GateStatus, evaluate_g8_release
+from twin_core.model_roles import is_product_geometry
 from twin_core.models.enums import WorkProductType
 
 logger = structlog.get_logger(__name__)
@@ -125,7 +126,7 @@ async def design_file_manifest(twin: Any, project_id: UUID) -> list[dict[str, An
                 if node is None:
                     continue
                 meta = dict(getattr(node, "metadata", None) or {})
-                if str(meta.get("model_role") or "") == "analysis":
+                if not is_product_geometry(meta):
                     continue
                 heads.add(str(node.id))
                 rows.append(
