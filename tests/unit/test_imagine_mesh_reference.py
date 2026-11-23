@@ -358,3 +358,91 @@ async def test_a_board_with_no_preview_is_refused(tmp_path: Path) -> None:
         await svc.add_mesh_reference(
             PROJECT, actor="test", work_product_id=str(wp.id), ref_id="board", title="Board"
         )
+
+
+def _ref_in(config: dict[str, Any], ref_id: str) -> dict[str, Any]:
+    refs = config["context"]["references"]["references"]
+    return next(r for r in refs if r["id"] == ref_id)
+
+
+def _box_stl(length: float) -> bytes:
+    """The box, ``length`` mm long in X: a different revision of the same part."""
+    return _stl().replace(b"vertex 100.0", f"vertex {length}".encode())
+
+
+async def _revision(twin: Any, tmp_path: Path, length: float, key: str | None = None) -> Any:
+    from uuid import UUID
+
+    from twin_core.items import commit_revision, plan_revision
+
+    plan = await plan_revision(
+        twin,
+        item_type="cad_model",
+        name="Case",
+        project_id=UUID(PROJECT),
+        author="test",
+        item_key=key,
+    )
+    path = tmp_path / f"case-{length}.stl"
+    path.write_bytes(_box_stl(length))
+    wp = await twin.create_work_product(
+        WorkProduct(
+            name="Case",
+            type=WorkProductType.CAD_MODEL,
+            domain="mechanical",
+            file_path=str(path),
+            content_hash=str(length),
+            format="stl",
+            created_by="test",
+            project_id=UUID(PROJECT),
+            metadata=plan.stamp(),
+        )
+    )
+    await commit_revision(twin, plan, wp.id, name="Case")
+    return plan.key, wp
+
+
+async def test_a_followed_reference_shows_the_items_current_revision(tmp_path: Path) -> None:
+    """FORGE-913: the studio picture follows Develop without a rework."""
+    twin = InMemoryTwinAPI.create()
+    key, first = await _revision(twin, tmp_path, 100.0)
+    svc = ImagineService(twin)
+    await svc.put_studio(PROJECT, full_config(), actor="test")
+    out = await svc.add_mesh_reference(
+        PROJECT,
+        actor="test",
+        work_product_id=str(first.id),
+        ref_id="case",
+        title="Case",
+        at=[5.0, 0.0, 0.0],
+        follow=True,
+    )
+    ref = _ref(out, "case")
+    assert ref["follow"] == {"item_key": key, "revision": 1, "node_id": str(first.id)}
+
+    # Unchanged item: the page shows the packed copy as it is.
+    same = await svc._live_references(PROJECT, out.config)
+    assert _ref_in(same, "case")["stats"] == ref["stats"]
+
+    # Develop makes the part longer: the page shows revision 2, in the same frame.
+    await _revision(twin, tmp_path, 160.0, key=key)
+    live = _ref_in(await svc._live_references(PROJECT, out.config), "case")
+    assert live["stats"]["size"][0] == 160.0
+    assert live["title"] == f"Case (live: {key}@2)"
+    # The X centre moved by 30 mm, so `at` moves with it: the file's own frame stays put.
+    assert live["at"][0] == 35.0
+    # The stored studio is untouched.
+    assert _ref(out, "case")["stats"]["size"][0] == 100.0
+
+
+async def test_follow_needs_an_item(tmp_path: Path) -> None:
+    svc, wp_id = await _studio_with(tmp_path, "loose", "stl", _stl())
+    with pytest.raises(ImagineError, match="nothing to follow"):
+        await svc.add_mesh_reference(
+            PROJECT,
+            actor="test",
+            work_product_id=wp_id,
+            ref_id="loose",
+            title="Loose",
+            follow=True,
+        )
