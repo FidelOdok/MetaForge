@@ -975,3 +975,20 @@ async def test_routes(
         client.post(f"{base}/verification/dfmv-missing/evidence", json={"note": "x"}).status_code
         == 404
     )
+
+
+async def test_a_component_model_is_not_held_to_the_release(
+    twin: InMemoryTwinAPI, machine_library: SqliteMachineLibrary
+) -> None:
+    """A bought part's own model, once marked as one, drops out with its old findings."""
+    await _resolved_project(twin, machine_library)
+    key, _rev, node_id = await _cad(twin, "Inductor model", VALIDATED)
+    await _run(twin, node_id, measured(wall=0.5))
+    blocked = await manufacturing_checklist(twin, PID)
+    assert blocked is not None and not blocked.releasable
+    # Counted as a part: it would need assembling and passing DFM.
+    assert any("2 part(s)" in b or "Inductor model" in b for b in blocked.blockers)
+
+    await _cad(twin, "Inductor model", {**VALIDATED, "model_role": "component"}, key=key)
+    checklist = await manufacturing_checklist(twin, PID)
+    assert checklist is not None and checklist.releasable, checklist.blockers
