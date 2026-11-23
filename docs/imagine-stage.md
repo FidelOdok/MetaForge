@@ -16,7 +16,7 @@ its own copy; this one lives in `api_gateway/imagine/` (provenance in its
 |---|---|
 | Gateway | `/v1/twin/projects/{project_id}/imagine/...` (`api_gateway/imagine/`) |
 | Twin item | `IMG-STUDIO`, work product type `imagine_studio` (a definition: every config change or rework is its next revision) |
-| MCP | `twin.imagine_get_studio`, `twin.imagine_put_studio`, `twin.imagine_patch_studio`, `twin.imagine_handover_status`, `twin.component_thread`, `twin.imagine_adopt`; under delegation only, `twin.imagine_handover` and `twin.imagine_rework` |
+| MCP | `twin.imagine_get_studio`, `twin.imagine_put_studio`, `twin.imagine_patch_studio`, `twin.imagine_handover_status`, `twin.component_thread`, `twin.imagine_adopt`, `twin.form_thread`, `twin.imagine_accept_form`; under delegation only, `twin.imagine_handover` and `twin.imagine_rework` |
 | Engine | `api_gateway/imagine/engine/` (HTML, CSS and JS), three.js r128 vendored under `engine/vendor/` |
 
 ## Verification levels
@@ -492,6 +492,29 @@ through the twin's existing impact path: decisions are pinned to the studio
 revision and go stale with it, and the screening evidence is marked stale
 through the same staleness path. Develop and Check then show that evidence as
 needing a re-run.
+
+### Form changes from Develop
+
+A rework is for a change of intent. When Develop only changes the form (a longer case,
+a thinner lid), the studio can follow without one. `twin.form_thread` puts each part
+the studio draws beside the Develop CAD item that makes it. A part is paired with the
+item it names in `develop_item`, or else with the one CAD item whose name holds every
+word of the part's name ("Case base" pairs with "Flight controller case base"). If more
+than one item fits, nothing is paired. Both sizes are boxes on the studio's axes
+(millimetres, Y up). The studio side is what `twin.imagine_look` last drew, kept for
+that revision even after handover. The CAD side is the head revision's validated
+bounding box. Each row is `same` (every side within 0.5 mm), `differs`, `accepted`
+(the studio took that item revision's difference), `unmeasured` or `unpaired`.
+Openings and mounts are not compared yet.
+
+`twin.imagine_accept_form` takes one `differs` row into the studio. Its `changes`
+replace form parameters only (`/form/params/<name>`, numbers); the caller picks them so
+the studio draws Develop's size. With no changes, the difference is recorded as known
+and the form stays as it is. The part is stamped `develop_form` with the item revision
+it took, and the studio keeps a list of these syncs. This is the one change allowed on a
+handed-over studio, and the studio stays handed over: only the form moves, so the
+requirements, interfaces and components the handover seeded stand, and nothing is
+marked stale.
 
 ## The engine page and the host bridge
 

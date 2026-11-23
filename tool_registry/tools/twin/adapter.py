@@ -9689,6 +9689,84 @@ class TwinServer(McpToolServer):
         )
         self.register_tool(
             manifest=ToolManifest(
+                tool_id="twin.form_thread",
+                adapter_id="twin",
+                name="Form Thread",
+                description=(
+                    "Each part the Imagine studio draws (a case, a lid) beside the Develop CAD "
+                    "item that makes it, paired by the item the part names (develop_item) or "
+                    "by name, with both sizes as boxes on the studio's axes (mm, Y up) and "
+                    "their difference. status: same, differs (Develop changed the form), "
+                    "accepted (the studio took that revision's difference), unmeasured (look "
+                    "at the studio once, or validate the CAD) or unpaired. The studio side is "
+                    "what twin.imagine_look last drew. Openings and mounts are not compared "
+                    "yet. Reads only."
+                ),
+                capability="twin_imagine",
+                input_schema={"type": "object", "properties": {**project}},
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {"type": "string"},
+                        "studio": {"type": ["object", "null"]},
+                        "rows": {"type": "array", "items": {"type": "object"}},
+                        "summary": {"type": "object"},
+                        "warnings": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=60),
+            ),
+            handler=self.form_thread,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.imagine_accept_form",
+                adapter_id="twin",
+                name="Imagine: Accept Form From Develop",
+                description=(
+                    "Take one form difference Develop made into the Imagine studio as a "
+                    "recorded change, without a rework and handover: row is a key from "
+                    "twin.form_thread whose status is differs; changes replace form "
+                    "parameters only ({op: replace, path: /form/params/<name>, value: "
+                    "number}), chosen so the studio draws Develop's size (none keeps the "
+                    "form and records that the difference is known). The part is stamped "
+                    "with the item revision it took. Allowed on a handed-over studio, which "
+                    "stays handed over: only the form moves, so the requirements and "
+                    "interfaces the handover seeded stand. Look at the studio afterwards "
+                    "and read the thread again to see the difference close."
+                ),
+                capability="twin_imagine",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        **project,
+                        "base_revision": {"type": "integer", "minimum": 1},
+                        "row": {"type": "string", "minLength": 1},
+                        "changes": {
+                            "type": "array",
+                            "maxItems": 16,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "op": {"enum": ["replace"]},
+                                    "path": {"type": "string"},
+                                    "value": {"type": "number"},
+                                },
+                                "required": ["op", "path", "value"],
+                            },
+                        },
+                    },
+                    "required": ["base_revision", "row"],
+                },
+                output_schema=studio_out,
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=60),
+            ),
+            handler=self.imagine_accept_form,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
                 tool_id="twin.imagine_add_mesh_reference",
                 adapter_id="twin",
                 name="Imagine: Add Mesh Reference",
@@ -10313,6 +10391,40 @@ class TwinServer(McpToolServer):
         pid = self._imagine_project(arguments, "twin.component_thread")
         return await gather_threads(self._twin, pid, studio_service=self._imagine_studio)
 
+    async def form_thread(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from api_gateway.twin.form_thread import gather_form_thread
+
+        pid = self._imagine_project(arguments, "twin.form_thread")
+        return await gather_form_thread(self._twin, pid, studio_service=self._imagine_studio)
+
+    async def imagine_accept_form(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from api_gateway.twin.form_thread import count, gather_form_thread
+
+        tool = "twin.imagine_accept_form"
+        pid = self._imagine_project(arguments, tool)
+        base = arguments.get("base_revision")
+        key = str(arguments.get("row") or "").strip()
+        if isinstance(base, bool) or not isinstance(base, int) or not key:
+            raise ValueError(f"{tool}: 'base_revision' (an integer) and 'row' are required")
+        data = await gather_form_thread(self._twin, pid, studio_service=self._imagine_studio)
+        row = next((r for r in data["rows"] if r["key"] == key), None)
+        if row is None:
+            count("accept", "refused")
+            raise ValueError(f"{tool}: no form thread row {key}")
+        actor = str(current_context().actor_id or "agent")
+        try:
+            studio = await self._imagine_studio.accept_form(
+                pid, base, row, arguments.get("changes"), actor=actor
+            )
+        except Exception as exc:
+            count("accept", "refused" if getattr(exc, "status", 500) < 500 else "failed")
+            message = getattr(exc, "message", None)
+            if message:
+                raise ValueError(f"{tool}: {message}") from exc
+            raise
+        count("accept", "ok")
+        return dict(studio.model_dump(mode="json"))
+
     async def imagine_adopt(self, arguments: dict[str, Any]) -> dict[str, Any]:
         from api_gateway.twin.component_thread import count, gather_threads
 
@@ -10517,6 +10629,16 @@ class TwinServer(McpToolServer):
                 )
             except Exception as exc:
                 logger.warning("imagine_measurement_not_recorded", project_id=pid, error=str(exc))
+            if before["measured"].get("sizes"):
+                # Kept on a handed-over revision too: the form thread compares it.
+                try:
+                    await self._imagine_studio.record_form_sizes(
+                        pid, base["revision"], before["measured"]["sizes"]
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "imagine_form_sizes_not_recorded", project_id=pid, error=str(exc)
+                    )
         statuses = [before["status"], (after or {}).get("status")]
         status = "error" if "error" in statuses else before["status"]
         views = ["first look", "after the change"]

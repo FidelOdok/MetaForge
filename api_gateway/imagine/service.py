@@ -840,6 +840,103 @@ class ImagineService:
             )
             return out
 
+    async def accept_form(
+        self,
+        project_id: str,
+        base_revision: int,
+        row: dict[str, Any],
+        changes: Any,
+        *,
+        actor: str,
+    ) -> StudioResponse:
+        """Take a form difference Develop made into the studio (FORGE-915).
+
+        ``row`` is a form thread row that differs; ``changes`` replace form parameters
+        only (``/form/params/<name>``, numbers), chosen by the caller so the studio draws
+        Develop's size; none records that the studio keeps its form knowingly. The part is
+        stamped with the item revision it took. Unlike any other change this is allowed on
+        a handed-over studio and keeps it handed over: only the form moves, so the
+        requirements and interfaces the handover seeded stand and nothing goes stale.
+        Refused (409) when the studio moved past ``base_revision``.
+        """
+        from twin_core.form_thread import check_form_changes
+
+        with tracer.start_as_current_span("imagine.accept_form") as span:
+            span.set_attribute("project_id", project_id)
+            span.set_attribute("studio.base_revision", base_revision)
+            head = await self._head(project_id)
+            if head is None or not isinstance(head.state.get("config"), dict):
+                _count("accept_form", "refused")
+                raise ImagineError("There is no studio yet.", 404)
+            if head.revision != base_revision:
+                _count("accept_form", "refused")
+                raise ImagineError(
+                    f"The studio is at revision {head.revision}, not {base_revision}; read "
+                    "the form thread again and accept against the current revision.",
+                    409,
+                )
+            develop = row.get("develop") or {}
+            if row.get("status") != "differs" or not develop.get("item_ref"):
+                _count("accept_form", "refused")
+                raise ImagineError(
+                    f"{row.get('name')} has no difference to accept ({row.get('status')}).", 409
+                )
+            try:
+                checked = check_form_changes(changes)
+            except ValueError as exc:
+                _count("accept_form", "refused")
+                raise ImagineError(str(exc), 400) from exc
+            config = head.state["config"]
+            if checked:
+                try:
+                    config, _ = studio_patch.apply_changes(config, checked)
+                except studio_patch.PatchError as exc:
+                    _count("accept_form", "refused")
+                    raise ImagineError(str(exc), 400) from exc
+            config = copy.deepcopy(config)
+            stamp = {
+                "item_ref": develop["item_ref"],
+                "size_mm": develop.get("size_mm"),
+                "studio_size_mm": (row.get("studio") or {}).get("size_mm"),
+                "changes": checked,
+                "at": _now(),
+                "by": actor,
+            }
+            parts = ((config.get("form") or {}).get("authored") or {}).get("parts") or []
+            target = next(
+                (p for p in parts if isinstance(p, dict) and str(p.get("id")) == row.get("key")),
+                None,
+            )
+            if target is None:
+                _count("accept_form", "refused")
+                raise ImagineError(f"The studio has no form part {row.get('key')}.", 404)
+            target["develop_form"] = stamp
+            what = f"{row.get('key')} from {develop['item_ref']}"
+            out = await self._put(
+                project_id,
+                config,
+                actor=actor,
+                span=span,
+                expect_revision=base_revision,
+                reason=f"form taken from Develop: {what}",
+                metric="accept_form",
+                form_sync={"part": row.get("key"), **stamp},
+            )
+            sizes = head.state.get("form_sizes")
+            if not checked and isinstance(sizes, dict) and sizes.get("revision") == head.revision:
+                # The form did not change, so what the page drew still holds for the next
+                # revision: the other rows can be taken without another look.
+                await self.record_form_sizes(project_id, out.revision, sizes.get("sizes") or [])
+            logger.info(
+                "imagine_form_accepted",
+                project_id=project_id,
+                base_revision=base_revision,
+                revision=out.revision,
+                what=what,
+                changes=len(checked),
+            )
+            return out
+
     async def adopt_component(
         self,
         project_id: str,
@@ -1176,6 +1273,7 @@ class ImagineService:
         expect_revision: int | None = None,
         reason: str = "studio config from the agent",
         metric: str = "put",
+        form_sync: dict[str, Any] | None = None,
     ) -> StudioResponse:
         # A linked part's size comes from its library entry first (FORGE-877), so the
         # rungs below draw only what the library cannot size.
@@ -1254,7 +1352,8 @@ class ImagineService:
             ) from exc
         async with self._lock(project_id):
             head = await self._head(project_id)
-            if head is not None and head.state.get("status") == "handed_over":
+            kept = head is not None and head.state.get("status") == "handed_over"
+            if head is not None and kept and form_sync is None:
                 _count(metric, "refused")
                 raise ImagineError(
                     f"{head.ref} is handed over and read-only; rework it to change the config.",
@@ -1277,6 +1376,14 @@ class ImagineService:
                 "rework": head.state.get("rework") if head else None,
                 "warnings": [*checked.warnings, *drawn, *wiring],
             }
+            if form_sync is not None and head is not None:
+                # A form-only change Develop made (FORGE-915): the handover stands, since
+                # what it seeded (requirements, interfaces, components) did not change.
+                syncs = list(head.state.get("form_syncs") or [])
+                state["form_syncs"] = [*syncs, form_sync][-50:]
+                if kept:
+                    state["status"] = "handed_over"
+                    state["handover"] = head.state.get("handover")
             new = await self._write_revision(project_id, state, actor=actor, reason=reason)
         span.set_attribute("studio.revision", new.revision)
         _count(metric, "ok")
@@ -1332,6 +1439,52 @@ class ImagineService:
             }
             await self._save(head)
         _count("measure", "ok")
+
+    async def record_form_sizes(self, project_id: str, revision: int, sizes: Any) -> None:
+        """Keep each drawn part's box for ``revision`` (FORGE-915), for the form thread.
+
+        Called by the gateway's own look, like a measurement. Unlike one, it is kept on a
+        handed-over revision too: a part's size is what its config draws, so recording it
+        changes nothing the handover froze, and Develop is compared against the revision
+        Develop works from. ``sizes`` is ``[{id, size_mm: [x, y, z]}]``, studio axes.
+        """
+        if not isinstance(sizes, list):
+            raise ImagineError("sizes must be a list.", 422)
+        cleaned: list[dict[str, Any]] = []
+        try:
+            for z in sizes[:200]:
+                size = z.get("size_mm")
+                if not isinstance(size, list) or len(size) != 3:
+                    raise ValueError("a size must be three numbers")
+                cleaned.append({"id": str(z["id"])[:64], "size_mm": [_number(x) for x in size]})
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
+            _count("form_sizes", "refused")
+            raise ImagineError(
+                f"The sizes are not in the shape the page reports: {exc}", 422
+            ) from exc
+        async with self._lock(project_id):
+            head = await self._head(project_id)
+            if head is None:
+                _count("form_sizes", "refused")
+                raise ImagineError("No studio yet: an agent puts a config first.", 404)
+            if head.revision != revision:
+                _count("form_sizes", "refused")
+                raise ImagineError(
+                    f"The studio is at revision {head.revision}, not {revision}.", 409
+                )
+            head.state["form_sizes"] = {"revision": revision, "at": _now(), "sizes": cleaned}
+            await self._save(head)
+        _count("form_sizes", "ok")
+
+    async def get_form_sizes(self, project_id: str) -> dict[str, Any] | None:
+        """The part sizes recorded for the head revision, or ``None``."""
+        head = await self._head(project_id)
+        if head is None:
+            return None
+        record = head.state.get("form_sizes")
+        if not isinstance(record, dict) or record.get("revision") != head.revision:
+            return None
+        return dict(record)
 
     async def get_measurement(self, project_id: str) -> dict[str, Any] | None:
         """The measurement recorded for the head revision, or ``None``."""

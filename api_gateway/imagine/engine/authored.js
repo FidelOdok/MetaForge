@@ -834,9 +834,13 @@
         if (ov > 0.001) overlaps.push({ a: comps[i].id, b: comps[j].id, volume_mm3: round(ov) });
       }
     }
+    // Each drawn part's box, studio axes (Y up), so Develop's CAD can be set beside it.
+    var sizes = live.filter(function (r) { return r.bbox; }).map(function (r) {
+      return { id: r.id, size_mm: [0, 1, 2].map(function (k) { return round(r.bbox.max[k] - r.bbox.min[k]); }) };
+    });
     return {
       total_area: round(total), overhang_area: round(down), overhang_share: total > 0 ? round(down / total) : 0,
-      com: com, support: support, overlaps: overlaps, fit: fitCheck(live), notes: notes,
+      com: com, support: support, overlaps: overlaps, fit: fitCheck(live), notes: notes, sizes: sizes,
     };
   }
 
