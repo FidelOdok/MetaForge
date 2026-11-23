@@ -36,6 +36,9 @@ def count(operation: str, outcome: str) -> None:
 def form_parts_of(config: dict[str, Any]) -> list[FormPart]:
     """The parts the studio draws itself (not bought components: their thread is the
     component thread)."""
+    from api_gateway.imagine.brief import PART_ID, is_brief
+
+    brief = is_brief(config)
     authored = (config.get("form") or {}).get("authored") or {}
     out = []
     for p in authored.get("parts") or []:
@@ -52,6 +55,7 @@ def form_parts_of(config: dict[str, Any]) -> list[FormPart]:
                 kind=str(p.get("kind") or "generated"),
                 develop_item=str(p.get("develop_item") or ""),
                 accepted=accepted,
+                limit=brief and pid == PART_ID,
             )
         )
     return out
@@ -76,6 +80,7 @@ def cad_heads(work_products: list[Any]) -> list[CadItem]:
             name=str(getattr(wp, "name", "") or key),
             node_id=str(getattr(wp, "id", "")),
             bbox=bbox if isinstance(bbox, dict) else None,
+            assembly=str(meta.get("item_type") or "") == "assembly" or key.startswith("ASM-"),
         )
     return list(heads.values())
 

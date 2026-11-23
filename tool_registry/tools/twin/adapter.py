@@ -9529,7 +9529,10 @@ class TwinServer(McpToolServer):
                     "product context (real parts with datasheet, retrieved date, interfaces "
                     "and a geometry envelope, options, models, scenarios, packed references) "
                     "goes inline as config.context, never as a folder path. Errors refuse "
-                    "the write and are returned; warnings say what the page will flag. A "
+                    "the write and are returned; warnings say what the page will flag. For a "
+                    "product led by its electronics or function, a brief studio writes form "
+                    "as {template: 'brief', envelope_mm: [length, width, height]}: the size "
+                    "limit is drawn as one box and no form needs to be seen before handover. A "
                     "handed-over studio is read-only until a person reworks it. Nothing an "
                     "agent writes here is above V0 to V2 (captured, consistent, screened)."
                 ),

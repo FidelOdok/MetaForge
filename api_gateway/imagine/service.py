@@ -33,6 +33,7 @@ import structlog
 from pydantic import ValidationError
 
 from api_gateway.imagine import (
+    brief,
     component_link,
     engine_page,
     library_cost,
@@ -876,7 +877,7 @@ class ImagineService:
                     409,
                 )
             develop = row.get("develop") or {}
-            if row.get("status") != "differs" or not develop.get("item_ref"):
+            if row.get("status") not in ("differs", "exceeds") or not develop.get("item_ref"):
                 _count("accept_form", "refused")
                 raise ImagineError(
                     f"{row.get('name')} has no difference to accept ({row.get('status')}).", 409
@@ -1275,6 +1276,14 @@ class ImagineService:
         metric: str = "put",
         form_sync: dict[str, Any] | None = None,
     ) -> StudioResponse:
+        try:
+            # A brief studio's size limit is its one drawn part (FORGE-918), from the start.
+            config = brief.expand(config)
+        except brief.BriefError as exc:
+            _count(metric, "refused")
+            raise ImagineError(
+                "The config does not pass the formgraph checks.", 422, {"errors": [str(exc)]}
+            ) from exc
         # A linked part's size comes from its library entry first (FORGE-877), so the
         # rungs below draw only what the library cannot size.
         lookup = library_cost.cached(library_cost.catalog_entry)
@@ -2257,11 +2266,22 @@ class ImagineService:
         # satisfies it, or a concept mesh does, illustrative or structured from the layout (spec
         # 5.1, concept.form_seen). The mesh
         # is optional: nothing downstream reads it and it can never be evidence.
+        is_brief = brief.is_brief(config)
         mesh = await self.bridge.has_concept_mesh(project_id)
         seen_doc = (cols.get("formSeen") or {}).get("latest") or {}
         seen = bool(seen_doc.get("seen")) and seen_doc.get("revision") == head.revision
         parts_ok = bool(chosen) and not no_part
-        if parts_ok and (mesh or seen):
+        if parts_ok and is_brief:
+            # A brief studio draws no form to see: Develop designs it (FORGE-919).
+            env = brief.envelope_of(config) or []
+            add(
+                "concept_assembly",
+                "Concept assembly and concept mesh",
+                "done",
+                "Component ids are assigned at handover; a brief studio has no drawn form, "
+                "only its size limit (" + " x ".join(f"{v:g}" for v in env) + " mm).",
+            )
+        elif parts_ok and (mesh or seen):
             how = (
                 f"a person has seen this form (revision {head.revision})"
                 if seen
@@ -2279,7 +2299,7 @@ class ImagineService:
             missing = []
             if not parts_ok:
                 missing.append("a chosen part for every function")
-            if not (mesh or seen):
+            if not (mesh or seen or is_brief):
                 missing.append(
                     "a person to have seen the form (use 'I have seen this form' in the studio), "
                     "or a concept mesh: twin.render_structured_mesh builds one free from the "
@@ -2306,7 +2326,14 @@ class ImagineService:
 
         # 9. screening stored as V2
         scr = cols["screening"].get("latest")
-        if scr:
+        if is_brief and not scr:
+            add(
+                "screening",
+                "Screening results stored (V2)",
+                "assumed",
+                "A brief studio has no drawn form to screen; Develop's CAD is checked instead.",
+            )
+        elif scr:
             add(
                 "screening",
                 "Screening results stored (V2)",

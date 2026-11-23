@@ -361,9 +361,33 @@ product's own, keep the shape:
 The angle-bracket values pass the checks but are not facts. Replace each with
 what you read, or list it to the person as missing.
 
+## Brief or full: choose the depth first
+
+Decide how much form the studio needs before you write it. You make this call; record
+it with `twin.record_decision` and say which depth you chose and why.
+
+- **Brief**, for a product led by its electronics or function (a board, a controller,
+  a module that sits inside a host, a sensor node): the form Develop designs is the real
+  one, so do not draw a concept of it. Write
+  `form: {template: "brief", envelope_mm: [length, width, height]}`, the size the
+  product must fit, from the person or a source. Everything else is the same: ledger,
+  assumptions, scenarios, requirements, one part per function, interfaces,
+  manufacturing and wiring. The studio draws the size limit as one box, a person does
+  not need to have seen a form before handover, and form screening does not apply.
+  After handover, an agent that has the studio's reference and form tools (an MCP
+  client sees them all; the in-app chat's stages do not) adds Develop's assembly as a
+  mesh reference that follows its item, and reads the form thread to see whether
+  Develop's design still fits the size limit (`within` or `exceeds`). A larger size is
+  taken by accepting that row with `{op: replace, path: /form/brief/envelope_mm,
+  value: [L, W, H]}`.
+- **Full**, for a product where look and handling are the point (a lamp, a handheld,
+  a speaker, anything with industrial design): author the form as below.
+
+When you are unsure, choose brief: the person can rework the studio into a full one.
+
 ## Authoring a form
 
-Every form is authored: you write its geometry as code and the page draws it,
+Every full form is authored: you write its geometry as code and the page draws it,
 whether the product is a lamp with a base, an arm and a shade, a clock, a stand,
 or a box around electronics (a box is one `g.box`).
 

@@ -32,6 +32,7 @@ class FormPart:
     kind: str = "generated"
     develop_item: str = ""  # an item key the studio names for this part, if any
     accepted: dict[str, Any] | None = None  # the last difference the studio took
+    limit: bool = False  # a brief studio's size limit (FORGE-920), not a part to make
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,7 @@ class CadItem:
     name: str
     node_id: str
     bbox: dict[str, float] | None = None
+    assembly: bool = False
 
     @property
     def ref(self) -> str:
@@ -53,7 +55,8 @@ class CadItem:
 class FormRow:
     key: str
     name: str
-    status: str  # same | differs | accepted | unmeasured | unpaired
+    # same | differs | accepted | unmeasured | unpaired; a size limit: within | exceeds
+    status: str
     studio: dict[str, Any] = field(default_factory=dict)
     develop: dict[str, Any] | None = None
     delta_mm: list[float] | None = None
@@ -89,6 +92,11 @@ def pair(part: FormPart, items: list[CadItem]) -> CadItem | None:
     Ambiguity pairs nothing rather than guessing."""
     if part.develop_item:
         return next((i for i in items if i.item_key == part.develop_item), None)
+    if part.limit:
+        # A size limit holds the whole product: Develop's assembly, else its one CAD item.
+        assemblies = [i for i in items if i.assembly]
+        pool = assemblies or items
+        return pool[0] if len(pool) == 1 else None
     words = _words(part.name) or _words(part.id.replace("-", " "))
     if not words:
         return None
@@ -150,6 +158,9 @@ def build_rows(
             )
             continue
         delta = [round(d - s, 3) for d, s in zip(cad_size, size, strict=True)]
+        if part.limit:
+            rows.append(_limit_row(part, studio, develop, delta, item, tolerance_mm))
+            continue
         differs = any(abs(d) > tolerance_mm for d in delta)
         accepted = part.accepted or {}
         if not differs:
@@ -182,6 +193,36 @@ def build_rows(
     return rows
 
 
+def _limit_row(
+    part: FormPart,
+    studio: dict[str, Any],
+    develop: dict[str, Any],
+    delta: list[float],
+    item: CadItem,
+    tolerance_mm: float,
+) -> FormRow:
+    """A size limit holds when Develop's box fits inside it on every side."""
+    over = [(a, d) for a, d in zip(_AXES, delta, strict=True) if d > tolerance_mm]
+    accepted = part.accepted or {}
+    if not over:
+        status, note = "within", f"Develop's {item.ref} fits the size limit."
+    else:
+        sides = ", ".join(f"{a} +{d:g} mm" for a, d in over)
+        status = "accepted" if accepted.get("item_ref") == item.ref else "exceeds"
+        note = f"Develop's {item.ref} is larger than the size limit ({sides}; studio axes, Y up)."
+        if status == "accepted":
+            note += f" The studio took it on {str(accepted.get('at', ''))[:10]}."
+    return FormRow(
+        key=part.id,
+        name=part.name,
+        status=status,
+        studio=studio,
+        develop=develop,
+        delta_mm=delta,
+        note=note,
+    )
+
+
 def summary(rows: list[FormRow]) -> dict[str, int]:
     out: dict[str, int] = {}
     for r in rows:
@@ -189,8 +230,10 @@ def summary(rows: list[FormRow]) -> dict[str, int]:
     return out
 
 
-#: The only paths a form acceptance may change: the form's own numbers.
+#: The only paths a form acceptance may change: the form's own numbers, and a brief
+#: studio's size limit.
 FORM_PATH = re.compile(r"^/form/params/[A-Za-z_][A-Za-z0-9_]*$")
+LIMIT_PATH = "/form/brief/envelope_mm"
 
 
 def check_form_changes(changes: Any) -> list[dict[str, Any]]:
@@ -199,14 +242,25 @@ def check_form_changes(changes: Any) -> list[dict[str, Any]]:
         return []
     if not isinstance(changes, list):
         raise ValueError("changes must be a list")
-    out = []
+    out: list[dict[str, Any]] = []
     for c in changes:
         if not isinstance(c, dict) or c.get("op") != "replace":
             raise ValueError("each change replaces a form parameter: op 'replace'")
         path = str(c.get("path") or "")
-        if not FORM_PATH.match(path):
-            raise ValueError(f"{path!r} is not a form parameter (/form/params/<name>)")
         value = c.get("value")
+        if path == LIMIT_PATH:
+            if not (
+                isinstance(value, list)
+                and len(value) == 3
+                and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in value)
+            ):
+                raise ValueError(f"{path} takes [length, width, height] in mm")
+            out.append({"op": "replace", "path": path, "value": list(value)})
+            continue
+        if not FORM_PATH.match(path):
+            raise ValueError(
+                f"{path!r} is not a form parameter (/form/params/<name>) or {LIMIT_PATH}"
+            )
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError(f"{path} takes a number")
         out.append({"op": "replace", "path": path, "value": value})
