@@ -440,6 +440,207 @@ def test_edit_operations_are_checked_before_the_board_is_touched(
     assert worker.edit({"pcb_path": "x", "operations": [{"op": "explode"}]})["ok"] is False
 
 
+def test_a_drawn_pour_is_strips_the_placer_keeps_out_of(worker: types.ModuleType) -> None:
+    # An L: 4 x 2 along the top, 2 x 4 down the left, in 1 mm cells.
+    l_shape = [(0, 0), (4, 0), (4, 2), (2, 2), (2, 4), (0, 4)]
+    strips = worker.polygon_cells(l_shape, cell=1.0)
+    assert sum((x1 - x0) * (y1 - y0) for x0, y0, x1, y1 in strips) == 12
+    assert (0, 0, 4, 1) in strips and (0, 3, 2, 4) in strips
+    assert not any(x0 < 3 < x1 and y0 < 3 < y1 for x0, y0, x1, y1 in strips)  # the notch
+    assert worker.polygon_cells([(0, 0), (1, 1)]) == []
+
+
+def test_a_power_pour_is_the_hull_of_its_pads(worker: types.ModuleType) -> None:
+    # Two pads 10 mm apart, grown by 0.5 mm: the hull is the rectangle around both.
+    hull = worker.pad_hull([(0, 0, 1, 1), (10, 0, 11, 1)], 0.5)
+    assert sorted(hull) == [(-0.5, -0.5), (-0.5, 1.5), (11.5, -0.5), (11.5, 1.5)]
+    # An L of three pads: the hull cuts the corner, counter-clockwise, no repeats.
+    hull = worker.pad_hull([(0, 0, 1, 1), (10, 0, 11, 1), (0, 10, 1, 11)], 0.0)
+    assert len(hull) == len(set(hull)) == 5
+    area = sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(hull, hull[1:] + hull[:1])) / 2
+    assert area > 0  # counter-clockwise
+    assert worker.pad_hull([], 0.4) == []
+
+
+def test_a_power_pour_takes_the_board_clearance(
+    worker: types.ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """KiCad's own zone clearance (about 0.5 mm) cut a buck's VIN pour off its
+    0.5 mm-pitch pins; the pour keeps the board's clearance instead."""
+
+    class Outline:
+        def __init__(self) -> None:
+            self.points: list[tuple[int, int]] = []
+
+        def NewOutline(self) -> None:  # noqa: N802
+            pass
+
+        def Append(self, x: int, y: int) -> None:  # noqa: N802
+            self.points.append((x, y))
+
+    class Zone:
+        def __init__(self, board: Any) -> None:
+            self.outline, self.set = Outline(), {}
+
+        def Outline(self) -> Outline:  # noqa: N802
+            return self.outline
+
+        def __getattr__(self, name: str) -> Any:
+            return lambda *a: self.set.__setitem__(name, a[0] if a else None)
+
+    class Settings:
+        class m_NetSettings:  # noqa: N801
+            @staticmethod
+            def GetDefaultNetclass() -> Any:  # noqa: N802
+                return types.SimpleNamespace(GetClearance=lambda: int(0.127 * NM))
+
+    added: list[Any] = []
+    board = types.SimpleNamespace(GetDesignSettings=lambda: Settings, Add=added.append)
+    monkeypatch.setattr(worker.pcbnew, "ZONE", Zone, raising=False)
+    monkeypatch.setattr(worker.pcbnew, "F_Cu", F_CU, raising=False)
+    monkeypatch.setattr(worker.pcbnew, "ZONE_CONNECTION_FULL", 1, raising=False)
+    net = types.SimpleNamespace(GetNetCode=lambda: 7)
+    spec = {
+        "net": "VBAT",
+        "points": [{"x_mm": 1, "y_mm": 1}, {"x_mm": 5, "y_mm": 1}, {"x_mm": 5, "y_mm": 4}],
+    }
+    zone = worker._power_zone(board, {}, {"VBAT": net}, spec, 3, (100.0, 100.0))
+    assert added == [zone]
+    assert zone.set["SetLocalClearance"] == int(0.127 * NM)
+    assert zone.set["SetZoneName"] == "power:VBAT" and zone.set["SetAssignedPriority"] == 3
+    assert zone.outline.points[0] == (int(101 * NM), int(101 * NM))
+
+
+def test_a_power_pour_keeps_other_nets_out_of_its_inside(
+    worker: types.ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Freerouting ran an EN track straight through a VIN pour and split it; a
+    rule area just inside the pour keeps other nets' tracks and vias out."""
+
+    class Poly:
+        def __init__(self, src: Any) -> None:
+            self.inflated: list[Any] = []
+            self.count = src.count
+
+        def Inflate(self, amount: int, *rest: Any) -> None:  # noqa: N802
+            self.inflated.append(amount)
+
+        def OutlineCount(self) -> int:  # noqa: N802
+            return self.count
+
+        def COutline(self, i: int) -> Any:  # noqa: N802
+            pts = [types.SimpleNamespace(x=1, y=2), types.SimpleNamespace(x=3, y=4)]
+            return types.SimpleNamespace(PointCount=lambda: len(pts), CPoint=lambda k: pts[k])
+
+    class Ring:
+        def __init__(self) -> None:
+            self.points: list[tuple[int, int]] = []
+
+        def NewOutline(self) -> None:  # noqa: N802
+            pass
+
+        def Append(self, x: int, y: int, k: int = 0) -> None:  # noqa: N802
+            self.points.append((x, y, k))
+
+    made: list[Poly] = []
+
+    class Zone:
+        def __init__(self, board: Any) -> None:
+            self.set: dict[str, Any] = {}
+            self.ring = Ring()
+
+        def Outline(self) -> Ring:  # noqa: N802
+            return self.ring
+
+        def __getattr__(self, name: str) -> Any:
+            if name == "SetOutline":
+                raise AssertionError("SetOutline takes ownership and crashed the worker")
+            return lambda *a: self.set.__setitem__(name, a[0] if a else None)
+
+    def poly(src: Any) -> Poly:
+        made.append(Poly(src))
+        return made[-1]
+
+    for name, value in {
+        "SHAPE_POLY_SET": poly,
+        "ZONE": Zone,
+        "CORNER_STRATEGY_CHAMFER_ALL_CORNERS": 2,
+    }.items():
+        monkeypatch.setattr(worker.pcbnew, name, value, raising=False)
+    added: list[Any] = []
+    board = types.SimpleNamespace(Add=added.append)
+    outline = types.SimpleNamespace(count=1)
+    pour = types.SimpleNamespace(
+        Outline=lambda: outline, GetLayer=lambda: F_CU, GetZoneName=lambda: "power:VBAT"
+    )
+    rule = worker._pour_keepout(board, pour)
+    assert added == [rule]
+    assert rule.set["SetIsRuleArea"] is True and rule.set["SetZoneName"] == "power:VBAT:keepout"
+    assert rule.set["SetDoNotAllowTracks"] is True and rule.set["SetDoNotAllowVias"] is True
+    assert rule.set["SetDoNotAllowCopperPour"] is False and rule.set["SetDoNotAllowPads"] is False
+    assert made[0].inflated == [-int(worker.POUR_KEEPOUT_INSET_MM * NM)]
+    assert rule.ring.points == [(1, 2, 0), (3, 4, 0)]
+    # A concave pour deflates into pieces: every piece is kept out.
+    outline.count = 2
+    rule = worker._pour_keepout(board, pour)
+    assert rule.ring.points == [(1, 2, 0), (3, 4, 0), (1, 2, 1), (3, 4, 1)]
+    outline.count = 1
+    # A pour too narrow to keep anything inside gets no keepout.
+    outline.count = 0
+    assert worker._pour_keepout(board, pour) is None and len(added) == 2
+
+
+def test_strip_routing_keeps_the_power_pours(worker: types.ModuleType) -> None:
+    class Zone:
+        def __init__(self, name: str, net: str) -> None:
+            self.name, self.net = name, net
+
+        def GetIsRuleArea(self) -> bool:  # noqa: N802
+            return False
+
+        def GetLayer(self) -> int:  # noqa: N802
+            return F_CU
+
+        def GetZoneName(self) -> str:  # noqa: N802
+            return self.name
+
+        def GetNetname(self) -> str:  # noqa: N802
+            return self.net
+
+    board = Board([])
+    gnd, vbat = Zone("", "GND"), Zone("power:VBAT", "VBAT")
+    board.zones = [gnd, vbat]
+    out = worker.strip_routing(board)
+    assert out["pour_nets"] == ["GND"] and board.zones == [vbat]
+
+
+def test_set_model_replaces_or_adds_the_footprint_model(worker: types.ModuleType) -> None:
+    """KiCad ships no model for some packages; an edit points the footprint at one."""
+
+    class Model:
+        m_Filename = ""
+
+    class WithModels:
+        def __init__(self, models: list[Model]) -> None:
+            self.models = models
+
+        def Models(self) -> list[Model]:  # noqa: N802
+            return self.models
+
+    worker.pcbnew.FP_3DMODEL = Model
+    has = WithModels([Model()])
+    worker.set_model(has, "/workspace/models/wqfn30.step")
+    assert [m.m_Filename for m in has.models] == ["/workspace/models/wqfn30.step"]
+    bare = WithModels([])
+    worker.set_model(bare, "/workspace/models/wqfn30.step")
+    assert [m.m_Filename for m in bare.models] == ["/workspace/models/wqfn30.step"]
+    errors = worker.check_operations(
+        [{"op": "set_model", "ref": "U2"}, {"op": "set_model", "model": "a.step"}]
+    )
+    assert len(errors) == 2
+    assert worker.check_operations([{"op": "set_model", "ref": "U2", "model": "a.STEP"}]) == []
+
+
 def test_the_edit_moves_rotates_places_and_strips(
     worker: types.ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -461,6 +662,9 @@ def test_the_edit_moves_rotates_places_and_strips(
 
         def GetNetname(self) -> str:  # noqa: N802
             return "GND"
+
+        def GetZoneName(self) -> str:  # noqa: N802
+            return ""
 
     board = Board([j1, r2, h2])
     board.tracks = [Track(), Track()]

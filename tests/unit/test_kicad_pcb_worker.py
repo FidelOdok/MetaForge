@@ -73,3 +73,12 @@ def test_mounting_hole_name_matches_the_drill(
 def test_mounting_hole_name_never_picks_a_pad_variant(worker: types.ModuleType) -> None:
     assert worker.mounting_hole_name(2.5, ["MountingHole_2.5mm_Pad"]) is None
     assert worker.mounting_hole_name(3.2, ["MountingHole_3.2mm_M3_Pad_Via"]) is None
+
+
+def test_fanout_holes_keep_the_hole_to_hole_minimum(worker: types.ModuleType) -> None:
+    """Fanout vias at 0.5 mm pitch with 0.3 mm drills broke the 0.25 mm hole-to-hole rule."""
+    ds = types.SimpleNamespace(m_HoleClearance=200_000, m_HoleToHoleMin=250_000)
+    assert worker.fanout_hole_gap(ds) == 250_000
+    ds = types.SimpleNamespace(m_HoleClearance=300_000, m_HoleToHoleMin=250_000)
+    assert worker.fanout_hole_gap(ds) == 300_000
+    assert worker.fanout_hole_gap(types.SimpleNamespace(m_HoleClearance=100_000)) == 100_000
