@@ -2189,6 +2189,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     supervisor_task = asyncio.create_task(run_supervisor_loop())
     app.state.run_supervisor_task = supervisor_task
+    # With METAFORGE_APPROVALS=off nothing waits for a person: approve what reaches
+    # /v1/approvals through each kind's own decide route (orders and failing gates wait).
+    from api_gateway.approvals.approvals_off import run_sweep_loop
+
+    approvals_off_task = asyncio.create_task(run_sweep_loop(app))
+    app.state.approvals_off_task = approvals_off_task
     # FORGE-606: projects that had runs before "active" was ever set.
     from api_gateway.runs.routes import activate_projects_with_runs
 
@@ -2208,6 +2214,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("gateway_stopping")
     reconcile_task.cancel()
     supervisor_task.cancel()
+    approvals_off_task.cancel()
     kb_storage_task.cancel()
     await file_watcher.stop()
     if hasattr(app.state, "tool_registry"):
