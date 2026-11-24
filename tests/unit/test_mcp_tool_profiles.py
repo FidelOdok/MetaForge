@@ -208,10 +208,10 @@ class TestServing:
         assert "kicad" in reported
 
     async def test_a_healthy_server_says_nothing_extra(self) -> None:
-        # _meta only appears when there is something to report, so its
-        # presence is itself the signal.
+        # _meta carries only the tool-set digest (FORGE-930) unless there is
+        # something to report, so any other key is itself the signal.
         result = await _tools_list(UnifiedMcpServer(adapters=[_Twin()]))
-        assert "_meta" not in result
+        assert set(result.get("_meta", {})) == {"metaforge/toolSet"}
         # +1 for the server's own `health.check` (FORGE-409). Asserted as
         # a set difference rather than a count so the point of the test --
         # that nothing was dropped -- survives the next server-owned tool.

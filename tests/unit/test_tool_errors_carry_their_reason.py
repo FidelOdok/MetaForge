@@ -327,3 +327,27 @@ class TestAHeldCallThatThenFails:
         call that then failed would leave one behind until the cap cleared."""
         _, server = await self._run()
         assert server._approval_records == {}
+
+
+class TestToolsTheConnectionLacks:
+    """R10: a refusal that names a tool the client cannot call says so."""
+
+    REGISTERED = {"twin.commit_geometry", "twin.get_node", "cadquery.execute_script"}
+
+    def _text(self, details: str, served: set[str] | None, profile: str | None = "lean") -> str:
+        exc = ToolHandlerError("twin.get_node", details, 1.0)
+        return _tool_error_text(exc, self.REGISTERED, served, profile)
+
+    def test_a_tool_left_out_by_the_profile_is_named_as_such(self) -> None:
+        text = self._text("commit it first with `twin.commit_geometry`", {"twin.get_node"})
+        assert "twin.commit_geometry is not on this connection (profile 'lean'" in text
+
+    def test_a_tool_that_does_not_exist_is_named_as_such(self) -> None:
+        text = self._text("use twin.commit_cad instead", None)
+        assert "twin.commit_cad is not a tool on this server." in text
+
+    def test_served_tools_and_non_tools_add_nothing(self) -> None:
+        details = "see twin.commit_geometry and image.png, version 1.2"
+        text = self._text(details, {"twin.commit_geometry"})
+        assert text == f"twin.get_node failed: {details}"
+        assert _tool_error_text(ToolHandlerError("t", details, 0.0)) == f"t failed: {details}"
