@@ -1326,7 +1326,11 @@ async def bootstrap_tool_registry(
                 provider = select_search_provider()
                 # FORGE-899: component.find borrows the same provider.
                 _web_search_provider = provider
-                server = WebMcpServer(provider=provider, extractor=select_extractor())
+                server = WebMcpServer(
+                    provider=provider,
+                    extractor=select_extractor(),
+                    distributors=_available_distributor_adapters,
+                )
                 await registry.register_adapter(server)
                 registered.append("web")
                 logger.info(

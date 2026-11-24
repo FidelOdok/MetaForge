@@ -423,6 +423,7 @@ TOOL_RULES: dict[str, ToolRule] = {
         "cadquery.export_step",
         "cadquery.validate_shape",
         "distributors.resolve_offers",
+        "image.fetch",
         "web.extract",
         "web.fetch",
         "web.search",

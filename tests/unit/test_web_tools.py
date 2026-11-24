@@ -249,7 +249,7 @@ def _server(client: httpx.AsyncClient | None = None) -> WebMcpServer:
 def test_adapter_registers_both_tools_with_object_schemas() -> None:
     server = _server()
     tool_ids = set(server._tools)
-    assert tool_ids == {"web.search", "web.fetch"}
+    assert tool_ids == {"web.search", "web.fetch", "image.fetch"}
     for reg in server._tools.values():
         # harness_backend.mcp_tools_from_bridge only forwards a real
         # object schema to the model; anything else silently degrades to

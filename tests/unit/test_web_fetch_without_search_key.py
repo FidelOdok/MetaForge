@@ -26,12 +26,12 @@ class _Provider:
 
 def test_without_a_provider_only_fetch_is_offered() -> None:
     server = WebMcpServer(provider=None)
-    assert set(server.tool_ids) == {"web.fetch"}
+    assert set(server.tool_ids) == {"web.fetch", "image.fetch"}
 
 
 def test_with_a_provider_both_are_offered() -> None:
     server = WebMcpServer(provider=_Provider())  # type: ignore[arg-type]
-    assert set(server.tool_ids) == {"web.search", "web.fetch"}
+    assert set(server.tool_ids) == {"web.search", "web.fetch", "image.fetch"}
 
 
 async def test_close_without_a_provider_is_a_no_op() -> None:
