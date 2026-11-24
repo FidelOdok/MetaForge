@@ -333,8 +333,12 @@ def _result(folder: Path, manifest: dict[str, Any], cached: bool) -> dict[str, A
         "cached": cached,
         "next": (
             {
-                "inspect": {"tool": "freecad.describe_step_file", "file_path": steps[0]},
-                "commit": {"tool": "twin.commit_geometry", "file_path": steps[0]},
+                # Each tool's own argument name: describe_step_file reads input_file.
+                "inspect": {
+                    "tool": "freecad.describe_step_file",
+                    "arguments": {"input_file": steps[0]},
+                },
+                "commit": {"tool": "twin.commit_geometry", "arguments": {"file_path": steps[0]}},
             }
             if steps
             else {}

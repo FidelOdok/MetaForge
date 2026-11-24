@@ -89,7 +89,8 @@ async def test_a_zip_is_unpacked_recorded_and_cached(tmp_path: Path) -> None:
     assert out["licence"]["spdx_guess"] == "MIT" and out["licence"]["file"] == "RPi5/LICENSE.txt"
     why = {s["path"]: s["why"] for s in out["skipped"]}
     assert "nested archive" in why["RPi5/inner.zip"] and "not a CAD" in why["RPi5/notes.docx"]
-    assert out["next"]["commit"]["file_path"] == step["file_path"]
+    assert out["next"]["commit"]["arguments"] == {"file_path": step["file_path"]}
+    assert out["next"]["inspect"]["arguments"] == {"input_file": step["file_path"]}
     manifest = json.loads((Path(out["folder"]) / "manifest.json").read_text())
     assert manifest["source_url"] == "https://example.com/go" and manifest["retrieved_at"]
 
