@@ -13,6 +13,27 @@ from tool_registry.tools.cadquery.config import CadqueryConfig
 logger = structlog.get_logger()
 
 
+def _step_inline_on_request(
+    result: dict[str, Any], arguments: dict[str, Any], *, path_key: str
+) -> dict[str, Any]:
+    """The STEP's base64 only when the caller asks for it (FORGE-930, R10).
+
+    A STEP inline is a large response (a board assembly runs to megabytes) for a
+    client that only needs to commit it: ``twin.commit_geometry`` reads the same
+    file by its path from the shared adapter workspace. ``include_step_base64``
+    keeps the old behaviour for a caller that does need the bytes.
+    """
+    if arguments.get("include_step_base64") is True or "step_base64" not in result:
+        return result
+    out = {k: v for k, v in result.items() if k != "step_base64"}
+    path = out.get(path_key)
+    out["step_inline"] = (
+        f"not inline: pass {path_key} ({path}) to twin.commit_geometry as file_path, or "
+        "call again with include_step_base64 true for the bytes"
+    )
+    return out
+
+
 class CadqueryServer(McpToolServer):
     """CadQuery tool adapter for CAD operations via MCP.
 
@@ -218,9 +239,10 @@ class CadqueryServer(McpToolServer):
                     "Export CAD model to STEP/STL/OBJ/BREP/AMF/SVG format. Output is "
                     "written to the adapter's local filesystem only — it is NOT "
                     "persisted or visible in the project/Twin until "
-                    "twin.commit_geometry is called. The response includes "
-                    "step_base64 (when output_format is STEP) — pass that directly "
-                    "as twin.commit_geometry's step_base64 argument to persist it."
+                    "twin.commit_geometry is called: pass the response's output_file to "
+                    "twin.commit_geometry as file_path (it reads the file from the shared "
+                    "workspace). The STEP is returned inline as step_base64 only when "
+                    "include_step_base64 is true."
                 ),
                 capability="cad_export",
                 input_schema={
@@ -239,6 +261,11 @@ class CadqueryServer(McpToolServer):
                             "type": "string",
                             "description": "Optional output file path",
                         },
+                        "include_step_base64": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Also return the STEP inline as step_base64.",
+                        },
                     },
                     "required": ["input_file", "output_format"],
                 },
@@ -252,7 +279,7 @@ class CadqueryServer(McpToolServer):
                             "type": "string",
                             "description": (
                                 "Base64 STEP bytes, present when output_format is "
-                                "STEP -- pass to twin.commit_geometry's step_base64."
+                                "STEP and include_step_base64 is true."
                             ),
                         },
                     },
@@ -925,10 +952,12 @@ class CadqueryServer(McpToolServer):
                     "private folder, no network, no access to other files, resource limits). "
                     "The script must assign "
                     "its final result to a variable named 'result' (a CadQuery Workplane). "
-                    "The response includes step_base64 (when the export is STEP format) -- "
-                    "pass that directly as twin.commit_geometry's step_base64 argument to "
-                    "commit this result. There is no session/obj_id concept here (unlike "
-                    "freecad.*): step_base64 is the only path to commit CadQuery output."
+                    "To commit the result, pass the response's cad_file to "
+                    "twin.commit_geometry as file_path (it reads the file from the shared "
+                    "workspace). There is no session/obj_id concept here (unlike freecad.*). "
+                    "The STEP is returned inline as step_base64 only when "
+                    "include_step_base64 is true; the bounding box, volume and area cover "
+                    "every solid the script returns."
                 ),
                 capability="cad_scripting",
                 input_schema={
@@ -937,6 +966,11 @@ class CadqueryServer(McpToolServer):
                         "script": {
                             "type": "string",
                             "description": "CadQuery Python script to execute",
+                        },
+                        "include_step_base64": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Also return the STEP inline as step_base64.",
                         },
                         "output_path": {
                             "type": "string",
@@ -963,7 +997,7 @@ class CadqueryServer(McpToolServer):
                             "type": "string",
                             "description": (
                                 "Base64 STEP bytes, present when the export is STEP "
-                                "format -- pass to twin.commit_geometry's step_base64."
+                                "format and include_step_base64 is true."
                             ),
                         },
                         "volume_mm3": {"type": "number"},
@@ -1729,7 +1763,8 @@ class CadqueryServer(McpToolServer):
             work_dir=self.config.work_dir,
             timeout=self.config.max_operation_time,
         )
-        return ops.export_geometry(input_file, output_format, output_path)
+        result = ops.export_geometry(input_file, output_format, output_path)
+        return _step_inline_on_request(result, arguments, path_key="output_file")
 
     async def export_urdf(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Export a single-link URDF for a STEP file."""
@@ -1951,7 +1986,8 @@ class CadqueryServer(McpToolServer):
             # A caller may shorten the limit, never lengthen it past the adapter's own.
             timeout = min(float(timeout), float(self.config.max_operation_time))
         # The runner blocks while it supervises the child; keep the event loop free.
-        return await asyncio.to_thread(ops.execute_script, script, output_path, timeout)
+        result = await asyncio.to_thread(ops.execute_script, script, output_path, timeout)
+        return _step_inline_on_request(result, arguments, path_key="cad_file")
 
     async def create_assembly(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Create multi-part assembly from STEP files with constraints."""

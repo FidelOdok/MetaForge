@@ -376,7 +376,11 @@ async def lower_design_ir_cadquery(mcp: McpBridge, doc: DesignIR) -> CadqueryLow
         script, terminal_id, var_map = compile_design_ir_cadquery(doc)
         span.set_attribute("terminal_entity_id", terminal_id)
 
-        response = await mcp.invoke("cadquery.execute_script", {"script": script}, timeout=120)
+        response = await mcp.invoke(
+            "cadquery.execute_script",
+            {"script": script, "include_step_base64": True},
+            timeout=120,
+        )
         step_b64 = response.get("step_base64")
         if not step_b64:
             raise LoweringError("cadquery.execute_script returned no step_base64")
