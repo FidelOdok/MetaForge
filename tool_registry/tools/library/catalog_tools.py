@@ -171,6 +171,11 @@ _SPECS = (
     "operating_temp_max_c (C). "
     "A module, battery or electronic part is length_mm x width_mm x height_mm: its height "
     "is height_mm, never thickness_mm (that is for plates and washers). "
+    "A size worked out rather than read (from a photo, a similar part or a package's "
+    "nominal size) is source_kind estimate with method (photo, similar_part or "
+    "package_nominal), source_ref its basis (the image_ref, the similar part's entry, the "
+    "package code) and confidence (0 to 1): it is flagged for review, and it never "
+    "replaces a value that has a real source (that update is refused). "
 )
 _PART_DATA = (
     "Real part data (FORGE-906), each piece sourced like a value: ratings is a list of "
@@ -465,7 +470,10 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                 "standard part, or {step_url, licence} / {step_work_product_id} for a "
                 "purchased one, or {usd_url, sha256, licence, package_id, attribution} "
                 "for an OpenUSD package, which simready.import builds; the licence must "
-                "be an accepted one), material (a library material name), and suppliers "
+                "be an accepted one; any of them may add fidelity: maker_cad, datasheet_built, "
+                "kicad_generic, photo_estimate or outline, best first, and a less faithful "
+                "geometry never replaces a better one), material (a library material name, "
+                "never a colour: a colour is the part's appearance), and suppliers "
                 "[{supplier, sku, url, offer}], where offer is what you read: {read_on "
                 "(YYYY-MM-DD), via (the tool or page), currency, breaks [{qty, unit_price}], "
                 "stock, lead_time_days, confirmed (false for a search snippet or cached page)}. "

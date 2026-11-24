@@ -90,6 +90,27 @@ The dashboard's library page shows:
 In the component thread, Develop's part says `Part data complete` or how many items are still
 to do, read when the thread is shown.
 
+## Estimates and geometry fidelity
+
+A size worked out rather than read is stored as what it is. A component spec with
+`source_kind: estimate` names its `method` (`photo`, `similar_part` or
+`package_nominal`), its basis in `source_ref` (an `image:<sha256>` ref, a similar part's
+entry, a package code) and a `confidence` from 0 to 1, and is always flagged for review:
+
+```json
+"length_mm": {"value": 25.28, "unit": "mm", "source_kind": "estimate",
+              "method": "photo", "source_ref": "image:…", "confidence": 0.7}
+```
+
+An estimate never replaces a value with a real source: an update that tries is refused
+and names the sourced values. A sourced value replaces an estimate, and a newer estimate
+may refine an older one.
+
+An entry's `geometry` may state its `fidelity`, best first: `maker_cad`,
+`datasheet_built`, `kicad_generic`, `photo_estimate`, `outline`. A less faithful geometry
+never replaces a better one. A colour is appearance, never a material: a colour word given
+as `material` (black, silver, …) is refused.
+
 ## Model representations on reusable entries
 
 `library.register_component` and `library.update_component` accept an optional
