@@ -57,7 +57,13 @@ class TestHappyPath:
         assert result.bounding_box["max_z"] == 40.0
         assert result.terminal_entity_id == "box1"
         assert result.obj_id_map == {"box1": "v_box1"}
-        assert mcp.calls == [("cadquery.execute_script", {"script": result.script_text})]
+        # The lowering needs the STEP bytes back, so it asks for them (FORGE-930).
+        assert mcp.calls == [
+            (
+                "cadquery.execute_script",
+                {"script": result.script_text, "include_step_base64": True},
+            )
+        ]
         assert "cq.Workplane().box(40.0, 20.0, 40.0, centered=(False, False, False))" in (
             result.script_text
         )
