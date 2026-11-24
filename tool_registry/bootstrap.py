@@ -1314,15 +1314,13 @@ async def bootstrap_tool_registry(
         # this codebase keeps re-learning), so the tool simply isn't offered.
         if _is_adapter_enabled("web") and (not adapter_ids or "web" in adapter_ids):
             # web.fetch needs no key, so the adapter always registers; only
-            # web.search waits for BRAVE_API_KEY (see WebMcpServer).
+            # web.search waits for a search key (TAVILY_API_KEY or BRAVE_API_KEY,
+            # WEB_SEARCH_PROVIDER picks between them; see WebMcpServer).
             try:
                 from tool_registry.tools.web.mcp_adapter import WebMcpServer
+                from tool_registry.tools.web.tavily import select_search_provider
 
-                provider = None
-                if os.environ.get("BRAVE_API_KEY"):
-                    from tool_registry.tools.web.brave import BraveSearchProvider
-
-                    provider = BraveSearchProvider()
+                provider = select_search_provider()
                 # FORGE-899: component.find borrows the same provider.
                 _web_search_provider = provider
                 server = WebMcpServer(provider=provider)
@@ -1330,7 +1328,7 @@ async def bootstrap_tool_registry(
                 registered.append("web")
                 logger.info(
                     "web_mcp_adapter_registered",
-                    provider="Brave" if provider is not None else None,
+                    provider=provider.name if provider is not None else None,
                     search=provider is not None,
                 )
             except Exception as exc:

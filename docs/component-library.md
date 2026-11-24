@@ -243,7 +243,7 @@ distributor (DigiKey, Mouser, Nexar, Farnell, Arrow). It returns two ranked list
 
 - `web`: when the library finds nothing and the distributors fewer than three (`web: "auto"`,
   the default; `"on"` always, `"off"` never), pages from the configured web search
-  (`BRAVE_API_KEY`) for the need plus "datasheet": each a title, address and snippet, marked
+  (`TAVILY_API_KEY` or `BRAVE_API_KEY`) for the need plus "datasheet": each a title, address and snippet, marked
   as a `datasheet` when it is a PDF, with the maker, order code, size, pins and price all
   `unknown` until the page is read. A part found only on the web (a board its maker sells
   directly) is registered with `library.register_component`, every value sourced to the page,
