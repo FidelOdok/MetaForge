@@ -67,6 +67,13 @@ def test_an_estimate_names_how_what_from_and_how_sure(change: dict[str, Any], wh
         parse_specs({"length_mm": _estimate(25.28, **change)})
 
 
+def test_every_scale_resolve_method_is_an_estimate_method() -> None:
+    for method in ("printed", "package_nominal", "similar_part", "photo"):
+        assert (
+            parse_specs({"length_mm": _estimate(25.4, method=method)})["length_mm"].method == method
+        )
+
+
 def test_an_estimate_survives_a_save_and_load() -> None:
     catalog = SqliteCatalog()
     entry = _register(catalog)

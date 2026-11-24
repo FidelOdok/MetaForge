@@ -114,7 +114,9 @@ _NEEDS_REF = ("measurement", "standard", "datasheet", "manufacturer_spec", "supp
 #: package code) and how sure (``confidence``, 0 to 1). Always needs review, and never
 #: replaces a value that has a real source.
 ESTIMATE = "estimate"
-ESTIMATE_METHODS: tuple[str, ...] = ("photo", "similar_part", "package_nominal")
+#: ``printed``: a size stated in a listing or the person's text whose quote
+#: scale.resolve checked against that text (FORGE-926).
+ESTIMATE_METHODS: tuple[str, ...] = ("printed", "package_nominal", "similar_part", "photo")
 
 #: FORGE-929 (R7): how faithful a part's geometry is, best first. A better model always
 #: replaces a worse one, never the other way round.

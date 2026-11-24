@@ -93,8 +93,8 @@ to do, read when the thread is shown.
 ## Estimates and geometry fidelity
 
 A size worked out rather than read is stored as what it is. A component spec with
-`source_kind: estimate` names its `method` (`photo`, `similar_part` or
-`package_nominal`), its basis in `source_ref` (an `image:<sha256>` ref, a similar part's
+`source_kind: estimate` names its `method` (`printed`, `package_nominal`,
+`similar_part` or `photo`, as `scale.resolve` gives it), its basis in `source_ref` (an `image:<sha256>` ref, a similar part's
 entry, a package code) and a `confidence` from 0 to 1, and is always flagged for review:
 
 ```json

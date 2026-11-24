@@ -172,8 +172,9 @@ _SPECS = (
     "A module, battery or electronic part is length_mm x width_mm x height_mm: its height "
     "is height_mm, never thickness_mm (that is for plates and washers). "
     "A size worked out rather than read (from a photo, a similar part or a package's "
-    "nominal size) is source_kind estimate with method (photo, similar_part or "
-    "package_nominal), source_ref its basis (the image_ref, the similar part's entry, the "
+    "nominal size) is source_kind estimate with method (printed, package_nominal, "
+    "similar_part or photo, as scale.resolve gives it), source_ref its basis (the "
+    "image_ref, the similar part's entry, the "
     "package code) and confidence (0 to 1): it is flagged for review, and it never "
     "replaces a value that has a real source (that update is refused). "
 )
