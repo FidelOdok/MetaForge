@@ -126,3 +126,47 @@ async def test_a_part_off_its_size_is_not_saved(server: Any) -> None:
         await server.build_from_estimate(
             {"template": "CHIP", "dims": {"length": 1.6, "width": 0.8, "height": 0.45}}
         )
+
+
+BREAKOUT = {
+    "length": 25.4,
+    "width": 17.78,
+    "corner_radius": 1.0,
+    "holes": [{"x": 2.54, "y": 15.24, "diameter": 2.5}, {"x": 22.86, "y": 15.24, "diameter": 2.5}],
+}
+
+
+def test_a_board_lists_its_subparts_and_stands_its_headers_on_top() -> None:
+    """Built in the CadQuery container: 25.4 x 17.78 x 10.1 exactly, one solid."""
+    built = build("BOARD", BREAKOUT, {"headers": [{"x": 2.54, "y": 1.27, "count": 9}]}, 9)
+    assert built.bbox == (25.4, 17.78, 10.1) and built.pins == 9
+    assert [p["name"] for p in built.parts] == ["board", "J1"]
+    assert built.parts[1]["bbox_mm"] == [pytest.approx(9 * 2.54), 2.54, 8.5]
+    assert built.script.count(".cut(") == 2 and "fillet(1.0)" in built.script
+
+
+def test_a_header_flush_with_the_edge_fits() -> None:
+    edge = {"x": 46.99, "y": 6.35, "count": 4, "rows": 2, "axis": "y"}
+    assert build("BOARD", {"length": 50.8, "width": 22.86}, {"headers": [edge]}, 8).pins == 8
+
+
+@pytest.mark.parametrize(
+    ("dims", "headers", "pin_count", "why"),
+    [
+        (
+            {"length": 20, "width": 10},
+            [{"x": 2, "y": 1.27, "count": 9}],
+            None,
+            "header 1 does not fit",
+        ),
+        ({**BREAKOUT, "holes": [{"x": 0.5, "y": 5, "diameter": 2.5}]}, [], None, "hole 1"),
+        (BREAKOUT, [{"x": 2.54, "y": 1.27, "count": 9}], 8, "pin_count is 8"),
+        (BREAKOUT, [{"x": 2.54, "y": 1.27, "count": 3, "rows": 3}], None, "1 or 2 rows"),
+        ({**BREAKOUT, "corner_radius": 9}, [], None, "corner_radius"),
+    ],
+)
+def test_a_board_that_cannot_be_built_says_why(
+    dims: dict[str, Any], headers: list[dict[str, Any]], pin_count: int | None, why: str
+) -> None:
+    with pytest.raises(TemplateError, match=why):
+        build("BOARD", dims, {"headers": headers}, pin_count)

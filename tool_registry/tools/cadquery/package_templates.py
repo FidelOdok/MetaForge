@@ -17,6 +17,9 @@ Axes: x is the body's length, y its width, z up from the seating plane (z = 0).
 * ``GULL4``: QFP: gull-wing leads on all four sides.
 * ``BGA``: body on a grid of balls.
 * ``CYLINDER``: a round can (electrolytic, crystal can) standing on its base.
+* ``BOARD``: a breakout or module PCB: outline (optional corner radius), mounting
+  holes and pin headers, positioned in millimetres from the board's lower-left
+  corner as a photo is read. Lists its subparts (the board, each header).
 
 A pin count that disagrees with the pads per edge fails the build, never adjusts it.
 """
@@ -26,7 +29,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-TEMPLATES = ("BOX", "CHIP", "NOLEAD", "GULL2", "GULL4", "BGA", "CYLINDER")
+TEMPLATES = ("BOX", "CHIP", "NOLEAD", "GULL2", "GULL4", "BGA", "CYLINDER", "BOARD")
 EDGES = ("top", "bottom", "left", "right")
 
 
@@ -40,6 +43,8 @@ class Built:
     bbox: tuple[float, float, float]
     pins: int
     notes: list[str] = field(default_factory=list)
+    #: The pieces this part is made of, each ``{name, kind, bbox_mm}`` (R14).
+    parts: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _num(dims: dict[str, Any], key: str, default: float | None = None) -> float:
@@ -228,6 +233,88 @@ def cylinder(dims: dict[str, Any], pins: dict[str, Any], pin_count: int | None) 
     return Built(script, (diameter, diameter, height), int(pin_count or 0))
 
 
+_HEADER_PIN = 0.64  # square pin, 2.54 mm headers
+_HEADER_BODY = 2.5  # plastic housing height
+
+
+def board(dims: dict[str, Any], pins: dict[str, Any], pin_count: int | None) -> Built:
+    length, width = _num(dims, "length"), _num(dims, "width")
+    thick = _num(dims, "thickness", 1.6)
+    radius = float(dims.get("corner_radius") or 0)
+    if radius < 0 or 2 * radius >= min(length, width):
+        raise TemplateError("corner_radius must be under half the board's smaller side")
+    holes = dims.get("holes") or []
+    headers = pins.get("headers") or []
+    if not isinstance(holes, list) or not isinstance(headers, list):
+        raise TemplateError("dims.holes and pins.headers are lists")
+    ox, oy = -length / 2, -width / 2  # lower-left corner to centred coordinates
+    lines = [_HEAD, f"result = {_blk(length, width, thick)}\n"]
+    if radius:
+        lines.append(f"result = result.edges('|Z').fillet({radius})\n")
+    parts: list[dict[str, Any]] = [
+        {"name": "board", "kind": "pcb", "bbox_mm": [length, width, thick]}
+    ]
+    for i, hole in enumerate(holes):
+        d = _num(hole, "diameter")
+        x, y = _num(hole, "x"), _num(hole, "y")
+        if not (d / 2 < x < length - d / 2 and d / 2 < y < width - d / 2):
+            raise TemplateError(f"hole {i + 1} at ({x}, {y}) does not fit on the board")
+        lines.append(
+            f"result = result.cut(cq.Workplane('XY').circle({d / 2}).extrude({thick})"
+            f".translate(({ox + x}, {oy + y}, 0)))\n"
+        )
+    top = thick
+    total = 0
+    for i, head in enumerate(headers):
+        n = _count(head, "count")
+        rows = _count(head, "rows") or 1
+        if n == 0 or rows not in (1, 2):
+            raise TemplateError(f"header {i + 1} needs count and 1 or 2 rows")
+        pitch = _num(head, "pitch", 2.54)
+        tall = _num(head, "height", 8.5)  # pin tip above the board
+        along_y = str(head.get("axis") or "x") == "y"
+        x, y = _num(head, "x"), _num(head, "y")  # first pin, from the lower-left corner
+        span = (n - 1) * pitch + pitch  # housing reaches half a pitch past each end
+        depth = rows * pitch
+        hx = (depth if along_y else span) / 2
+        hy = (span if along_y else depth) / 2
+        cx = x + ((rows - 1) * pitch / 2 if along_y else (n - 1) * pitch / 2)
+        cy = y + ((n - 1) * pitch / 2 if along_y else (rows - 1) * pitch / 2)
+        eps = 1e-6  # a header flush with the edge must not fail on rounding
+        if cx - hx < -eps or cx + hx > length + eps or cy - hy < -eps or cy + hy > width + eps:
+            raise TemplateError(f"header {i + 1} does not fit on the board")
+        bx, by = 2 * hx, 2 * hy
+        lines.append(
+            f"result = result.union({_blk(bx, by, _HEADER_BODY, (ox + cx, oy + cy, thick))})\n"
+        )
+        pts = [
+            (
+                round(ox + x + (r * pitch if along_y else k * pitch), 6),
+                round(oy + y + (k * pitch if along_y else r * pitch), 6),
+            )
+            for k in range(n)
+            for r in range(rows)
+        ]
+        lines.append(
+            f"result = result.union(cq.Workplane('XY').pushPoints({pts})"
+            f".rect({_HEADER_PIN}, {_HEADER_PIN}).extrude({tall}).translate((0, 0, {thick})))\n"
+        )
+        total += n * rows
+        top = max(top, thick + tall)
+        parts.append(
+            {
+                "name": str(head.get("name") or f"J{i + 1}"),
+                "kind": "pin_header",
+                "pins": n * rows,
+                "pitch_mm": pitch,
+                "bbox_mm": [round(bx, 6), round(by, 6), tall],
+            }
+        )
+    _check_pins(total, pin_count)
+    notes = [f"{len(holes)} mounting hole(s)", f"{len(headers)} header(s), {total} pins"]
+    return Built("".join(lines), (length, width, round(top, 6)), total, notes, parts)
+
+
 _BUILDERS = {
     "BOX": box,
     "CHIP": chip,
@@ -236,6 +323,7 @@ _BUILDERS = {
     "GULL4": gull4,
     "BGA": bga,
     "CYLINDER": cylinder,
+    "BOARD": board,
 }
 
 

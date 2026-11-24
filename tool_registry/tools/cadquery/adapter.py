@@ -958,7 +958,11 @@ class CadqueryServer(McpToolServer):
                     "pad_length, pad_width, exposed_pad), GULL2 (SOIC/SOT: pins.per_side or "
                     "left/right, dims pitch, span tip to tip, standoff, lead_width), GULL4 "
                     "(QFP: span_x, span_y), BGA (pins.rows, cols, dims pitch, ball_diameter) "
-                    "or CYLINDER (diameter, height). dims are millimetres: length (x), width "
+                    "CYLINDER (diameter, height) or BOARD (a module PCB: dims thickness, "
+                    "corner_radius, holes [{x, y, diameter}]; pins.headers [{x, y, count, "
+                    "rows, pitch, axis x|y, height, name}], positions in mm from the board's "
+                    "lower-left corner, first pin; returns its subparts in parts). "
+                    "dims are millimetres: length (x), width "
                     "(y), height (z, above the seating plane). A pin_count that disagrees "
                     "with the pads per edge fails the build. The built part is measured over "
                     "every solid and must match the template's size within 0.02 mm, or it is "
@@ -972,7 +976,16 @@ class CadqueryServer(McpToolServer):
                     "type": "object",
                     "properties": {
                         "template": {
-                            "enum": ["BOX", "CHIP", "NOLEAD", "GULL2", "GULL4", "BGA", "CYLINDER"]
+                            "enum": [
+                                "BOX",
+                                "CHIP",
+                                "NOLEAD",
+                                "GULL2",
+                                "GULL4",
+                                "BGA",
+                                "CYLINDER",
+                                "BOARD",
+                            ]
                         },
                         "dims": {"type": "object"},
                         "pins": {"type": "object"},
@@ -2076,6 +2089,7 @@ class CadqueryServer(McpToolServer):
             "size_check": {"asked_mm": list(built.bbox), "off_mm": off, "passed": True},
             "pins": built.pins,
             "notes": built.notes,
+            "parts": built.parts,
             "volume_mm3": result.get("volume_mm3"),
             "geometry": {
                 "generator": "package_template",
