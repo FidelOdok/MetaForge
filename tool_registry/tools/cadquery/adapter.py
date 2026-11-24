@@ -961,7 +961,11 @@ class CadqueryServer(McpToolServer):
                     "CYLINDER (diameter, height) or BOARD (a module PCB: dims thickness, "
                     "corner_radius, holes [{x, y, diameter}]; pins.headers [{x, y, count, "
                     "rows, pitch, axis x|y, height, name}], positions in mm from the board's "
-                    "lower-left corner, first pin; returns its subparts in parts). "
+                    "lower-left corner, first pin; returns its subparts in parts), "
+                    "SHIELDED_MODULE or SPEAKER: dims.subparts must say, for every expected "
+                    "subpart (module: board, can, antenna, pads; speaker: frame, magnet, cone, "
+                    "gasket, terminals), its sizes or visible: false; a subpart not mentioned is "
+                    "refused, never invented. "
                     "dims are millimetres: length (x), width "
                     "(y), height (z, above the seating plane). A pin_count that disagrees "
                     "with the pads per edge fails the build. The built part is measured over "
@@ -985,6 +989,8 @@ class CadqueryServer(McpToolServer):
                                 "BGA",
                                 "CYLINDER",
                                 "BOARD",
+                                "SHIELDED_MODULE",
+                                "SPEAKER",
                             ]
                         },
                         "dims": {"type": "object"},

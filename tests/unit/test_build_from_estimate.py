@@ -223,3 +223,115 @@ def test_a_part_is_as_good_as_its_worst_mechanical_subpart() -> None:
         ],
     }
     assert part_fidelity(tree) == "datasheet_built"
+
+
+ESP32 = {
+    "length": 18.0,
+    "width": 25.5,
+    "subparts": {
+        "board": {"visible": True, "thickness": 0.8},
+        "can": {"visible": True, "length": 15.8, "width": 17.3, "height": 2.3, "x": 1.1, "y": 0.6},
+        "antenna": {"visible": True, "end": "top", "depth": 6.0},
+        "pads": {
+            "visible": True,
+            "pitch": 1.27,
+            "per_edge": {"left": 14, "right": 14, "bottom": 10},
+        },
+    },
+}
+SPEAKER = {
+    "subparts": {
+        "frame": {"visible": True, "diameter": 40, "height": 6},
+        "magnet": {"visible": True, "diameter": 20, "height": 8},
+        "cone": {"visible": True, "diameter": 34},
+        "gasket": {"visible": True, "thickness": 0.5, "width": 2},
+        "terminals": {"visible": True, "count": 2},
+    }
+}
+
+
+def test_a_shielded_module_has_its_expected_subparts() -> None:
+    """Built in the CadQuery container: 18 x 25.5 x 3.1 exactly, board + can, no overlap."""
+    built = build("SHIELDED_MODULE", ESP32, {}, 38)
+    assert built.bbox == (18.0, 25.5, 3.1) and built.pins == 38
+    (tree,) = built.parts
+    assert [c["name"] for c in tree["children"]] == ["antenna", "can", "pads"]
+    assert tree["children"][0]["shape"] == "area" and [s["name"] for s in built.solids] == [
+        "board",
+        "can",
+    ]
+
+
+def test_a_subpart_the_reading_cannot_see_is_marked_never_made() -> None:
+    sub = {**ESP32["subparts"], "can": {"visible": False}}
+    built = build("SHIELDED_MODULE", {**ESP32, "subparts": sub}, {}, None)
+    can = next(c for c in built.parts[0]["children"] if c["name"] == "can")
+    assert can["status"] == "not_visible" and "size" not in can
+    assert built.bbox == (18.0, 25.5, 0.8) and "can not visible in the reading" in built.notes
+
+
+def test_a_speaker_stacks_magnet_frame_and_gasket() -> None:
+    """Built in the container: 40 x 40 x 14.5, six named solids, no overlaps."""
+    built = build("SPEAKER", SPEAKER, {}, 2)
+    assert built.bbox == (40, 40, 14.5)
+    assert [s["name"] for s in built.solids] == [
+        "frame",
+        "magnet",
+        "cone",
+        "gasket",
+        "terminal_1",
+        "terminal_2",
+    ]
+    front = {**SPEAKER["subparts"], "magnet": {"visible": False}, "terminals": {"visible": False}}
+    seen_front = build("SPEAKER", {"subparts": front}, {}, None)
+    assert seen_front.bbox == (40, 40, 6.5)
+    hidden = [
+        c["name"] for c in seen_front.parts[0]["children"] if c.get("status") == "not_visible"
+    ]
+    assert hidden == ["magnet", "terminals"]
+
+
+@pytest.mark.parametrize(
+    ("template", "dims", "why"),
+    [
+        (
+            "SHIELDED_MODULE",
+            {**ESP32, "subparts": {k: v for k, v in ESP32["subparts"].items() if k != "antenna"}},
+            "does not say whether antenna is visible",
+        ),
+        (
+            "SHIELDED_MODULE",
+            {**ESP32, "subparts": {**ESP32["subparts"], "lid": {"visible": True}}},
+            "no subpart lid",
+        ),
+        (
+            "SHIELDED_MODULE",
+            {
+                **ESP32,
+                "subparts": {**ESP32["subparts"], "can": {**ESP32["subparts"]["can"], "y": 6.0}},
+            },
+            "covers the antenna",
+        ),
+        ("SHIELDED_MODULE", {"length": 18, "width": 25.5}, "needs dims.subparts"),
+        (
+            "SPEAKER",
+            {"subparts": {**SPEAKER["subparts"], "frame": {"visible": False}}},
+            "must be visible",
+        ),
+        (
+            "SPEAKER",
+            {
+                "subparts": {
+                    **SPEAKER["subparts"],
+                    "gasket": {"visible": True, "thickness": 0.5, "width": 5},
+                }
+            },
+            "cover the cone",
+        ),
+    ],
+)
+def test_a_reading_that_leaves_something_out_is_refused(
+    template: str, dims: dict[str, Any], why: str
+) -> None:
+    with pytest.raises(TemplateError, match=why):
+        build(template, dims, {}, None)

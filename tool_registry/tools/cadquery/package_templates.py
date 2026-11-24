@@ -26,10 +26,22 @@ A pin count that disagrees with the pads per edge fails the build, never adjusts
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
-TEMPLATES = ("BOX", "CHIP", "NOLEAD", "GULL2", "GULL4", "BGA", "CYLINDER", "BOARD")
+TEMPLATES = (
+    "BOX",
+    "CHIP",
+    "NOLEAD",
+    "GULL2",
+    "GULL4",
+    "BGA",
+    "CYLINDER",
+    "BOARD",
+    "SHIELDED_MODULE",
+    "SPEAKER",
+)
 EDGES = ("top", "bottom", "left", "right")
 
 
@@ -379,6 +391,316 @@ def board(dims: dict[str, Any], pins: dict[str, Any], pin_count: int | None) -> 
     return built
 
 
+#: R14.2: the subparts each part type is expected to have, ``name -> kind``. The
+#: reading says, for every one, its sizes or ``visible: false``; a subpart it does
+#: not mention is refused, never invented.
+EXPECTED_SUBPARTS: dict[str, dict[str, str]] = {
+    "SHIELDED_MODULE": {"board": "pcb", "can": "shield", "antenna": "antenna", "pads": "terminal"},
+    "SPEAKER": {
+        "frame": "frame",
+        "magnet": "magnet",
+        "cone": "cone",
+        "gasket": "seal",
+        "terminals": "terminal",
+    },
+}
+
+
+def read_subparts(template: str, dims: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The reading of each expected subpart; refuses a missing, unknown or vague one."""
+    expected = EXPECTED_SUBPARTS[template]
+    given = dims.get("subparts")
+    if not isinstance(given, dict):
+        raise TemplateError(
+            f"{template} needs dims.subparts with each of {', '.join(expected)}: its sizes, "
+            "or visible: false (a hidden subpart is never invented)"
+        )
+    unknown = sorted(set(given) - set(expected))
+    if unknown:
+        raise TemplateError(f"{template} has no subpart {', '.join(unknown)}")
+    missing = [name for name in expected if name not in given]
+    if missing:
+        raise TemplateError(
+            f"the reading does not say whether {', '.join(missing)} "
+            f"{'is' if len(missing) == 1 else 'are'} visible: give the sizes or "
+            "visible: false; a hidden subpart is never invented"
+        )
+    out: dict[str, dict[str, Any]] = {}
+    for name, reading in given.items():
+        if not isinstance(reading, dict) or not isinstance(reading.get("visible"), bool):
+            raise TemplateError(f"subparts.{name} needs visible: true or false")
+        out[name] = reading
+    return out
+
+
+def _hidden(name: str, kind: str) -> dict[str, Any]:
+    return {"name": name, "kind": kind, "status": "not_visible", "children": []}
+
+
+def _merge(solids: list[dict[str, Any]]) -> str:
+    """One script uniting every solid at its location, for the size check."""
+    lines = [_HEAD]
+    for i, solid in enumerate(solids):
+        body = solid["script"].replace(_HEAD, "", 1).replace("result", f"s{i}")
+        at = solid["location"]
+        lines.append(body)
+        moved = f"s{i}.translate(({at['x']}, {at['y']}, {at['z']}))"
+        lines.append(f"result = {moved}\n" if i == 0 else f"result = result.union({moved})\n")
+    return "".join(lines)
+
+
+def shielded_module(dims: dict[str, Any], pins: dict[str, Any], pin_count: int | None) -> Built:
+    seen = read_subparts("SHIELDED_MODULE", dims)
+    kinds = EXPECTED_SUBPARTS["SHIELDED_MODULE"]
+    if not seen["board"]["visible"]:
+        raise TemplateError("the board is the module's outline: it must be visible")
+    length, width = _num(dims, "length"), _num(dims, "width")
+    thick = _num(seen["board"], "thickness", 0.8)
+    ox, oy = -length / 2, -width / 2
+    board_node: dict[str, Any] = {
+        "name": "board",
+        "kind": "pcb",
+        "shape": "box",
+        "pose": [0.0, 0.0, 0.0],
+        "size": [length, width, thick],
+        "children": [],
+    }
+    solids = [
+        {
+            "name": "board",
+            "script": _HEAD + f"result = {_blk(length, width, thick)}\n",
+            "location": {"x": 0, "y": 0, "z": 0},
+        }
+    ]
+    top = thick
+    antenna_foot = None
+    antenna = seen["antenna"]
+    if antenna["visible"]:
+        end = str(antenna.get("end") or "top")
+        depth = _num(antenna, "depth")
+        span: dict[str, tuple[float, float, float, float]] = {
+            "top": (0.0, width - depth, length, width),
+            "bottom": (0.0, 0.0, length, depth),
+            "left": (0.0, 0.0, depth, width),
+            "right": (length - depth, 0.0, length, width),
+        }
+        if end not in span or depth >= (width if end in ("top", "bottom") else length):
+            raise TemplateError("antenna.end is top, bottom, left or right, depth inside the board")
+        antenna_foot = span[end]
+        a = antenna_foot
+        board_node["children"].append(
+            {
+                "name": "antenna",
+                "kind": "antenna",
+                "shape": "area",
+                "pose": [round(ox + (a[0] + a[2]) / 2, 6), round(oy + (a[1] + a[3]) / 2, 6), thick],
+                "size": [round(a[2] - a[0], 6), round(a[3] - a[1], 6), 0.0],
+                "note": "a keep-out area on the board, not a solid",
+                "children": [],
+            }
+        )
+    else:
+        board_node["children"].append(_hidden("antenna", kinds["antenna"]))
+    can = seen["can"]
+    if can["visible"]:
+        cl, cw, ch = _num(can, "length"), _num(can, "width"), _num(can, "height")
+        cx0, cy0 = float(can.get("x") or 0.0), float(can.get("y") or 0.0)
+        foot = (cx0, cy0, cx0 + cl, cy0 + cw)
+        eps = 1e-6
+        if foot[0] < -eps or foot[1] < -eps or foot[2] > length + eps or foot[3] > width + eps:
+            raise TemplateError("the can does not fit on the board")
+        if antenna_foot and _overlap(foot, antenna_foot):
+            raise TemplateError("the can covers the antenna area")
+        at = {"x": round(ox + cx0 + cl / 2, 6), "y": round(oy + cy0 + cw / 2, 6), "z": thick}
+        solids.append(
+            {"name": "can", "script": _HEAD + f"result = {_blk(cl, cw, ch)}\n", "location": at}
+        )
+        board_node["children"].append(
+            {
+                "name": "can",
+                "kind": "shield",
+                "shape": "box",
+                "pose": [at["x"], at["y"], at["z"]],
+                "size": [cl, cw, ch],
+                "children": [],
+            }
+        )
+        top = thick + ch
+    else:
+        board_node["children"].append(_hidden("can", kinds["can"]))
+    pads = seen["pads"]
+    total = 0
+    if pads["visible"]:
+        pitch = _num(pads, "pitch")
+        per_edge = pads.get("per_edge") or {}
+        for edge in per_edge:
+            if edge not in EDGES:
+                raise TemplateError("pads.per_edge names top, bottom, left or right")
+        for edge, n in per_edge.items():
+            n = _count(per_edge, edge)
+            side = length if edge in ("top", "bottom") else width
+            if n and (n - 1) * pitch >= side:
+                raise TemplateError(f"{n} pads at {pitch} mm do not fit along the {edge} edge")
+            total += n
+        board_node["children"].append(
+            {
+                "name": "pads",
+                "kind": "terminal",
+                "shape": "castellated_pads",
+                "per_edge": dict(per_edge),
+                "pitch_mm": pitch,
+                "note": "plated half-holes in the board's edge, part of the board solid",
+                "children": [],
+            }
+        )
+        _check_pins(total, pin_count)
+    else:
+        board_node["children"].append(_hidden("pads", kinds["pads"]))
+    notes = [f"{name} not visible in the reading" for name, r in seen.items() if not r["visible"]]
+    built = Built(_merge(solids), (length, width, round(top, 6)), total, notes, [board_node])
+    built.solids = solids
+    return built
+
+
+def speaker(dims: dict[str, Any], pins: dict[str, Any], pin_count: int | None) -> Built:
+    seen = read_subparts("SPEAKER", dims)
+    kinds = EXPECTED_SUBPARTS["SPEAKER"]
+    frame = seen["frame"]
+    if not frame["visible"]:
+        raise TemplateError("the frame is the speaker's outline: it must be visible")
+    fd, fh = _num(frame, "diameter"), _num(frame, "height")
+    magnet, cone = seen["magnet"], seen["cone"]
+    gasket, terms = seen["gasket"], seen["terminals"]
+    md = mh = 0.0
+    if magnet["visible"]:
+        md, mh = _num(magnet, "diameter"), _num(magnet, "height")
+        if md >= fd:
+            raise TemplateError("the magnet must be narrower than the frame")
+    th = 1.5 if terms["visible"] else 0.0
+    base = max(mh, th)  # the frame's back face; the magnet and terminals sit below it
+    solids: list[dict[str, Any]] = []
+    children: list[dict[str, Any]] = []
+    cone_d = _num(cone, "diameter") if cone["visible"] else round(fd * 0.8, 4)
+    if cone_d >= fd:
+        raise TemplateError("the cone must be narrower than the frame")
+    depth = round(fh * 0.6, 4)
+    cup = (
+        f"result = cq.Workplane('XY').circle({fd / 2}).extrude({fh})"
+        f".cut(cq.Workplane('XY').circle({cone_d / 2}).extrude({depth})"
+        f".translate((0, 0, {round(fh - depth, 6)})))\n"
+    )
+    solids.append({"name": "frame", "script": _HEAD + cup, "location": {"x": 0, "y": 0, "z": base}})
+    frame_node: dict[str, Any] = {
+        "name": "frame",
+        "kind": "frame",
+        "shape": "cup",
+        "pose": [0.0, 0.0, base],
+        "size": [fd, fd, fh],
+        "children": children,
+    }
+    top = base + fh
+    if magnet["visible"]:
+        solids.append(
+            {
+                "name": "magnet",
+                "script": _HEAD + f"result = cq.Workplane('XY').circle({md / 2}).extrude({mh})\n",
+                "location": {"x": 0, "y": 0, "z": round(base - mh, 6)},
+            }
+        )
+        children.append(
+            {
+                "name": "magnet",
+                "kind": "magnet",
+                "shape": "cylinder",
+                "pose": [0.0, 0.0, round(-mh, 6)],
+                "size": [md, md, mh],
+                "children": [],
+            }
+        )
+    else:
+        children.append(_hidden("magnet", kinds["magnet"]))
+    if cone["visible"]:
+        cone_h = round(depth * 0.8, 4)
+        script = (
+            _HEAD
+            + "result = cq.Workplane('XY').add(cq.Solid.makeCone("
+            + f"{round(cone_d * 0.15, 4)}, {round(cone_d / 2 - 0.05, 4)}, {cone_h}))\n"
+        )
+        z = round(base + fh - depth, 6)
+        solids.append({"name": "cone", "script": script, "location": {"x": 0, "y": 0, "z": z}})
+        children.append(
+            {
+                "name": "cone",
+                "kind": "cone",
+                "shape": "cone",
+                "pose": [0.0, 0.0, round(fh - depth, 6)],
+                "size": [cone_d, cone_d, cone_h],
+                "children": [],
+            }
+        )
+    else:
+        children.append(_hidden("cone", kinds["cone"]))
+    if gasket["visible"]:
+        gt, gw = _num(gasket, "thickness"), _num(gasket, "width")
+        inner = fd - 2 * gw
+        if inner <= cone_d - 1e-6:
+            raise TemplateError("the gasket ring would cover the cone")
+        ring = f"result = cq.Workplane('XY').circle({fd / 2}).circle({inner / 2}).extrude({gt})\n"
+        solids.append(
+            {"name": "gasket", "script": _HEAD + ring, "location": {"x": 0, "y": 0, "z": top}}
+        )
+        children.append(
+            {
+                "name": "gasket",
+                "kind": "seal",
+                "shape": "ring",
+                "pose": [0.0, 0.0, fh],
+                "size": [fd, fd, gt],
+                "children": [],
+            }
+        )
+        top += gt
+    else:
+        children.append(_hidden("gasket", kinds["gasket"]))
+    total = 0
+    if terms["visible"]:
+        count = _count(terms, "count") or 2
+        r = (max(md, cone_d * 0.3) / 2 + fd / 2) / 2
+        if md and r - 1.0 <= md / 2:
+            raise TemplateError("no room for the terminals between the magnet and the rim")
+        for k in range(count):
+            angle = 2 * math.pi * k / count
+            x, y = round(r * math.cos(angle), 6), round(r * math.sin(angle), 6)
+            solids.append(
+                {
+                    "name": f"terminal_{k + 1}",
+                    "script": _HEAD + f"result = {_blk(2.0, 1.0, th)}\n",
+                    "location": {"x": x, "y": y, "z": round(base - th, 6)},
+                }
+            )
+        children.append(
+            {
+                "name": "terminals",
+                "kind": "terminal",
+                "shape": "tabs",
+                "count": count,
+                "pose": [0.0, 0.0, round(-th, 6)],
+                "size": [2.0, 1.0, th],
+                "children": [],
+            }
+        )
+        total = count
+        _check_pins(total, pin_count)
+    else:
+        children.append(_hidden("terminals", kinds["terminals"]))
+    notes = [f"{name} not visible in the reading" for name, rd in seen.items() if not rd["visible"]]
+    if not cone["visible"]:
+        notes.append("the cone opening is drawn at 80% of the frame, an assumption")
+    built = Built(_merge(solids), (fd, fd, round(top, 6)), total, notes, [frame_node])
+    built.solids = solids
+    return built
+
+
 _BUILDERS = {
     "BOX": box,
     "CHIP": chip,
@@ -388,6 +710,8 @@ _BUILDERS = {
     "BGA": bga,
     "CYLINDER": cylinder,
     "BOARD": board,
+    "SHIELDED_MODULE": shielded_module,
+    "SPEAKER": speaker,
 }
 
 
