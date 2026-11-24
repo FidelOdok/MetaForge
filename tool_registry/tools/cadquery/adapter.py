@@ -996,6 +996,12 @@ class CadqueryServer(McpToolServer):
                             "default": "photo_estimate",
                         },
                         "include_step_base64": {"type": "boolean", "default": False},
+                        "assembly": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "A part with several solids (BOARD) is also "
+                            "written as a STEP assembly with one named child per subpart.",
+                        },
                     },
                     "required": ["template", "dims"],
                 },
@@ -2031,7 +2037,11 @@ class CadqueryServer(McpToolServer):
             CadqueryOperations,
             script_isolation_mode,
         )
-        from tool_registry.tools.cadquery.package_templates import TemplateError, build
+        from tool_registry.tools.cadquery.package_templates import (
+            TemplateError,
+            build,
+            part_fidelity,
+        )
 
         pin_count = arguments.get("pin_count")
         if pin_count is not None and (
@@ -2061,6 +2071,7 @@ class CadqueryServer(McpToolServer):
             script_isolation=isolation,
             script_runner=self.script_runner() if isolation == "process" else None,
         )
+        fidelity = str(arguments.get("fidelity") or "photo_estimate")
         result = await asyncio.to_thread(ops.execute_script, built.script, output_path, None)
         box = result.get("bounding_box") or {}
         made = (
@@ -2082,14 +2093,14 @@ class CadqueryServer(McpToolServer):
                 f"{built.bbox[0]} x {built.bbox[1]} x {built.bbox[2]} mm asked for (off by up "
                 f"to {max(off)} mm, over {_SIZE_TOLERANCE_MM} mm), so it was not saved"
             )
-        out = {
+        out: dict[str, Any] = {
             "cad_file": result.get("cad_file"),
             "template": str(arguments.get("template")).upper(),
             "size_mm": [round(v, 4) for v in made],
             "size_check": {"asked_mm": list(built.bbox), "off_mm": off, "passed": True},
             "pins": built.pins,
             "notes": built.notes,
-            "parts": built.parts,
+            "parts": [],
             "volume_mm3": result.get("volume_mm3"),
             "geometry": {
                 "generator": "package_template",
@@ -2098,10 +2109,50 @@ class CadqueryServer(McpToolServer):
                     "dims": arguments.get("dims") or {},
                     "pins": arguments.get("pins") or {},
                 },
-                "fidelity": str(arguments.get("fidelity") or "photo_estimate"),
+                "fidelity": fidelity,
             },
             "script": built.script,
         }
+        if built.parts:
+            # R14.5: every node carries a fidelity (the one asked for unless the
+            # node says otherwise); the part's is the worst mechanical one.
+            def stamp(node: dict[str, Any]) -> dict[str, Any]:
+                return {
+                    **node,
+                    "fidelity": node.get("fidelity") or fidelity,
+                    "children": [stamp(c) for c in node.get("children") or []],
+                }
+
+            out["parts"] = [stamp(n) for n in built.parts]
+            out["geometry"]["fidelity"] = part_fidelity(out["parts"][0])
+        if len(built.solids) > 1 and arguments.get("assembly", True):
+            # R14.7: a STEP assembly with one named child per solid subpart,
+            # checked for overlaps by create_assembly's interference check.
+            files = []
+            for solid in built.solids:
+                piece = await asyncio.to_thread(
+                    ops.execute_script, solid["script"], f"{stem}-{solid['name']}.step", None
+                )
+                files.append(
+                    {
+                        "name": solid["name"],
+                        "file": piece["cad_file"],
+                        "location": solid["location"],
+                    }
+                )
+            assy = await asyncio.to_thread(
+                ops.create_assembly, files, None, f"{stem}-assembly.step"
+            )
+            if not assy.get("interference_check_passed", True):
+                raise ValueError(
+                    f"geometry.build_from_estimate: subparts overlap: {assy.get('interferences')}"
+                )
+            out["merged_cad_file"] = out["cad_file"]
+            out["cad_file"] = assy["assembly_file"]
+            out["assembly"] = {
+                "children": [s["name"] for s in built.solids],
+                "interference_check_passed": True,
+            }
         if "step_base64" in result:
             out["step_base64"] = result["step_base64"]
         logger.info("build_from_estimate", template=out["template"], size=out["size_mm"])

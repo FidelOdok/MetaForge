@@ -43,8 +43,11 @@ class Built:
     bbox: tuple[float, float, float]
     pins: int
     notes: list[str] = field(default_factory=list)
-    #: The pieces this part is made of, each ``{name, kind, bbox_mm}`` (R14).
+    #: The subpart tree (R14.1): root nodes ``{name, kind, shape, pose, size, children}``,
+    #: pose relative to the parent, millimetres.
     parts: list[dict[str, Any]] = field(default_factory=list)
+    #: One ``{name, script, location}`` per separate solid, for a named STEP assembly.
+    solids: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _num(dims: dict[str, Any], key: str, default: float | None = None) -> float:
@@ -237,6 +240,33 @@ _HEADER_PIN = 0.64  # square pin, 2.54 mm headers
 _HEADER_BODY = 2.5  # plastic housing height
 
 
+#: Worst first, as the library ranks geometry (twin_core.library GEOMETRY_FIDELITY).
+FIDELITY_ORDER = ("outline", "photo_estimate", "kicad_generic", "datasheet_built", "maker_cad")
+#: Subpart kinds that decide how a part fits (R14.5): the part's fidelity is the
+#: worst among these.
+MECHANICAL_KINDS = frozenset({"body", "pcb", "hole", "connector", "frame", "shield"})
+
+
+def part_fidelity(tree: dict[str, Any]) -> str:
+    """The worst fidelity among the tree's mechanically relevant nodes."""
+    found: list[str] = []
+
+    def walk(node: dict[str, Any]) -> None:
+        if node.get("kind") in MECHANICAL_KINDS and node.get("fidelity") in FIDELITY_ORDER:
+            found.append(node["fidelity"])
+        for child in node.get("children") or []:
+            walk(child)
+
+    walk(tree)
+    return min(found, key=FIDELITY_ORDER.index) if found else "outline"
+
+
+def _overlap(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> bool:
+    """Two footprints (x0, y0, x1, y1) share area."""
+    eps = 1e-6
+    return a[0] < b[2] - eps and b[0] < a[2] - eps and a[1] < b[3] - eps and b[1] < a[3] - eps
+
+
 def board(dims: dict[str, Any], pins: dict[str, Any], pin_count: int | None) -> Built:
     length, width = _num(dims, "length"), _num(dims, "width")
     thick = _num(dims, "thickness", 1.6)
@@ -248,21 +278,36 @@ def board(dims: dict[str, Any], pins: dict[str, Any], pin_count: int | None) -> 
     if not isinstance(holes, list) or not isinstance(headers, list):
         raise TemplateError("dims.holes and pins.headers are lists")
     ox, oy = -length / 2, -width / 2  # lower-left corner to centred coordinates
-    lines = [_HEAD, f"result = {_blk(length, width, thick)}\n"]
+    pcb = [f"result = {_blk(length, width, thick)}\n"]
     if radius:
-        lines.append(f"result = result.edges('|Z').fillet({radius})\n")
-    parts: list[dict[str, Any]] = [
-        {"name": "board", "kind": "pcb", "bbox_mm": [length, width, thick]}
-    ]
+        pcb.append(f"result = result.edges('|Z').fillet({radius})\n")
+    children: list[dict[str, Any]] = []
+    footprints: list[tuple[str, tuple[float, float, float, float]]] = []
     for i, hole in enumerate(holes):
         d = _num(hole, "diameter")
         x, y = _num(hole, "x"), _num(hole, "y")
         if not (d / 2 < x < length - d / 2 and d / 2 < y < width - d / 2):
             raise TemplateError(f"hole {i + 1} at ({x}, {y}) does not fit on the board")
-        lines.append(
+        pcb.append(
             f"result = result.cut(cq.Workplane('XY').circle({d / 2}).extrude({thick})"
             f".translate(({ox + x}, {oy + y}, 0)))\n"
         )
+        name = str(hole.get("name") or f"H{i + 1}")
+        children.append(
+            {
+                "name": name,
+                "kind": "hole",
+                "shape": "cylinder",
+                "pose": [round(ox + x, 6), round(oy + y, 6), 0.0],
+                "size": [d, d, thick],
+                "children": [],
+            }
+        )
+        footprints.append((f"hole {name}", (x - d / 2, y - d / 2, x + d / 2, y + d / 2)))
+    solids: list[dict[str, Any]] = [
+        {"name": "board", "script": _HEAD + "".join(pcb), "location": {"x": 0, "y": 0, "z": 0}}
+    ]
+    merged = [_HEAD, *pcb]
     top = thick
     total = 0
     for i, head in enumerate(headers):
@@ -274,45 +319,64 @@ def board(dims: dict[str, Any], pins: dict[str, Any], pin_count: int | None) -> 
         tall = _num(head, "height", 8.5)  # pin tip above the board
         along_y = str(head.get("axis") or "x") == "y"
         x, y = _num(head, "x"), _num(head, "y")  # first pin, from the lower-left corner
-        span = (n - 1) * pitch + pitch  # housing reaches half a pitch past each end
-        depth = rows * pitch
-        hx = (depth if along_y else span) / 2
-        hy = (span if along_y else depth) / 2
+        span, depth = n * pitch, rows * pitch  # housing reaches half a pitch past each end
+        bx, by = (depth, span) if along_y else (span, depth)
         cx = x + ((rows - 1) * pitch / 2 if along_y else (n - 1) * pitch / 2)
         cy = y + ((n - 1) * pitch / 2 if along_y else (rows - 1) * pitch / 2)
+        foot = (cx - bx / 2, cy - by / 2, cx + bx / 2, cy + by / 2)
         eps = 1e-6  # a header flush with the edge must not fail on rounding
-        if cx - hx < -eps or cx + hx > length + eps or cy - hy < -eps or cy + hy > width + eps:
+        if foot[0] < -eps or foot[1] < -eps or foot[2] > length + eps or foot[3] > width + eps:
             raise TemplateError(f"header {i + 1} does not fit on the board")
-        bx, by = 2 * hx, 2 * hy
-        lines.append(
-            f"result = result.union({_blk(bx, by, _HEADER_BODY, (ox + cx, oy + cy, thick))})\n"
-        )
-        pts = [
+        name = str(head.get("name") or f"J{i + 1}")
+        for other, other_foot in footprints:
+            if _overlap(foot, other_foot):
+                raise TemplateError(f"header {name} overlaps {other}")
+        footprints.append((f"header {name}", foot))
+        # Local frame: the housing's centre on the seating plane.
+        local_pts = [
             (
-                round(ox + x + (r * pitch if along_y else k * pitch), 6),
-                round(oy + y + (k * pitch if along_y else r * pitch), 6),
+                round((r * pitch if along_y else k * pitch) - (cx - x), 6),
+                round((k * pitch if along_y else r * pitch) - (cy - y), 6),
             )
             for k in range(n)
             for r in range(rows)
         ]
-        lines.append(
-            f"result = result.union(cq.Workplane('XY').pushPoints({pts})"
-            f".rect({_HEADER_PIN}, {_HEADER_PIN}).extrude({tall}).translate((0, 0, {thick})))\n"
+        local = (
+            f"result = {_blk(bx, by, _HEADER_BODY)}\n"
+            f"result = result.union(cq.Workplane('XY').pushPoints({local_pts})"
+            f".rect({_HEADER_PIN}, {_HEADER_PIN}).extrude({tall}))\n"
         )
+        at = {"x": round(ox + cx, 6), "y": round(oy + cy, 6), "z": thick}
+        solids.append({"name": name, "script": _HEAD + local, "location": at})
+        merged.append(local.replace("result", f"h{i}"))
+        merged.append(f"result = result.union(h{i}.translate(({at['x']}, {at['y']}, {at['z']})))\n")
         total += n * rows
         top = max(top, thick + tall)
-        parts.append(
+        children.append(
             {
-                "name": str(head.get("name") or f"J{i + 1}"),
-                "kind": "pin_header",
+                "name": name,
+                "kind": "connector",
+                "shape": "pin_header",
+                "pose": [at["x"], at["y"], at["z"]],
+                "size": [round(bx, 6), round(by, 6), tall],
                 "pins": n * rows,
                 "pitch_mm": pitch,
-                "bbox_mm": [round(bx, 6), round(by, 6), tall],
+                "children": [],
             }
         )
     _check_pins(total, pin_count)
+    tree = {
+        "name": "board",
+        "kind": "pcb",
+        "shape": "box",
+        "pose": [0.0, 0.0, 0.0],
+        "size": [length, width, thick],
+        "children": children,
+    }
     notes = [f"{len(holes)} mounting hole(s)", f"{len(headers)} header(s), {total} pins"]
-    return Built("".join(lines), (length, width, round(top, 6)), total, notes, parts)
+    built = Built("".join(merged), (length, width, round(top, 6)), total, notes, [tree])
+    built.solids = solids
+    return built
 
 
 _BUILDERS = {

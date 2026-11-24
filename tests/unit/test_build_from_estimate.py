@@ -81,6 +81,14 @@ class _Ops:
     def __init__(self, **_: Any) -> None:
         pass
 
+    assemblies: list[list[dict[str, Any]]] = []
+
+    def create_assembly(
+        self, parts: list[dict[str, Any]], constraints: Any, out: str
+    ) -> dict[str, Any]:
+        self.assemblies.append(parts)
+        return {"assembly_file": f"/workspace/output/{out}", "interference_check_passed": True}
+
     def execute_script(self, script: str, output_path: str, timeout: Any) -> dict[str, Any]:
         x, y, z = self.made
         return {
@@ -140,8 +148,12 @@ def test_a_board_lists_its_subparts_and_stands_its_headers_on_top() -> None:
     """Built in the CadQuery container: 25.4 x 17.78 x 10.1 exactly, one solid."""
     built = build("BOARD", BREAKOUT, {"headers": [{"x": 2.54, "y": 1.27, "count": 9}]}, 9)
     assert built.bbox == (25.4, 17.78, 10.1) and built.pins == 9
-    assert [p["name"] for p in built.parts] == ["board", "J1"]
-    assert built.parts[1]["bbox_mm"] == [pytest.approx(9 * 2.54), 2.54, 8.5]
+    (tree,) = built.parts
+    assert tree["kind"] == "pcb" and [c["name"] for c in tree["children"]] == ["H1", "H2", "J1"]
+    j1 = tree["children"][2]
+    assert j1["kind"] == "connector" and j1["pose"][2] == 1.6  # stands on the board
+    assert j1["size"] == [pytest.approx(9 * 2.54), 2.54, 8.5]
+    assert [s["name"] for s in built.solids] == ["board", "J1"]
     assert built.script.count(".cut(") == 2 and "fillet(1.0)" in built.script
 
 
@@ -162,6 +174,13 @@ def test_a_header_flush_with_the_edge_fits() -> None:
         ({**BREAKOUT, "holes": [{"x": 0.5, "y": 5, "diameter": 2.5}]}, [], None, "hole 1"),
         (BREAKOUT, [{"x": 2.54, "y": 1.27, "count": 9}], 8, "pin_count is 8"),
         (BREAKOUT, [{"x": 2.54, "y": 1.27, "count": 3, "rows": 3}], None, "1 or 2 rows"),
+        (BREAKOUT, [{"x": 2.54, "y": 14, "count": 9}], None, "overlaps hole H1"),
+        (
+            {"length": 30, "width": 20},
+            [{"x": 2.54, "y": 2.54, "count": 5}, {"x": 7.62, "y": 2.54, "count": 5, "name": "J2"}],
+            None,
+            "header J2 overlaps header J1",
+        ),
         ({**BREAKOUT, "corner_radius": 9}, [], None, "corner_radius"),
     ],
 )
@@ -170,3 +189,35 @@ def test_a_board_that_cannot_be_built_says_why(
 ) -> None:
     with pytest.raises(TemplateError, match=why):
         build("BOARD", dims, {"headers": headers}, pin_count)
+
+
+async def test_a_board_is_also_a_named_assembly_with_its_fidelity(server: Any) -> None:
+    _Ops.made, _Ops.assemblies = (25.4, 17.78, 10.1), []
+    out = await server.build_from_estimate(
+        {
+            "template": "BOARD",
+            "name": "breakout",
+            "dims": BREAKOUT,
+            "pins": {"headers": [{"x": 2.54, "y": 1.27, "count": 9}]},
+        }
+    )
+    assert out["cad_file"].endswith("breakout-estimate-assembly.step")
+    assert out["merged_cad_file"].endswith("breakout-estimate.step")
+    assert [p["name"] for p in _Ops.assemblies[0]] == ["board", "J1"]
+    assert out["assembly"]["children"] == ["board", "J1"]
+    assert out["parts"][0]["children"][2]["fidelity"] == "photo_estimate"
+    assert out["geometry"]["fidelity"] == "photo_estimate"
+
+
+def test_a_part_is_as_good_as_its_worst_mechanical_subpart() -> None:
+    from tool_registry.tools.cadquery.package_templates import part_fidelity
+
+    tree = {
+        "kind": "pcb",
+        "fidelity": "maker_cad",
+        "children": [
+            {"kind": "connector", "fidelity": "datasheet_built"},
+            {"kind": "passive", "fidelity": "outline"},  # a capacitor does not decide fit
+        ],
+    }
+    assert part_fidelity(tree) == "datasheet_built"
