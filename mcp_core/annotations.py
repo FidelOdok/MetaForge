@@ -565,6 +565,7 @@ PRODUCING: frozenset[str] = frozenset(
         # inside the work folder, never over an existing file. An auto policy
         # may approve it, up to METAFORGE_AUTO_APPROVE_SCRIPT_PER_HOUR.
         # freecad.execute_code below has no such runner and stays destructive.
+        "geometry.build_from_estimate",
         "cadquery.execute_script",
         "freecad.create_parametric",
         # FORGE-492: returns the STEP bytes in the response and writes

@@ -270,7 +270,8 @@ class TestBootstrapToolRegistry:
         # + cadquery.dfm_measure (C3D slice 6),
         # + render.model_views (the browser render adapter).
         # +1: web.fetch, registered without a search key.
-        assert len(tools) == 129
+        # +1: geometry.build_from_estimate (FORGE-928).
+        assert len(tools) == 130
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""
@@ -285,7 +286,7 @@ class TestBootstrapToolRegistry:
 
         health = await registry.check_health("cadquery")
         assert health.status == "healthy"
-        assert health.tools_available == 20  # + cadquery.check_interference (DFA)
+        assert health.tools_available == 21  # + check_interference, build_from_estimate
 
     async def test_bootstrap_forwards_every_twin_injection_kwarg_without_raising(self):
         """Regression test for the exact class of bug FORGE-405's own fix

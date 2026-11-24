@@ -34,6 +34,10 @@ def _step_inline_on_request(
     return out
 
 
+#: A built part further than this from its asked size on any side is not saved (R6).
+_SIZE_TOLERANCE_MM = 0.02
+
+
 class CadqueryServer(McpToolServer):
     """CadQuery tool adapter for CAD operations via MCP.
 
@@ -942,6 +946,60 @@ class CadqueryServer(McpToolServer):
             handler=self.generate_ros2_launch,
         )
 
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="geometry.build_from_estimate",
+                adapter_id="cadquery",
+                name="Build A Part From Estimated Sizes",
+                description=(
+                    "Build a part's 3D model from a pre-tested package template and the sizes "
+                    "scale.resolve gave (FORGE-928): template BOX, CHIP (two-terminal chip), "
+                    "NOLEAD (QFN/DFN: pins.top/bottom/left/right pads per edge, dims pitch, "
+                    "pad_length, pad_width, exposed_pad), GULL2 (SOIC/SOT: pins.per_side or "
+                    "left/right, dims pitch, span tip to tip, standoff, lead_width), GULL4 "
+                    "(QFP: span_x, span_y), BGA (pins.rows, cols, dims pitch, ball_diameter) "
+                    "or CYLINDER (diameter, height). dims are millimetres: length (x), width "
+                    "(y), height (z, above the seating plane). A pin_count that disagrees "
+                    "with the pads per edge fails the build. The built part is measured over "
+                    "every solid and must match the template's size within 0.02 mm, or it is "
+                    "not saved. Returns cad_file (commit it with twin.commit_geometry's "
+                    "file_path), the measured size, the script, and geometry for the "
+                    "library entry with its fidelity (photo_estimate unless you say "
+                    "otherwise). The STEP is inline only with include_step_base64."
+                ),
+                capability="cad_scripting",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "template": {
+                            "enum": ["BOX", "CHIP", "NOLEAD", "GULL2", "GULL4", "BGA", "CYLINDER"]
+                        },
+                        "dims": {"type": "object"},
+                        "pins": {"type": "object"},
+                        "pin_count": {"type": "integer"},
+                        "name": {"type": "string"},
+                        "fidelity": {
+                            "enum": ["datasheet_built", "photo_estimate", "outline"],
+                            "default": "photo_estimate",
+                        },
+                        "include_step_base64": {"type": "boolean", "default": False},
+                    },
+                    "required": ["template", "dims"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "cad_file": {"type": "string"},
+                        "size_mm": {"type": "array"},
+                        "size_check": {"type": "object"},
+                        "geometry": {"type": "object"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=2048, max_cpu_seconds=120),
+            ),
+            handler=self.build_from_estimate,
+        )
         self.register_tool(
             manifest=ToolManifest(
                 tool_id="cadquery.execute_script",
@@ -1949,6 +2007,88 @@ class CadqueryServer(McpToolServer):
             ),
             include_rviz=bool(arguments.get("include_rviz", True)),
         )
+
+    async def build_from_estimate(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Build a part from a package template and check its size (FORGE-928, R6)."""
+        import asyncio
+        import os
+        import re
+
+        from tool_registry.tools.cadquery.operations import (
+            CadqueryOperations,
+            script_isolation_mode,
+        )
+        from tool_registry.tools.cadquery.package_templates import TemplateError, build
+
+        pin_count = arguments.get("pin_count")
+        if pin_count is not None and (
+            isinstance(pin_count, bool) or not isinstance(pin_count, int)
+        ):
+            raise ValueError("pin_count must be a whole number")
+        try:
+            built = build(
+                str(arguments.get("template") or ""),
+                arguments.get("dims") or {},
+                arguments.get("pins") or {},
+                pin_count,
+            )
+        except TemplateError as exc:
+            raise ValueError(f"geometry.build_from_estimate: {exc}") from exc
+        name = re.sub(r"[^a-z0-9]+", "-", str(arguments.get("name") or "part").lower()).strip("-")
+        output_path = str(arguments.get("output_path") or f"{name or 'part'}-estimate.step")
+        isolation = script_isolation_mode()
+        ops = CadqueryOperations(
+            work_dir=self.config.work_dir,
+            timeout=self.config.max_operation_time,
+            max_script_lines=self.config.max_script_lines,
+            sandbox_enabled=self.config.sandbox_enabled,
+            script_isolation=isolation,
+            script_runner=self.script_runner() if isolation == "process" else None,
+        )
+        result = await asyncio.to_thread(ops.execute_script, built.script, output_path, None)
+        box = result.get("bounding_box") or {}
+        made = (
+            float(box.get("max_x", 0)) - float(box.get("min_x", 0)),
+            float(box.get("max_y", 0)) - float(box.get("min_y", 0)),
+            float(box.get("max_z", 0)) - float(box.get("min_z", 0)),
+        )
+        off = [round(abs(m - e), 4) for m, e in zip(made, built.bbox, strict=True)]
+        if max(off) > _SIZE_TOLERANCE_MM:
+            cad_file = result.get("cad_file")
+            if cad_file and os.path.exists(cad_file):
+                os.remove(cad_file)
+            logger.warning(
+                "build_from_estimate_size_mismatch", template=arguments.get("template"), off=off
+            )
+            raise ValueError(
+                "geometry.build_from_estimate: the built part is "
+                f"{made[0]:.3f} x {made[1]:.3f} x {made[2]:.3f} mm, not the "
+                f"{built.bbox[0]} x {built.bbox[1]} x {built.bbox[2]} mm asked for (off by up "
+                f"to {max(off)} mm, over {_SIZE_TOLERANCE_MM} mm), so it was not saved"
+            )
+        out = {
+            "cad_file": result.get("cad_file"),
+            "template": str(arguments.get("template")).upper(),
+            "size_mm": [round(v, 4) for v in made],
+            "size_check": {"asked_mm": list(built.bbox), "off_mm": off, "passed": True},
+            "pins": built.pins,
+            "notes": built.notes,
+            "volume_mm3": result.get("volume_mm3"),
+            "geometry": {
+                "generator": "package_template",
+                "params": {
+                    "template": str(arguments.get("template")).upper(),
+                    "dims": arguments.get("dims") or {},
+                    "pins": arguments.get("pins") or {},
+                },
+                "fidelity": str(arguments.get("fidelity") or "photo_estimate"),
+            },
+            "script": built.script,
+        }
+        if "step_base64" in result:
+            out["step_base64"] = result["step_base64"]
+        logger.info("build_from_estimate", template=out["template"], size=out["size_mm"])
+        return _step_inline_on_request(out, arguments, path_key="cad_file")
 
     async def execute_script(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Run a CadQuery script in the OS-isolated runner."""
