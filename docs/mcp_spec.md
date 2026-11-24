@@ -338,6 +338,10 @@ gets them:
   `isError: true`, as the spec recommends for a tool failure. The reason is
   the result text, which is what a model reads, and the code and details
   are in `_meta["com.metaforge/error"]` (`code`, `legacyCode`, `data`).
+  When the reason names a tool this connection cannot call, the text says
+  so: a tool its profile leaves out ("not on this connection") or one that
+  does not exist ("not a tool on this server"), so a client never goes
+  looking for a tool it will not find.
 - Any other method's code moves out of the reserved range by 1000
   (`-32001` becomes `-31001`), with the original in `error.data.legacyCode`.
 - Resource not found is still `-32602`.

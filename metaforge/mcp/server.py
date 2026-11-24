@@ -363,7 +363,42 @@ class ApprovalRecord:
         )
 
 
-def _tool_error_text(exc: ToolHandlerError) -> str:
+_TOOL_TOKEN = re.compile(r"`?\b([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+)\b`?")
+
+
+def _absent_tool_notes(
+    text: str, registered: set[str], served: set[str] | None, profile: str | None
+) -> list[str]:
+    """Say so when a refusal names a tool this connection cannot call (R10).
+
+    A refusal that says "use twin.commit_geometry" to a client whose profile
+    leaves that tool out sends it looking for a tool it will never find. Only
+    tokens under a registered tool's namespace count, so ``image.png`` or
+    ``a.b`` in a message is never taken for a tool.
+    """
+    namespaces = {t.split(".", 1)[0] for t in registered}
+    notes: list[str] = []
+    seen: set[str] = set()
+    for name in _TOOL_TOKEN.findall(text):
+        if name in seen or name.split(".", 1)[0] not in namespaces:
+            continue
+        seen.add(name)
+        if name not in registered:
+            notes.append(f"{name} is not a tool on this server.")
+        elif served is not None and name not in served:
+            notes.append(
+                f"{name} is not on this connection (profile {profile!r} leaves it out): "
+                "connect with a profile that has it, or ask the person to run that step."
+            )
+    return notes
+
+
+def _tool_error_text(
+    exc: ToolHandlerError,
+    registered: set[str] | None = None,
+    served: set[str] | None = None,
+    profile: str | None = None,
+) -> str:
     """What the model should read when a tool refuses (FORGE-419).
 
     The details are the actionable part and often the whole fix, so they lead.
@@ -379,7 +414,12 @@ def _tool_error_text(exc: ToolHandlerError) -> str:
             "This is a server-side gap, not something to fix by changing the "
             "arguments -- retrying the same call will fail the same way."
         )
-    return f"{exc.tool_id} failed: {details}"
+    text = f"{exc.tool_id} failed: {details}"
+    if registered:
+        notes = _absent_tool_notes(details, registered, served, profile)
+        if notes:
+            text += "\n\n" + " ".join(notes)
+    return text
 
 
 class UnifiedMcpServer:
@@ -1471,7 +1511,7 @@ class UnifiedMcpServer:
                     # `data.details`.
                     call_id = str(getattr(exc, "call_id", "") or "")
                     error_content: list[dict[str, Any]] = [
-                        {"type": "text", "text": _tool_error_text(exc)}
+                        {"type": "text", "text": self._tool_error_text(exc)}
                     ]
                     error_meta: dict[str, Any] = {
                         "callId": call_id,
@@ -2040,6 +2080,16 @@ class UnifiedMcpServer:
                 "reach them."
             ),
         }
+
+    def _tool_error_text(self, exc: ToolHandlerError) -> str:
+        """The refusal text, with a note on any tool it names that this connection lacks."""
+        registered = set(self._tool_index)
+        try:
+            profile = self._requested_profile()
+            served = set(tools_for_profile(profile)) & registered if profile else None
+        except Exception:  # noqa: BLE001 -- a profile fault must not hide the refusal
+            profile, served = None, None
+        return _tool_error_text(exc, registered, served, profile)
 
     def _requested_profile(self) -> str | None:
         """Which profile to serve this call, per connection (FORGE-410).
