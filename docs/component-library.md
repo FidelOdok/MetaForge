@@ -111,6 +111,21 @@ An entry's `geometry` may state its `fidelity`, best first: `maker_cad`,
 never replaces a better one. A colour is appearance, never a material: a colour word given
 as `material` (black, silver, …) is refused.
 
+### Accepting estimates
+
+A part that holds an estimate, or `photo_estimate` geometry, is saved with
+`estimate_review.status` set to `proposed`, whatever the approval policy. Until a person
+accepts it, the part cannot back a fit, interference, DFM or release check: those report
+it as a gap, not a pass.
+
+A person decides with `twin.confirm_estimate` (`accept` or `reject`, and a reason). The
+person is never an argument: the call is always held for a person, and whoever answers
+the approval is recorded as `decided_by` (an agent acting under delegation is recorded
+with the person it acted for). `library.update_component` cannot change the review.
+Changing an estimate's value, or the estimated geometry, proposes it again; other edits
+keep the decision. Over HTTP the same decision is
+`POST /v1/library/components/{ref}/estimate-review`.
+
 ## Model representations on reusable entries
 
 `library.register_component` and `library.update_component` accept an optional

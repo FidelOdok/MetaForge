@@ -8000,6 +8000,32 @@
         "title": "Estimate",
         "type": "object"
       },
+      "EstimateDecisionRequest": {
+        "description": "A person's decision on a component's proposed estimates (R8).",
+        "properties": {
+          "decided_by": {
+            "description": "The person deciding.",
+            "title": "Decided By",
+            "type": "string"
+          },
+          "decision": {
+            "description": "accept or reject",
+            "title": "Decision",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision",
+          "decided_by"
+        ],
+        "title": "EstimateDecisionRequest",
+        "type": "object"
+      },
       "EventAccepted": {
         "properties": {
           "accepted": {
@@ -29103,7 +29129,7 @@
   "info": {
     "description": "HTTP/WebSocket front door for the MetaForge platform",
     "title": "MetaForge Gateway",
-    "version": "0.3.0"
+    "version": "0.3.833"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -35432,6 +35458,61 @@
           }
         },
         "summary": "Update Component",
+        "tags": [
+          "library"
+        ]
+      }
+    },
+    "/v1/library/components/{ref}/estimate-review": {
+      "post": {
+        "description": "Accept or reject a component's proposed estimates (R8).\n\nOver MCP this is ``twin.confirm_estimate``, a human-authority tool: the\ndecider is the person who answered its approval, never a name the model\ntyped.",
+        "operationId": "decide_component_estimate_v1_library_components__ref__estimate_review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EstimateDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Decide Component Estimate V1 Library Components  Ref  Estimate Review Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide Component Estimate",
         "tags": [
           "library"
         ]
