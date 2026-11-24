@@ -228,3 +228,56 @@ async def test_worker_crash_is_isolated_to_its_own_session() -> None:
     finally:
         for sid in pool.session_ids():
             await pool.close_session(sid)
+
+
+@pytest.mark.asyncio
+async def test_a_stateless_call_runs_in_its_own_worker_and_leaves_none_behind() -> None:
+    """A long stateless call no longer runs on the server's loop (its health stalled)."""
+    pool = _make_pool()
+    out = await pool.run_once("describe_step_file", {"input_file": "/workspace/x.step"})
+    assert out == {"echo": {"input_file": "/workspace/x.step"}}
+    assert pool.session_ids() == []
+
+
+@pytest.mark.asyncio
+async def test_a_stateless_call_that_crashes_takes_only_its_worker() -> None:
+    pool = _make_pool()
+    with pytest.raises(FreecadWorkerCrashedError):
+        await pool.run_once("crash", {})
+    assert await pool.run_once("get_properties", {"a": 1}) == {"echo": {"a": 1}}
+
+
+@pytest.mark.asyncio
+async def test_the_adapter_hands_stateless_tools_to_the_pool() -> None:
+    from tool_registry.tools.freecad.adapter import FreecadServer
+
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class _Pool:
+        async def run_once(self, tool: str, arguments: dict[str, object]) -> dict[str, object]:
+            calls.append((tool, arguments))
+            return {"ok": tool}
+
+    server = FreecadServer(worker_pool=_Pool())  # type: ignore[arg-type]
+    for name in (
+        "create_parametric",
+        "export_geometry",
+        "generate_mesh",
+        "list_named_faces",
+        "boolean_operation",
+        "get_properties",
+        "describe_step_file",
+    ):
+        assert await getattr(server, name)({"input_file": "f"}) == {"ok": name}
+    assert [c[0] for c in calls][-1] == "describe_step_file" and len(calls) == 7
+
+
+def test_the_errors_say_what_happened() -> None:
+    stopped = str(
+        FreecadWorkerCrashedError(None, "freecad.describe_step_file", timed_out_after=300)
+    )
+    assert "longer than the 300 s limit" in stopped and "FREECAD_MAX_OPERATION_TIME" in stopped
+    crashed = str(FreecadWorkerCrashedError(None, "freecad.get_properties", one_shot=True))
+    assert "only that call's own worker" in crashed and "starting a new session" not in crashed
+    opening = str(FreecadWorkerCrashedError(None, "freecad.open_session"))
+    assert "starting a new session" in opening

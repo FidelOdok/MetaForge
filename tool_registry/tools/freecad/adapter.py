@@ -512,6 +512,9 @@ class FreecadServer(McpToolServer):
         In production, this invokes FreeCAD headless with a parametric script.
         For now, it validates arguments and raises NotImplementedError.
         """
+        if self._pool is not None:
+            # Off the server's event loop, so it keeps answering (health too).
+            return await self._pool.run_once("create_parametric", arguments)
         shape_type = arguments.get("shape_type", "")
         parameters = arguments.get("parameters", {})
         material = arguments.get("material", "")
@@ -542,6 +545,9 @@ class FreecadServer(McpToolServer):
         In production, this invokes FreeCAD headless. For now, it validates
         arguments and delegates to _execute_export().
         """
+        if self._pool is not None:
+            # Off the server's event loop, so it keeps answering (health too).
+            return await self._pool.run_once("export_geometry", arguments)
         input_file = arguments.get("input_file", "")
         output_format = arguments.get("output_format", "")
         output_path = arguments.get("output_path", "")
@@ -569,6 +575,9 @@ class FreecadServer(McpToolServer):
 
     async def generate_mesh(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Generate finite element mesh from CAD geometry."""
+        if self._pool is not None:
+            # Off the server's event loop, so it keeps answering (health too).
+            return await self._pool.run_once("generate_mesh", arguments)
         input_file = arguments.get("input_file", "")
         element_size = arguments.get("element_size", 1.0)
         algorithm = arguments.get("algorithm", self.config.default_mesh_algorithm)
@@ -598,6 +607,9 @@ class FreecadServer(McpToolServer):
 
     async def list_named_faces(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Re-fetch the per-face geometry table for an already-generated mesh."""
+        if self._pool is not None:
+            # Off the server's event loop, so it keeps answering (health too).
+            return await self._pool.run_once("list_named_faces", arguments)
         mesh_file = arguments.get("mesh_file", "")
         if not mesh_file:
             raise ValueError("mesh_file is required")
@@ -607,6 +619,9 @@ class FreecadServer(McpToolServer):
 
     async def boolean_operation(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Perform CSG boolean operation on two CAD models."""
+        if self._pool is not None:
+            # Off the server's event loop, so it keeps answering (health too).
+            return await self._pool.run_once("boolean_operation", arguments)
         input_file_a = arguments.get("input_file_a", "")
         input_file_b = arguments.get("input_file_b", "")
         operation = arguments.get("operation", "")
@@ -637,6 +652,9 @@ class FreecadServer(McpToolServer):
 
     async def get_properties(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Extract geometric properties from a CAD model."""
+        if self._pool is not None:
+            # Off the server's event loop, so it keeps answering (health too).
+            return await self._pool.run_once("get_properties", arguments)
         input_file = arguments.get("input_file", "")
         properties = arguments.get(
             "properties", ["volume", "area", "center_of_mass", "bounding_box"]
@@ -656,6 +674,9 @@ class FreecadServer(McpToolServer):
 
     async def describe_step_file(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Per-component breakdown of a multipart CAD assembly file."""
+        if self._pool is not None:
+            # Off the server's event loop, so it keeps answering (health too).
+            return await self._pool.run_once("describe_step_file", arguments)
         input_file = arguments.get("input_file", "")
         if not input_file:
             raise ValueError("input_file is required")

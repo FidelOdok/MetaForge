@@ -1277,6 +1277,9 @@ services:
     environment:
       - METAFORGE_ENV=docker
       - FREECAD_WORK_DIR=/workspace
+      # Seconds one FreeCAD operation may run before its worker is stopped. A very
+      # large STEP (the Raspberry Pi 5's is 78 MB, 2689 solids) needs more than 300.
+      - FREECAD_MAX_OPERATION_TIME=${FREECAD_MAX_OPERATION_TIME:-300}
       - FREECAD_HTTP_PORT=8102
       - QT_QPA_PLATFORM=offscreen
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
