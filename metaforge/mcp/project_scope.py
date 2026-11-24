@@ -412,6 +412,7 @@ TOOL_RULES: dict[str, ToolRule] = {
         "power.check_budget",
         "power.runtime",
         "scale.resolve",
+        "photo.rectify",
         "photo.measure",
         "cost.estimate_manufacturing",
         "optimize.suggest",

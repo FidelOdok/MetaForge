@@ -198,6 +198,53 @@ class PhotoServer(McpToolServer):
             handler=self.photo_measure,
         )
 
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="photo.rectify",
+                adapter_id="photo",
+                name="Correct An Angled View",
+                description=(
+                    "Positions on a part photographed at an angle, in millimetres (R14.4). "
+                    "corners_px: the part's four corners in pixels (photo.measure's body "
+                    "corners), any order. references: at least two known lengths, one along "
+                    "the part's length and one along its width, each {from_px, to_px, "
+                    "length_mm} (a 2.54 mm header span, a ruler, holes a known distance "
+                    "apart). features_px: [{name, at: [x, y]}] to place. A homography maps "
+                    "the outline onto a rectangle, so a scale read on one edge holds across "
+                    "the part. Returns size_mm, each feature's x_mm and y_mm from the "
+                    "part's lower-left corner (as the BOARD template takes them), and "
+                    "approximate: true, with the reason, when the two references on "
+                    "different sides are missing. A diagonal reference is not used. "
+                    "length_along: top_edge (default) or left_edge, the image edge the "
+                    "part's length runs along."
+                ),
+                capability="image_measurement",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "corners_px": {"type": "array", "items": {"type": "array"}},
+                        "references": {"type": "array", "items": {"type": "object"}},
+                        "features_px": {"type": "array", "items": {"type": "object"}},
+                        "length_along": {"enum": ["top_edge", "left_edge"]},
+                    },
+                    "required": ["corners_px"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "size_mm": {"type": "object"},
+                        "features": {"type": "array"},
+                        "approximate": {"type": "boolean"},
+                        "notes": {"type": "array"},
+                    },
+                    "required": ["size_mm", "features", "approximate"],
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=128, max_cpu_seconds=10),
+            ),
+            handler=self.photo_rectify,
+        )
+
     async def photo_measure(self, arguments: dict[str, Any]) -> dict[str, Any]:
         import asyncio
 
@@ -221,6 +268,23 @@ class PhotoServer(McpToolServer):
                 regions=len(regions),
                 failed=sum(1 for r in result["regions"] if "error" in r),
                 notes=len(result["notes"]),
+            )
+            return result
+
+    async def photo_rectify(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from tool_registry.tools.photo.rectify import RectifyError, rectify
+
+        with tracer.start_as_current_span("photo.rectify") as span:
+            try:
+                result = rectify(arguments)
+            except RectifyError as exc:
+                raise ValueError(f"photo.rectify: {exc}") from exc
+            span.set_attribute("photo.approximate", bool(result["approximate"]))
+            logger.info(
+                "photo_rectified",
+                approximate=result["approximate"],
+                features=len(result["features"]),
+                references=len(result["references_used"]),
             )
             return result
 

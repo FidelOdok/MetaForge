@@ -131,6 +131,6 @@ def test_an_unknown_scale_object_is_not_used_but_a_cited_one_is() -> None:
 
 async def test_the_tool_answers_and_is_registered() -> None:
     server = PhotoServer()
-    assert server.tool_ids == ["scale.resolve", "photo.measure"]
+    assert server.tool_ids == ["scale.resolve", "photo.measure", "photo.rectify"]
     out = await server.scale_resolve(PHOTO)
     assert out["sizes"]["length"]["value"] == pytest.approx(25.4)
