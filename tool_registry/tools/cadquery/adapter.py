@@ -2035,7 +2035,10 @@ class CadqueryServer(McpToolServer):
         except TemplateError as exc:
             raise ValueError(f"geometry.build_from_estimate: {exc}") from exc
         name = re.sub(r"[^a-z0-9]+", "-", str(arguments.get("name") or "part").lower()).strip("-")
-        output_path = str(arguments.get("output_path") or f"{name or 'part'}-estimate.step")
+        stem = name or "part"
+        if not stem.endswith("estimate"):
+            stem += "-estimate"
+        output_path = str(arguments.get("output_path") or f"{stem}.step")
         isolation = script_isolation_mode()
         ops = CadqueryOperations(
             work_dir=self.config.work_dir,
