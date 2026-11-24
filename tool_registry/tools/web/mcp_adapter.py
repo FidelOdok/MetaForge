@@ -14,6 +14,7 @@ page bodies for every hit or require the model to already know the URL.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import structlog
@@ -29,6 +30,7 @@ from tool_registry.tools.web.base import (
 )
 from tool_registry.tools.web.brave import fetch_page
 from tool_registry.tools.web.pdf import DEFAULT_MAX_PAGES, PdfExtractionError
+from tool_registry.tools.web.pdf_reader import READERS, VisionCall
 from tool_registry.tools.web.refusals import SiteUnreachableError
 from tool_registry.tools.web.safety import (
     MAX_BYTES,
@@ -54,10 +56,14 @@ class WebMcpServer(McpToolServer):
         self,
         provider: WebSearchProvider | None,
         extractor: TavilyExtractor | None = None,
+        vision_call: VisionCall | None = None,
     ) -> None:
         super().__init__(adapter_id="web", version="0.1.0")
         self._provider = provider
         self._extractor = extractor
+        # None: built on first use from the gateway's vision route, unless
+        # METAFORGE_WEB_VISION=off.
+        self._vision_call = vision_call
         self._register_tools()
 
     # ------------------------------------------------------------------
@@ -134,7 +140,13 @@ class WebMcpServer(McpToolServer):
                     "Fetch one public http(s) URL and return its readable "
                     "text. Handles HTML (tags stripped) AND PDF (text "
                     "extracted) -- so datasheets, app notes and reference "
-                    "manuals are readable. Follow a web.search hit with this "
+                    "manuals are readable. A PDF page with no text layer (a scan) is "
+                    "read by OCR, and a page OCR cannot read well by a vision model "
+                    "(at most 4 a call); each page's text is labelled with what read it, "
+                    "and OCR and model readings are to be confirmed before a value is "
+                    "used. 'pages' reads chosen pages ('1-3,250-260', up to 100) instead "
+                    "of the first max_pages; 'reader' forces text, ocr or vision. "
+                    "Follow a web.search hit with this "
                     "to actually read the source. Only public addresses are "
                     "reachable -- private, loopback and link-local hosts are "
                     "refused, on the initial URL and every redirect. HTML is "
@@ -183,6 +195,21 @@ class WebMcpServer(McpToolServer):
                                 "context budget."
                             ),
                         },
+                        "pages": {
+                            "type": "string",
+                            "description": (
+                                "PDF only: the pages to read, e.g. '287' or '1-3,250-260' "
+                                "(at most 100). Overrides max_pages."
+                            ),
+                        },
+                        "reader": {
+                            "enum": list(READERS),
+                            "default": "auto",
+                            "description": (
+                                "PDF only: auto (text layer, then OCR for a scan, then a "
+                                "vision model for what OCR reads badly), text, ocr or vision."
+                            ),
+                        },
                     },
                     "required": ["url"],
                 },
@@ -194,6 +221,7 @@ class WebMcpServer(McpToolServer):
                         "text": {"type": "string"},
                         "truncated": {"type": "boolean"},
                         "links": {"type": "array", "items": {"type": "object"}},
+                        "pdf": {"type": ["object", "null"]},
                     },
                 },
                 phase=2,
@@ -293,9 +321,22 @@ class WebMcpServer(McpToolServer):
         url = self._require_str(arguments, "url")
         max_chars = self._coerce_max_chars(arguments.get("max_chars"))
         max_pages = self._coerce_max_pages(arguments.get("max_pages"))
+        pages = arguments.get("pages")
+        if pages is not None and (not isinstance(pages, str) or not pages.strip()):
+            raise ValueError("'pages' is a page list such as '287' or '1-3,250-260'")
+        reader = str(arguments.get("reader") or "auto")
+        if reader not in READERS:
+            raise ValueError(f"'reader' is one of {', '.join(READERS)}")
         with tracer.start_as_current_span("web.mcp.fetch") as span:
             try:
-                page = await fetch_page(url, max_bytes=MAX_BYTES, max_pages=max_pages)
+                page = await fetch_page(
+                    url,
+                    max_bytes=MAX_BYTES,
+                    max_pages=max_pages,
+                    pages=pages.strip() if isinstance(pages, str) else None,
+                    reader=reader,
+                    vision_call=self._vision(),
+                )
             except PdfExtractionError as exc:
                 # A scanned/encrypted/corrupt PDF is a reportable outcome with
                 # a real reason, never an empty page passed off as content.
@@ -333,7 +374,24 @@ class WebMcpServer(McpToolServer):
                 # A page's links, documents first, so a "Datasheet" link (LCSC, a
                 # maker's product page) can be followed with another web.fetch.
                 "links": page.links,
+                "pdf": page.pdf,
             }
+
+    def _vision(self) -> VisionCall | None:
+        """The vision call for PDF pages, built once from the gateway's vision route."""
+        if os.environ.get("METAFORGE_WEB_VISION", "on").strip().lower() in ("off", "0", "false"):
+            return None
+        if self._vision_call is None:
+            try:
+                from api_gateway.twin.vision import make_vision_call
+
+                self._vision_call = make_vision_call(
+                    role="web_pdf_reading", purpose="reading a datasheet page", max_tokens=8000
+                )
+            except Exception as exc:  # noqa: BLE001 - without it, pages stay labelled unread
+                logger.warning("web_pdf_vision_unavailable", error=str(exc))
+                return None
+        return self._vision_call
 
     async def handle_extract(self, arguments: dict[str, Any]) -> dict[str, Any]:
         if self._extractor is None:  # pragma: no cover - the tool is not registered

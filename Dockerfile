@@ -43,7 +43,7 @@ COPY LICENSE NOTICE ./
 # ``omniverse-usd`` (usd-core, trimesh, scipy; plain wheels, no GPU) is what
 # lets simready.inspect/import open a stage in the gateway and the MCP
 # sidecar (FORGE-711). Without it they raise the install hint.
-RUN pip install --no-cache-dir ".[gateway,kafka,temporal,omniverse-usd]" \
+RUN pip install --no-cache-dir ".[gateway,kafka,temporal,omniverse-usd,ocr]" \
     && pip install --no-cache-dir uvicorn[standard]
 
 # ── Stage 2: runtime ─────────────────────────────────────────────────

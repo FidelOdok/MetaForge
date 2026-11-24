@@ -227,6 +227,14 @@ docker = [
     "docker>=7.0",
 ]
 # All extras needed for the Docker gateway image
+# web.fetch reads a scanned PDF page by OCR (tool_registry/tools/web/pdf_reader.py):
+# pypdfium2 renders the page, RapidOCR reads it. Both are permissively licensed and
+# install from wheels, with no system packages. Without them a scan page is
+# reported unread, never returned empty.
+ocr = [
+    "pypdfium2>=4.30",
+    "rapidocr-onnxruntime>=1.3.24",
+]
 gateway = [
     "sqlalchemy[asyncio]>=2.0",
     "asyncpg>=0.29",

@@ -9,6 +9,7 @@ new tool surface.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -41,6 +42,9 @@ class PageContent(BaseModel):
     fetched_bytes: int = 0
     # The page's links (HTML only), documents first: ``[{text, url}]``.
     links: list[dict[str, str]] = Field(default_factory=list)
+    # PDF only: pages_total, which pages each reader read (text, ocr, vision, none)
+    # and anything a reader could not do.
+    pdf: dict[str, Any] | None = None
 
 
 class WebSearchProvider(ABC):

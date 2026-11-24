@@ -26,7 +26,8 @@ from tool_registry.tools.web.base import (
     WebSearchError,
     WebSearchProvider,
 )
-from tool_registry.tools.web.pdf import DEFAULT_MAX_PAGES, MAX_PDF_BYTES, pdf_to_text
+from tool_registry.tools.web.pdf import DEFAULT_MAX_PAGES, MAX_PDF_BYTES
+from tool_registry.tools.web.pdf_reader import VisionCall, page_ranges, read_pdf
 from tool_registry.tools.web.refusals import SiteUnreachableError, explain
 from tool_registry.tools.web.safety import (
     MAX_BYTES,
@@ -236,6 +237,9 @@ async def fetch_page(
     client: httpx.AsyncClient | None = None,
     max_bytes: int = MAX_BYTES,
     max_pages: int = DEFAULT_MAX_PAGES,
+    pages: str | None = None,
+    reader: str = "auto",
+    vision_call: VisionCall | None = None,
 ) -> PageContent:
     """Fetch one page, refusing any hop that points at a non-public address.
 
@@ -286,14 +290,31 @@ async def fetch_page(
                     # Resolve relative Location values against the current URL.
                     current = validate_url(str(response.url.join(location)))
                     continue
-                return _to_page(response, current, max_bytes=max_bytes, max_pages=max_pages)
+                return await _to_page(
+                    response,
+                    current,
+                    max_bytes=max_bytes,
+                    max_pages=max_pages,
+                    pages=pages,
+                    reader=reader,
+                    vision_call=vision_call,
+                )
             raise UnsafeUrlError(f"too many redirects (>{MAX_REDIRECTS})")
     finally:
         if owns_client:
             await http.aclose()
 
 
-def _to_page(response: httpx.Response, url: str, *, max_bytes: int, max_pages: int) -> PageContent:
+async def _to_page(
+    response: httpx.Response,
+    url: str,
+    *,
+    max_bytes: int,
+    max_pages: int,
+    pages: str | None = None,
+    reader: str = "auto",
+    vision_call: VisionCall | None = None,
+) -> PageContent:
     content_type = response.headers.get("content-type", "")
     if not content_type_allowed(content_type):
         raise UnsafeUrlError(
@@ -314,29 +335,44 @@ def _to_page(response: httpx.Response, url: str, *, max_bytes: int, max_pages: i
                 f"{MAX_PDF_BYTES / 1_000_000:.0f} MB limit -- truncating a PDF "
                 "corrupts it, so it was not fetched"
             )
-        title, text, stats = pdf_to_text(raw, max_pages=max_pages)
-        page_limited = stats["pages_read"] < stats["pages_total"]
+        reading = await read_pdf(
+            raw, pages=pages, max_pages=max_pages, reader=reader, vision_call=vision_call
+        )
+        numbers = [p.number for p in reading.pages]
+        total = reading.pages_total
+        page_limited = len(numbers) < total
         logger.info(
             "web_fetch_pdf",
             url=url[:200],
             bytes=fetched,
-            pages_total=stats["pages_total"],
-            pages_read=stats["pages_read"],
+            pages_total=total,
+            pages_read=len(numbers),
+            read_by={k: len(v) for k, v in reading.methods().items()},
         )
-        if page_limited:
+        text = reading.text()
+        if pages:
+            text = (
+                f"[Read pages {page_ranges(numbers)} of {total}, as asked. Other pages were "
+                "NOT read.]\n" + text
+            )
+        elif page_limited:
             # Say so in-band: the model must report "read 30 of 212 pages",
             # not imply it read the whole datasheet.
-            text = (
-                f"[Read pages 1-{stats['pages_read']} of {stats['pages_total']}. "
-                "Later pages were NOT read.]\n" + text
-            )
+            text = f"[Read pages 1-{len(numbers)} of {total}. Later pages were NOT read.]\n" + text
+        if reading.notes:
+            text = "".join(f"[{note}.]\n" for note in reading.notes) + text
         return PageContent(
             url=url,
-            title=title,
+            title=reading.title,
             text=text,
             content_type=content_type,
             truncated=page_limited,
             fetched_bytes=fetched,
+            pdf={
+                "pages_total": total,
+                "read_by": reading.methods(),
+                "notes": reading.notes,
+            },
         )
 
     truncated = fetched > max_bytes
