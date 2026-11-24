@@ -739,6 +739,8 @@ DESTRUCTIVE: frozenset[str] = frozenset(
         # FORGE-762: a person's confirm or reject of a sketch reading moves it
         # forward into concept input, the same family as the approvals above.
         "twin.confirm_sketch_reading",
+        # R8: accepting estimates moves a part past proposed, the same family.
+        "twin.confirm_estimate",
         # FORGE-824: the Imagine handover freezes the studio and seeds the
         # twin; the rework reopens it and marks dependent evidence stale. Both
         # are a person's decisions an agent may make only under delegation.

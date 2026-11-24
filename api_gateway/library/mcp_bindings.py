@@ -150,6 +150,20 @@ class LocalMachineLibrary:
             raise ValueError(f"no {kind} '{ref}'") from exc
         return {"entry": _entry(catalog.update(current.id, changes, by=by))}
 
+    async def decide_estimate(
+        self, ref: str, decision: str, decided_by: str, reason: str
+    ) -> dict[str, Any]:
+        from api_gateway.library.catalog_routes import get_catalog
+        from twin_core.library.catalog import CatalogNotFoundError
+
+        catalog = get_catalog()
+        try:
+            current = catalog.get(ref, "component")
+        except CatalogNotFoundError as exc:
+            raise ValueError(f"no component '{ref}'") from exc
+        entry = catalog.decide_estimate(current.id, decision, decided_by=decided_by, reason=reason)
+        return {"entry": _entry(entry)}
+
     async def process_limits(self, ref: str, material: str | None) -> dict[str, Any]:
         from api_gateway.library.catalog_routes import get_catalog
         from twin_core.library.catalog import CatalogNotFoundError

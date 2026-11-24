@@ -46,6 +46,7 @@ Layer: stdlib and structlog (twin_core may import nothing above it).
 from __future__ import annotations
 
 import builtins
+import hashlib
 import json
 import re
 import sqlite3
@@ -538,6 +539,52 @@ def check_fidelity_replacement(current: dict[str, Any], incoming: dict[str, Any]
         )
 
 
+#: Geometry fidelities that are an estimate of the part (R8).
+ESTIMATED_GEOMETRY = frozenset({"photo_estimate"})
+ESTIMATE_DECISIONS = ("accept", "reject")
+
+
+def estimate_basis(entry: Any) -> dict[str, Any]:
+    """What on a component is an estimate, with its value: a change re-opens review."""
+    basis: dict[str, Any] = {
+        key: spec.value for key, spec in sorted(entry.specs.items()) if spec.source_kind == ESTIMATE
+    }
+    geometry = entry.geometry or {}
+    if geometry.get("fidelity") in ESTIMATED_GEOMETRY:
+        digest = hashlib.sha256(
+            json.dumps(geometry, sort_keys=True, default=str).encode()
+        ).hexdigest()[:16]
+        basis["geometry"] = f"{geometry['fidelity']}:{digest}"
+    return basis
+
+
+def review_estimates(entry: Any, now: float) -> None:
+    """Propose a component's estimates for review unless this exact set was decided."""
+    basis = estimate_basis(entry)
+    if not basis:
+        entry.estimate_review = {}
+    elif (entry.estimate_review or {}).get("basis") != basis:
+        # New or changed estimates: whatever was decided was about other values.
+        entry.estimate_review = {"status": "proposed", "basis": basis, "since": now}
+
+
+def estimate_gap(entry: Any) -> str | None:
+    """Why a component cannot yet back a fit, interference, DFM or release check (R8)."""
+    review = getattr(entry, "estimate_review", None) or {}
+    status = review.get("status")
+    if not status or status == "accepted":
+        return None
+    what = ", ".join(sorted(review.get("basis") or {}))
+    if status == "rejected":
+        return (
+            f"{entry.name}: its estimates ({what}) were rejected; replace them with sourced values"
+        )
+    return (
+        f"{entry.name}: its estimates ({what}) are proposed and not yet accepted by a "
+        "person (twin.confirm_estimate)"
+    )
+
+
 def _finite(where: str, value: Any) -> float:
     ok = isinstance(value, int | float) and not isinstance(value, bool)
     if not ok or value != value or value in (float("inf"), float("-inf")):
@@ -991,6 +1038,11 @@ class ComponentEntry:
     #: y its height, z its width. A studio places it with g.model(name). "" for none.
     form_code: str = ""
     notes: str = ""
+    #: R8: a part holding estimates is ``proposed`` until a person accepts it
+    #: (``twin.confirm_estimate``). ``{status, basis, since, decided_by?, decided_at?,
+    #: reason?}``; empty when nothing on the part is an estimate. Only
+    #: :meth:`SqliteCatalog.decide_estimate` moves it past ``proposed``.
+    estimate_review: dict[str, Any] = field(default_factory=dict)
     version: int = 1
     updated_at: float = 0.0
     kind: str = field(default="component")
@@ -1465,6 +1517,7 @@ class SqliteCatalog:
                 notes=str(data.get("notes") or ""),
                 updated_at=now,
             )
+            review_estimates(entry, now)
         elif kind == "appearance":
             finish = str(data.get("finish") or "")
             if finish not in APPEARANCE_FINISHES:
@@ -1746,6 +1799,7 @@ class SqliteCatalog:
                 entry.material = check_material(changes["material"])
             if "suppliers" in changes:
                 entry.suppliers = parse_suppliers(changes["suppliers"])
+            review_estimates(entry, self._clock())
             if {"manufacturer", "manufacturer_org", "suppliers"} & set(changes):
                 if "manufacturer" in changes and "manufacturer_org" not in changes:
                     entry.manufacturer_org = ""
@@ -1783,6 +1837,49 @@ class SqliteCatalog:
         self._save(entry, by, new=False)
         if isinstance(entry, OrganisationEntry):
             self.relink_organisations(by=by)
+        return entry
+
+    def decide_estimate(
+        self,
+        entry_id: str,
+        decision: str,
+        *,
+        decided_by: str,
+        reason: str = "",
+        editor: Any = FROM_CONTEXT,
+    ) -> Any:
+        """A person's decision on a component's proposed estimates (R8).
+
+        The only way past ``proposed``: ``library.update_component`` cannot set
+        ``estimate_review``, and ``decided_by`` comes from the approval that
+        reached the tool, never from the model.
+        """
+        if decision not in ESTIMATE_DECISIONS:
+            raise CatalogError("decision is accept or reject")
+        if not decided_by.strip():
+            raise CatalogError("a decision on estimates names the person who made it")
+        editor = resolve(editor)
+        entry = self.get(entry_id, "component", viewer=editor)
+        if editor is not None and self.owner_of(entry.id) != editor:
+            raise CatalogPermissionError(f"{entry.name} is shared library data")
+        review = entry.estimate_review or {}
+        if review.get("status") != "proposed":
+            raise CatalogError(
+                f"{entry.name} has no proposed estimates to decide"
+                + (f" (they are {review['status']})" if review.get("status") else "")
+            )
+        now = self._clock()
+        entry.estimate_review = {
+            **review,
+            "status": "accepted" if decision == "accept" else "rejected",
+            "decided_by": decided_by.strip(),
+            "decided_at": now,
+            "reason": reason.strip()[:500],
+        }
+        entry.version += 1
+        entry.updated_at = now
+        self._save(entry, decided_by, new=False)
+        logger.info("library_estimate_decided", entry=entry.name, decision=decision)
         return entry
 
     # ── organisations (FORGE-450) ────────────────────────────────────────

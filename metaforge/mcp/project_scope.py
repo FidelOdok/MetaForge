@@ -263,6 +263,7 @@ TOOL_RULES: dict[str, ToolRule] = {
         "library.register_process",
         "library.update_appearance",
         "library.update_component",
+        "twin.confirm_estimate",
         "library.update_ergonomic_limit",
         "library.update_machine",
         "library.update_material",

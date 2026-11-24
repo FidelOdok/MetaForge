@@ -1,8 +1,10 @@
 """``library.*`` tools for processes and materials (FORGE-451, FORGE-446).
 
 Registered on the same ``library`` adapter as the machine tools. Reads are
-read-only; ``register_*`` and ``update_*`` are additive writes held for the
-person. The service is the same object the machine tools use (in-process in
+read-only; ``register_*`` and ``update_*`` are additive writes, held for the
+person when the project's approval policy holds writes. Estimates are saved as
+``proposed`` either way and count only once a person accepts them (R8,
+``twin.confirm_estimate``). The service is the same object the machine tools use (in-process in
 the gateway, over HTTP from the sidecar).
 
 Where the owner delegates human authority, an agent's register or update for
@@ -21,8 +23,10 @@ import structlog
 from mcp_core.guardrails import (
     APPROVED_BY_ARG,
     DELEGATED_AGENT_ARG,
+    HumanAuthorityRequiredError,
     delegated_authority,
     delegated_label,
+    reject_caller_supplied_approver,
     strip_reserved_arguments,
 )
 from observability.tracing import get_tracer
@@ -175,8 +179,11 @@ _SPECS = (
     "nominal size) is source_kind estimate with method (printed, package_nominal, "
     "similar_part or photo, as scale.resolve gives it), source_ref its basis (the "
     "image_ref, the similar part's entry, the "
-    "package code) and confidence (0 to 1): it is flagged for review, and it never "
-    "replaces a value that has a real source (that update is refused). "
+    "package code) and confidence (0 to 1). It never replaces a value that has a real "
+    "source (that update is refused). The write saves at once, but a part holding "
+    "estimates (or photo_estimate geometry) is saved with estimate_review proposed: it "
+    "cannot back a fit, interference, DFM or release check until a person accepts it "
+    "with twin.confirm_estimate, and changing an estimate proposes it again. "
 )
 _PART_DATA = (
     "Real part data (FORGE-906), each piece sourced like a value: ratings is a list of "
@@ -222,6 +229,7 @@ def catalog_tool_ids() -> set[str]:
         "library.standard_part",
         "library.resolve_component_model",
         "library.search",
+        "twin.confirm_estimate",
     }
     for kind, plural in (
         ("process", "processes"),
@@ -254,6 +262,10 @@ class CatalogService(Protocol):
     ) -> dict[str, Any]: ...
 
     async def process_limits(self, ref: str, material: str | None) -> dict[str, Any]: ...
+
+    async def decide_estimate(
+        self, ref: str, decision: str, decided_by: str, reason: str
+    ) -> dict[str, Any]: ...
 
     async def standard_part(
         self, family: str, size: str, length_mm: float | None
@@ -388,7 +400,7 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                 "applies_to, population and its source. "
                 + _ERGONOMIC
                 + _SOURCES
-                + " Held for the person's approval."
+                + " Held for the person's approval when the project's approval policy holds writes."
             )
             register_props = {
                 "name": {"type": "string"},
@@ -415,7 +427,8 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                 "shared email}] (never a person's own details), lifecycle_policy, connector "
                 "(the vendor connector id that quotes from it) and status (unreviewed, "
                 "approved, or blocked with status_reason). Components whose manufacturer or "
-                "offers name it are linked to it. Held for the person's approval."
+                "offers name it are linked to it. Held for the person's approval when the "
+                "project's approval policy holds writes."
             )
             register_props = {
                 "name": {"type": "string"},
@@ -446,7 +459,7 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                 "(library names it applies to) and suppliers [{supplier, sku, url}]. "
                 + _APPEARANCE
                 + _SOURCES
-                + " Held for the person's approval."
+                + " Held for the person's approval when the project's approval policy holds writes."
             )
             register_props = {
                 "name": {"type": "string"},
@@ -488,7 +501,7 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                 "so later projects find it with library.list_components instead of "
                 "researching it again. " + _SPECS + _PART_DATA + _SOURCES + " For a standard part, "
                 "build the entry with library.standard_part and register what it returns. "
-                "Held for the person's approval."
+                "Held for the person's approval when the project's approval policy holds writes."
             )
             register_props = {
                 "name": {"type": "string"},
@@ -586,7 +599,7 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                 "material_families it can make, and rules. "
                 + _RULES
                 + _SOURCES
-                + " Held for the person's approval."
+                + " Held for the person's approval when the project's approval policy holds writes."
             )
             register_props = {
                 "name": {"type": "string"},
@@ -604,7 +617,10 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
             register_desc = (
                 "Add a material: name (identifier, e.g. aluminium_6061_t6), title, family, "
                 "designation (the standard grade name), forms, processes it suits, and "
-                "properties. " + _PROPERTIES + _SOURCES + " Held for the person's approval."
+                "properties. "
+                + _PROPERTIES
+                + _SOURCES
+                + " Held for the person's approval when the project's approval policy holds writes."
             )
             register_props = {
                 "name": {"type": "string"},
@@ -647,7 +663,8 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                     "status_reason, country, regions, website, quote_url, certifications, "
                     "contacts, lifecycle_policy, connector or notes.",
                 }[kind]
-                + " The old version is kept. Held for the person's approval."
+                + " The old version is kept. Held for the person's approval when the "
+                "project's approval policy holds writes."
             ),
             {
                 "type": "object",
@@ -656,6 +673,56 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
             },
             update_,
         )
+
+    async def confirm_estimate(args: dict[str, Any]) -> dict[str, Any]:
+        """R8: a person accepts or rejects a component's proposed estimates."""
+        tool_id = "twin.confirm_estimate"
+        reject_caller_supplied_approver(tool_id, args)
+        person = args.get(APPROVED_BY_ARG)
+        if not isinstance(person, str) or not person.strip():
+            raise HumanAuthorityRequiredError(
+                tool_id, "no approver reached the tool, so nothing was decided"
+            )
+        agent = args.get(DELEGATED_AGENT_ARG)
+        decided_by = delegated_label(str(agent), person) if agent else person
+        clean = strip_reserved_arguments(args)
+        decision = clean.get("decision")
+        if decision not in ("accept", "reject"):
+            raise ValueError(f"{tool_id}: decision is 'accept' or 'reject'")
+        reason = clean.get("reason")
+        result = await service.decide_estimate(
+            str(clean["ref"]),
+            str(decision),
+            decided_by,
+            reason if isinstance(reason, str) else "",
+        )
+        logger.info("library_estimate_decided_over_mcp", decision=decision, delegated=bool(agent))
+        return with_authority(result, decided_by)
+
+    tool(
+        "twin.confirm_estimate",
+        "Confirm A Part's Estimates",
+        (
+            "Record a PERSON's decision on a library component's proposed estimates "
+            "(sizes worked out from a photo, a similar part or a package, and photo_estimate "
+            "geometry). Until accepted, a part holding estimates cannot back a fit, "
+            "interference, DFM or release check: those report it as a gap. 'accept' "
+            "records it as accepted; 'reject' marks the estimates for replacement. The "
+            "deciding person is NOT an argument: this call is always held for a person, "
+            "and whoever approves it is recorded. Changing an estimate later proposes it "
+            "again."
+        ),
+        {
+            "type": "object",
+            "properties": {
+                "ref": {"type": "string", "description": "Component id or name."},
+                "decision": {"type": "string", "enum": ["accept", "reject"]},
+                "reason": {"type": "string", "description": "Why, in a sentence."},
+            },
+            "required": ["ref", "decision"],
+        },
+        confirm_estimate,
+    )
 
     async def limits(args: dict[str, Any]) -> dict[str, Any]:
         return await service.process_limits(str(args["ref"]), args.get("material") or None)

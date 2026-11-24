@@ -176,6 +176,16 @@ class RemoteMachineLibrary:
         )
         return result
 
+    async def decide_estimate(
+        self, ref: str, decision: str, decided_by: str, reason: str
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = await self._gateway.request(
+            "POST",
+            f"/v1/library/components/{quote(ref, safe='')}/estimate-review",
+            json={"decision": decision, "decided_by": decided_by, "reason": reason},
+        )
+        return result
+
     async def process_limits(self, ref: str, material: str | None) -> dict[str, Any]:
         query = f"?{urlencode({'material': material})}" if material else ""
         result: dict[str, Any] = await self._gateway.request(
