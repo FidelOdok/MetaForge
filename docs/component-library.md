@@ -90,6 +90,45 @@ The dashboard's library page shows:
 In the component thread, Develop's part says `Part data complete` or how many items are still
 to do, read when the thread is shown.
 
+## Estimates and geometry fidelity
+
+A size worked out rather than read is stored as what it is. A component spec with
+`source_kind: estimate` names its `method` (`printed`, `package_nominal`,
+`similar_part` or `photo`, as `scale.resolve` gives it), its basis in `source_ref` (an `image:<sha256>` ref, a similar part's
+entry, a package code) and a `confidence` from 0 to 1, and is always flagged for review:
+
+```json
+"length_mm": {"value": 25.28, "unit": "mm", "source_kind": "estimate",
+              "method": "photo", "source_ref": "image:…", "confidence": 0.7}
+```
+
+An estimate never replaces a value with a real source: an update that tries is refused
+and names the sourced values. A sourced value replaces an estimate, and a newer estimate
+may refine an older one.
+
+An entry's `geometry` may state its `fidelity`, best first: `maker_cad`,
+`datasheet_built`, `kicad_generic`, `photo_estimate`, `outline`. A less faithful geometry
+never replaces a better one. A colour is appearance, never a material: a colour word given
+as `material` (black, silver, …) is refused.
+
+### Accepting estimates
+
+A part that holds an estimate, or `photo_estimate` geometry, is saved with
+`estimate_review.status` set to `proposed`, whatever the approval policy. Until a person
+accepts it, the part cannot back a fit, interference, DFM or release check: those report
+it as a gap, not a pass.
+
+A person decides with `twin.confirm_estimate` (`accept` or `reject`, and a reason). The
+person is never an argument: the call is always held for a person, and whoever answers
+the approval is recorded as `decided_by` (an agent acting under delegation is recorded
+with the person it acted for). `library.update_component` cannot change the review.
+Changing an estimate's value, or the estimated geometry, proposes it again; other edits
+keep the decision. When the gateway runs with `METAFORGE_APPROVALS=off`, the confirmation is approved automatically like every other held call, and the record says so (`approved_by` is the approvals-off marker, not a person). The release checklist's `estimates_accepted` item lists every library
+part the BOM uses whose estimates are proposed or rejected, and fails until each is
+accepted or replaced; it counts for prototype readiness too, because the fit,
+interference and DFM items cannot stand on unaccepted sizes. Over HTTP the same decision is
+`POST /v1/library/components/{ref}/estimate-review`.
+
 ## Model representations on reusable entries
 
 `library.register_component` and `library.update_component` accept an optional

@@ -2538,6 +2538,7 @@ browsable; the same content reuses the current report.
 | Item | Resolved when |
 |------|---------------|
 | `components_exact` | Every required component is at least `Exact` (per-component maturity) |
+| `estimates_accepted` | No library part the BOM uses rests on estimates a person has not accepted (`twin.confirm_estimate`); an unreadable library fails, and where no library is connected the item says so as `not_applicable` |
 | `dfm` | Every required component made by a process with exact checks has a current exact set that passed, or whose every open finding a person accepted (`keep_design` with who and when). Pending, incomplete or stale analysis is open. An assembly (made of its parts) and a board's 3D export (made by the board house) have no analysis of their own and are not counted |
 | `verification` | Every verification item is `satisfied` |
 | `approvals` | An approved `release_approval` is on record. One a delegated agent approved (`twin.approve_release`) reads "approved by agent X on behalf of Y" in the detail |
@@ -2551,7 +2552,7 @@ browsable; the same content reuses the current report.
 It applies only when a component is made by a process whose profile has
 exact checks (or has an exact set); otherwise there is no checklist and the
 release gate keeps its earlier checks. Create may say **Ready for
-prototype** when `components_exact`, `dfm`, `step_round_trip`, `eda_checks`,
+prototype** when `components_exact`, `estimates_accepted`, `dfm`, `step_round_trip`, `eda_checks`,
 `assembly_dfa` and `outputs_current` are resolved (or do not apply), and
 **Ready for production** only when every item is; otherwise the open items
 are its next steps. The checklist is part of G8 (every item except
@@ -2755,6 +2756,7 @@ revision of any of them makes it stale:
 | `fastener` | A fastener of the assembly (or of `checks.fasteners`) is not in its hole (more than `fastener_tolerance_mm`, default 0.3, off a hole's `center`, or 2 degrees off its axis); its shank does not pass a clearance hole, or is tight (under the ISO 273 fine clearance, medium); a tapped hole is not smaller than the screw, or under its tap drill (medium); a thread-forming pilot is not under 0.9 of the screw (0.9 and over, or under 0.7, medium); a pin does not pass its hole, or a press fit does not hold (more than `max_interference_mm`, default 0.1, is medium); it is too short (into a thread less than `min_engagement_mm`, default one diameter tapped, 1.5 thread-forming; through a nut, the grip and the nut; a pin, every member's `length_mm`); it bottoms out in a blind hole's `depth_mm`; nothing holds it (only clearance holes and no nut); its head does not fit the counterbore, stands proud of a `flush` one (medium), overhangs the face it bears on (medium) or pulls through the first hole. **Unfastened joint:** a hole pattern, or a revolute joint, with no fastener on it (a fastener's axis through each hole, or along the joint's axis), unless its `retention` is `press_fit` or `snap` | high; medium (tight, unfastened joint) |
 | `motion` | A revolute joint with `min_deg` and `max_deg`, swept in `steps` samples, makes a moving body overlap a fixed one | medium |
 | `seat` | A seated part's diameter plus `min_clearance_mm` exceeds the seat's (a `press_fit` must sit 0 to `max_interference_mm` over), or no `retention` (clips, screws, adhesive, press fit) is recorded | high (fit), medium (retention) |
+| `estimates` | A part's model belongs to a library component (`geometry.step_work_product_id`) whose estimated sizes no person has accepted (`twin.confirm_estimate`); an unreadable library leaves the check not assessed, so the outcome is `incomplete`, never passed | medium |
 
 The solids are measured by `cadquery.check_interference` (read only: it
 reads the staged STEPs and returns overlaps, gaps and the overlaps in each

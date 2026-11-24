@@ -52,6 +52,14 @@ class UpdateEntryRequest(BaseModel):
     by: str = ""
 
 
+class EstimateDecisionRequest(BaseModel):
+    """A person's decision on a component's proposed estimates (R8)."""
+
+    decision: str = Field(description="accept or reject")
+    decided_by: str = Field(description="The person deciding.")
+    reason: str = ""
+
+
 def _by(request: Request, named: str) -> str:
     return (named or request.headers.get(AGENT_HEADER) or "").strip()[:100] or "unknown"
 
@@ -280,6 +288,36 @@ async def register_component(body: dict[str, Any], request: Request) -> dict[str
 @router.patch("/components/{ref}")
 async def update_component(ref: str, body: UpdateEntryRequest, request: Request) -> dict[str, Any]:
     return _update("component", ref, body, request)
+
+
+@router.post("/components/{ref}/estimate-review")
+async def decide_component_estimate(
+    ref: str, body: EstimateDecisionRequest, request: Request
+) -> dict[str, Any]:
+    """Accept or reject a component's proposed estimates (R8).
+
+    Over MCP this is ``twin.confirm_estimate``, a human-authority tool: the
+    decider is the person who answered its approval, never a name the model
+    typed.
+    """
+    catalog = get_catalog()
+    editor = library_tenant(request)
+    try:
+        current = catalog.get(ref, "component", viewer=editor)
+        entry = catalog.decide_estimate(
+            current.id,
+            body.decision,
+            decided_by=body.decided_by,
+            reason=body.reason,
+            editor=editor,
+        )
+    except CatalogNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"no component '{ref}'") from exc
+    except CatalogPermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except CatalogError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"entry": _shown(entry)}
 
 
 @router.get("/appearances")

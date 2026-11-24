@@ -46,6 +46,7 @@ Layer: stdlib and structlog (twin_core may import nothing above it).
 from __future__ import annotations
 
 import builtins
+import hashlib
 import json
 import re
 import sqlite3
@@ -108,6 +109,34 @@ SOURCE_KINDS: tuple[str, ...] = (
     "assumption",
 )
 _NEEDS_REF = ("measurement", "standard", "datasheet", "manufacturer_spec", "supplier")
+
+#: FORGE-929 (R7): a component's size or spec worked out rather than read. It names how
+#: (``method``), what from (its ``source_ref``: an image ref, a similar part's entry, a
+#: package code) and how sure (``confidence``, 0 to 1). Always needs review, and never
+#: replaces a value that has a real source.
+ESTIMATE = "estimate"
+#: ``printed``: a size stated in a listing or the person's text whose quote
+#: scale.resolve checked against that text (FORGE-926).
+ESTIMATE_METHODS: tuple[str, ...] = ("printed", "package_nominal", "similar_part", "photo")
+
+#: FORGE-929 (R7): how faithful a part's geometry is, best first. A better model always
+#: replaces a worse one, never the other way round.
+GEOMETRY_FIDELITY: tuple[str, ...] = (
+    "maker_cad",
+    "datasheet_built",
+    "kicad_generic",
+    "photo_estimate",
+    "outline",
+)
+
+#: Colour words: a colour seen in a photo is appearance, never a material (R7).
+_COLOUR_WORDS = frozenset(
+    {
+        "black", "white", "grey", "gray", "silver", "gold", "red", "green", "blue",
+        "yellow", "orange", "purple", "brown", "beige", "transparent", "clear",
+        "matte black", "glossy black", "dark grey", "light grey",
+    }
+)  # fmt: skip
 
 PROCESS_FAMILIES: tuple[str, ...] = (
     "additive",
@@ -351,6 +380,9 @@ class Sourced:
     source_kind: str
     source_ref: str = ""
     needs_review: bool = False
+    #: An estimate's method (ESTIMATE_METHODS) and confidence, 0 to 1 (FORGE-929).
+    method: str = ""
+    confidence: float | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -420,6 +452,11 @@ def parse_specs(raw: Any) -> dict[str, Sourced]:
             value = _finite(f"spec {key}", item.get("value"))
         else:
             value = _number(f"spec {key}", item.get("value"))
+        nested = item.get("source")
+        src_kind = (nested if isinstance(nested, dict) else item).get("source_kind")
+        if str(src_kind or "") == ESTIMATE:
+            out[key] = _estimate(f"spec {key}", value, unit, item)
+            continue
         kind, ref = _source(f"spec {key}", item)
         out[key] = Sourced(value, unit, kind, ref, kind == "assumption")
     for low, high in SPEC_RANGES:
@@ -428,6 +465,124 @@ def parse_specs(raw: Any) -> dict[str, Sourced]:
                 f"spec {low} ({out[low].value:g}) is above {high} ({out[high].value:g})"
             )
     return out
+
+
+def _estimate(where: str, value: float, unit: str, item: dict[str, Any]) -> Sourced:
+    """A component spec worked out rather than read: method, basis and confidence."""
+    nested = item.get("source")
+    src: dict[str, Any] = nested if isinstance(nested, dict) else item
+    method = str(src.get("method") or "").strip()
+    if method not in ESTIMATE_METHODS:
+        raise CatalogError(
+            f"{where}: an estimate needs a method, one of {', '.join(ESTIMATE_METHODS)}"
+        )
+    basis = str(src.get("source_ref") or src.get("ref") or src.get("basis") or "").strip()
+    if not basis:
+        raise CatalogError(
+            f"{where}: an estimate needs its basis in source_ref (an image ref, a similar "
+            "part's entry or a package code)"
+        )
+    confidence = src.get("confidence")
+    if (
+        not isinstance(confidence, int | float)
+        or isinstance(confidence, bool)
+        or not 0.0 <= float(confidence) <= 1.0
+    ):
+        raise CatalogError(f"{where}: an estimate needs a confidence between 0 and 1")
+    return Sourced(value, unit, ESTIMATE, basis, True, method, round(float(confidence), 3))
+
+
+def _is_real_source(spec: Sourced) -> bool:
+    """A value read from a source (not worked out, not assumed)."""
+    return spec.source_kind not in (ESTIMATE, "assumption")
+
+
+def merge_specs(current: dict[str, Sourced], incoming: dict[str, Sourced]) -> dict[str, Sourced]:
+    """``incoming`` over ``current``, refusing an estimate over a sourced value (R7)."""
+    refused = [
+        f"{key} ({current[key].source_kind}: {current[key].source_ref or 'no reference'})"
+        for key, spec in incoming.items()
+        if spec.source_kind == ESTIMATE and key in current and _is_real_source(current[key])
+    ]
+    if refused:
+        raise CatalogError(
+            "an estimate never replaces a sourced value; these are sourced already: "
+            + ", ".join(refused)
+        )
+    return {**current, **incoming}
+
+
+def check_material(material: Any) -> str:
+    """A material name, refusing a colour (a colour is appearance, R7)."""
+    name = str(material or "").strip().lower()
+    if name in _COLOUR_WORDS:
+        raise CatalogError(
+            f"'{name}' is a colour, not a material: record it as the part's appearance "
+            "and give the material it is made of, or leave material empty"
+        )
+    return name
+
+
+def fidelity_rank(geometry: dict[str, Any]) -> int | None:
+    """0 for the best fidelity; ``None`` when the geometry states none."""
+    fid = geometry.get("fidelity") if isinstance(geometry, dict) else None
+    return GEOMETRY_FIDELITY.index(fid) if fid in GEOMETRY_FIDELITY else None
+
+
+def check_fidelity_replacement(current: dict[str, Any], incoming: dict[str, Any]) -> None:
+    """Refuse geometry that is less faithful than what the entry has (R7)."""
+    old, new = fidelity_rank(current), fidelity_rank(incoming)
+    if old is not None and new is not None and new > old:
+        raise CatalogError(
+            f"the entry's geometry is {current['fidelity']}; {incoming['fidelity']} is less "
+            "faithful and never replaces it"
+        )
+
+
+#: Geometry fidelities that are an estimate of the part (R8).
+ESTIMATED_GEOMETRY = frozenset({"photo_estimate"})
+ESTIMATE_DECISIONS = ("accept", "reject")
+
+
+def estimate_basis(entry: Any) -> dict[str, Any]:
+    """What on a component is an estimate, with its value: a change re-opens review."""
+    basis: dict[str, Any] = {
+        key: spec.value for key, spec in sorted(entry.specs.items()) if spec.source_kind == ESTIMATE
+    }
+    geometry = entry.geometry or {}
+    if geometry.get("fidelity") in ESTIMATED_GEOMETRY:
+        digest = hashlib.sha256(
+            json.dumps(geometry, sort_keys=True, default=str).encode()
+        ).hexdigest()[:16]
+        basis["geometry"] = f"{geometry['fidelity']}:{digest}"
+    return basis
+
+
+def review_estimates(entry: Any, now: float) -> None:
+    """Propose a component's estimates for review unless this exact set was decided."""
+    basis = estimate_basis(entry)
+    if not basis:
+        entry.estimate_review = {}
+    elif (entry.estimate_review or {}).get("basis") != basis:
+        # New or changed estimates: whatever was decided was about other values.
+        entry.estimate_review = {"status": "proposed", "basis": basis, "since": now}
+
+
+def estimate_gap(entry: Any) -> str | None:
+    """Why a component cannot yet back a fit, interference, DFM or release check (R8)."""
+    review = getattr(entry, "estimate_review", None) or {}
+    status = review.get("status")
+    if not status or status == "accepted":
+        return None
+    what = ", ".join(sorted(review.get("basis") or {}))
+    if status == "rejected":
+        return (
+            f"{entry.name}: its estimates ({what}) were rejected; replace them with sourced values"
+        )
+    return (
+        f"{entry.name}: its estimates ({what}) are proposed and not yet accepted by a "
+        "person (twin.confirm_estimate)"
+    )
 
 
 def _finite(where: str, value: Any) -> float:
@@ -529,6 +684,16 @@ def parse_geometry(raw: Any) -> dict[str, Any]:
         return {}
     if not isinstance(raw, dict):
         raise CatalogError("geometry must be an object")
+    fidelity = raw.get("fidelity")
+    if fidelity is not None and fidelity not in GEOMETRY_FIDELITY:
+        raise CatalogError(f"geometry.fidelity is one of {', '.join(GEOMETRY_FIDELITY)}")
+    out = _geometry_source(raw)
+    if fidelity is not None:
+        out["fidelity"] = fidelity
+    return out
+
+
+def _geometry_source(raw: dict[str, Any]) -> dict[str, Any]:
     if raw.get("generator"):
         params = raw.get("params") or {}
         if not isinstance(params, dict):
@@ -873,6 +1038,11 @@ class ComponentEntry:
     #: y its height, z its width. A studio places it with g.model(name). "" for none.
     form_code: str = ""
     notes: str = ""
+    #: R8: a part holding estimates is ``proposed`` until a person accepts it
+    #: (``twin.confirm_estimate``). ``{status, basis, since, decided_by?, decided_at?,
+    #: reason?}``; empty when nothing on the part is an estimate. Only
+    #: :meth:`SqliteCatalog.decide_estimate` moves it past ``proposed``.
+    estimate_review: dict[str, Any] = field(default_factory=dict)
     version: int = 1
     updated_at: float = 0.0
     kind: str = field(default="component")
@@ -1342,11 +1512,12 @@ class SqliteCatalog:
                 lifecycle=_part_data().parse_lifecycle(data.get("lifecycle")),
                 ecad=_part_data().parse_ecad(data.get("ecad")),
                 form_code=parse_form_code(data.get("form_code")),
-                material=str(data.get("material") or "").strip().lower(),
+                material=check_material(data.get("material")),
                 suppliers=parse_suppliers(data.get("suppliers")),
                 notes=str(data.get("notes") or ""),
                 updated_at=now,
             )
+            review_estimates(entry, now)
         elif kind == "appearance":
             finish = str(data.get("finish") or "")
             if finish not in APPEARANCE_FINISHES:
@@ -1603,7 +1774,7 @@ class SqliteCatalog:
                 if entry.family in BODY_FAMILIES and "height_mm" in incoming:
                     # An entry saved before the rule named its height thickness_mm.
                     kept.pop("thickness_mm", None)
-                entry.specs = {**kept, **incoming}
+                entry.specs = merge_specs(kept, incoming)
             for key in ("manufacturer", "mpn"):
                 if key in changes:
                     setattr(entry, key, str(changes[key] or "").strip())
@@ -1621,11 +1792,14 @@ class SqliteCatalog:
             if "form_code" in changes:
                 entry.form_code = parse_form_code(changes["form_code"])
             if "geometry" in changes:
-                entry.geometry = parse_geometry(changes["geometry"])
+                geometry = parse_geometry(changes["geometry"])
+                check_fidelity_replacement(entry.geometry, geometry)
+                entry.geometry = geometry
             if "material" in changes:
-                entry.material = str(changes["material"] or "").strip().lower()
+                entry.material = check_material(changes["material"])
             if "suppliers" in changes:
                 entry.suppliers = parse_suppliers(changes["suppliers"])
+            review_estimates(entry, self._clock())
             if {"manufacturer", "manufacturer_org", "suppliers"} & set(changes):
                 if "manufacturer" in changes and "manufacturer_org" not in changes:
                     entry.manufacturer_org = ""
@@ -1663,6 +1837,49 @@ class SqliteCatalog:
         self._save(entry, by, new=False)
         if isinstance(entry, OrganisationEntry):
             self.relink_organisations(by=by)
+        return entry
+
+    def decide_estimate(
+        self,
+        entry_id: str,
+        decision: str,
+        *,
+        decided_by: str,
+        reason: str = "",
+        editor: Any = FROM_CONTEXT,
+    ) -> Any:
+        """A person's decision on a component's proposed estimates (R8).
+
+        The only way past ``proposed``: ``library.update_component`` cannot set
+        ``estimate_review``, and ``decided_by`` comes from the approval that
+        reached the tool, never from the model.
+        """
+        if decision not in ESTIMATE_DECISIONS:
+            raise CatalogError("decision is accept or reject")
+        if not decided_by.strip():
+            raise CatalogError("a decision on estimates names the person who made it")
+        editor = resolve(editor)
+        entry = self.get(entry_id, "component", viewer=editor)
+        if editor is not None and self.owner_of(entry.id) != editor:
+            raise CatalogPermissionError(f"{entry.name} is shared library data")
+        review = entry.estimate_review or {}
+        if review.get("status") != "proposed":
+            raise CatalogError(
+                f"{entry.name} has no proposed estimates to decide"
+                + (f" (they are {review['status']})" if review.get("status") else "")
+            )
+        now = self._clock()
+        entry.estimate_review = {
+            **review,
+            "status": "accepted" if decision == "accept" else "rejected",
+            "decided_by": decided_by.strip(),
+            "decided_at": now,
+            "reason": reason.strip()[:500],
+        }
+        entry.version += 1
+        entry.updated_at = now
+        self._save(entry, decided_by, new=False)
+        logger.info("library_estimate_decided", entry=entry.name, decision=decision)
         return entry
 
     # ── organisations (FORGE-450) ────────────────────────────────────────

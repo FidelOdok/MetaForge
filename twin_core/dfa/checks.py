@@ -122,6 +122,7 @@ CHECK_LABELS: dict[str, str] = {
     "fastener": "Fasteners fit their holes and every joint is fastened",
     "motion": "Joints move through their range without collision",
     "seat": "Seated parts fit and are retained",
+    "estimates": "Every part's sizes are sourced or accepted by a person",
 }
 CHECK_ORDER: tuple[str, ...] = tuple(CHECK_LABELS)
 #: Checks that always have to run.
@@ -773,6 +774,41 @@ def _result(
 def _span(points: list[Vec]) -> tuple[float, float]:
     xs, ys = [p[0] for p in points], [p[1] for p in points]
     return (max(xs) - min(xs), max(ys) - min(ys))
+
+
+def check_estimates(part_refs: Sequence[str], gaps: dict[str, str] | None) -> CheckResult:
+    """R8: a part built on estimates no person accepted cannot pass a fit check.
+
+    ``gaps``: part ``KEY@n`` -> why its library entry's estimates are not accepted;
+    ``None`` when the library could not be read, which is not assessed (required),
+    never a pass.
+    """
+    if gaps is None:
+        return CheckResult(
+            "estimates",
+            "not_assessed",
+            True,
+            "the component library could not be read, so estimated sizes were not checked",
+        )
+    findings = [
+        Finding(
+            id=_fid("estimates", [ref]),
+            check="estimates",
+            severity="medium",
+            message=f"{ref} rests on estimates not accepted by a person: {why}",
+            parts=[ref],
+            values={"gap": why},
+        )
+        for ref, why in sorted(gaps.items())
+    ]
+    return _result(
+        "estimates",
+        findings,
+        False,
+        len(part_refs),
+        f"{len(part_refs)} parts, none resting on unaccepted estimates",
+        "no parts in the assembly",
+    )
 
 
 def check_revisions(bodies: Sequence[Body], stale: dict[str, str]) -> CheckResult:

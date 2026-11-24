@@ -953,6 +953,7 @@ async def test_routes(
     body = client.get(f"{base}/checklist").json()
     assert body["applies"] and [i["id"] for i in body["items"]] == [
         "components_exact",
+        "estimates_accepted",  # R8: not_applicable here, no library connected
         "dfm",
         "verification",
         "approvals",

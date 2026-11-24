@@ -132,6 +132,10 @@ HUMAN_AUTHORITY_TOOLS: frozenset[str] = frozenset(
         # turns it into concept input. The person confirming is the content,
         # so the model can neither name them nor confirm its own reading.
         "twin.confirm_sketch_reading",
+        # R8: accepting a part's estimates is what lets them back a fit,
+        # interference, DFM or release check. The person accepting is the
+        # content, so the model can neither name them nor accept its own.
+        "twin.confirm_estimate",
         # FORGE-824: handing Imagine over to Develop, and reopening it, are a
         # person's decisions. An agent reaches them only when the gateway
         # owner delegates human authority (METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY),
