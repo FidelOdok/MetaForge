@@ -270,7 +270,8 @@ class TestBootstrapToolRegistry:
         # + cadquery.dfm_measure (C3D slice 6),
         # + render.model_views (the browser render adapter).
         # +1: web.fetch, registered without a search key.
-        assert len(tools) == 129
+        # +1: image.fetch is registered without a key (FORGE-923).
+        assert len(tools) == 130
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""
