@@ -205,7 +205,7 @@ _RUNTIME_INJECTED_ADAPTER_IDS = frozenset(
     # Cloud adapters: an API key in place of a local tool container.
     | {"meshy", "zoo", "tripo", "slant3d"}
     # FORGE-544: in-process, no container, no credentials.
-    | {"power"}
+    | {"photo", "power"}
     # FORGE-451: the machine library, injected by the gateway or the sidecar.
     | {"library"}
     # FORGE-427: vendor connectors, injected by the gateway or the sidecar.
@@ -1481,6 +1481,23 @@ async def bootstrap_tool_registry(
                     else "disabled via config"
                 ),
             )
+
+        # ----- Photo adapter (FORGE-926) -----
+        # Plain code over a client's photo reading (scale.resolve): nothing to
+        # inject and nothing that can be missing, like the power adapter.
+        if _is_adapter_enabled("photo") and (not adapter_ids or "photo" in adapter_ids):
+            try:
+                from tool_registry.tools.photo.adapter import PhotoServer
+
+                await registry.register_adapter(PhotoServer())
+                registered.append("photo")
+                logger.info("photo_mcp_adapter_registered")
+            except Exception as exc:
+                logger.error("photo_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("photo")
+        else:
+            skipped.append("photo")
 
         # ----- Power budget MCP adapter (FORGE-544) -----
         # Pure arithmetic over figures the caller supplies, so nothing to
