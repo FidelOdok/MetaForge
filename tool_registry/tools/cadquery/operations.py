@@ -1014,6 +1014,21 @@ def _run_script_in_namespace(script: str) -> Any:
     return namespace.get("result")
 
 
+def whole_shape(shape: Any) -> Any:
+    """Everything a Workplane holds as one shape, so it is measured whole (FORGE-930).
+
+    ``Workplane.val()`` is the FIRST object on the stack: a STEP with several
+    top-level solids (an assembly, a board and its parts) was measured as its
+    first solid alone, its bounding box and volume both short.
+    """
+    if not hasattr(shape, "vals"):
+        return shape.val() if hasattr(shape, "val") else shape
+    objects = [o for o in shape.vals() if hasattr(o, "BoundingBox")]
+    if len(objects) <= 1:
+        return shape.val()
+    return cq.Compound.makeCompound(objects)
+
+
 def shape_properties(shape: Any) -> dict[str, Any]:
     """Volume, area and bounding box of a CadQuery shape or Workplane.
 
@@ -1022,7 +1037,7 @@ def shape_properties(shape: Any) -> dict[str, Any]:
     box: OCCT's ``BoundingBox()`` raises ``Bnd_Box is void`` for it, so it is
     reported with ``bounding_box: None`` rather than as an error.
     """
-    solid = shape.val() if hasattr(shape, "val") else shape
+    solid = whole_shape(shape)
     if hasattr(solid, "Solids") and not solid.Solids():
         return {"volume_mm3": 0.0, "surface_area_mm2": 0.0, "bounding_box": None}
     bb = solid.BoundingBox()
@@ -1326,8 +1341,10 @@ class CadqueryOperations:
             start = time.monotonic()
 
             shape = cq.importers.importStep(input_file)
-            solid = shape.val()
+            solid = whole_shape(shape)
             bb = solid.BoundingBox()
+            if hasattr(shape, "vals"):
+                span.set_attribute("shape.objects", len(shape.vals()))
 
             if properties is None:
                 properties = ["volume", "area", "center_of_mass", "bounding_box", "inertia"]
@@ -1459,7 +1476,7 @@ class CadqueryOperations:
             inertia_kgm2 = inertia_mm5 * 1e-15 * density_kg_m3
             (1 mm^3 = 1e-9 m^3; 1 mm^5 = 1e-15 m^5)
         """
-        solid = shape.val()
+        solid = whole_shape(shape)
         volume_mm3 = solid.Volume()
         com = solid.Center()
         # cq.Shape.matrixOfInertia is a STATIC method taking the solid

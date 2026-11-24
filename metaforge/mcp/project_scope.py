@@ -452,6 +452,7 @@ TOOL_RULES: dict[str, ToolRule] = {
         "cadquery.check_interference",
         "cadquery.create_assembly",
         "cadquery.create_parametric",
+        "geometry.build_from_estimate",
         "cadquery.execute_script",
         "cadquery.export_geometry",
         "cadquery.export_sdf",

@@ -44,7 +44,8 @@ class TestCadqueryServer:
 
     def test_registers_seventeen_tools(self):
         server = CadqueryServer()
-        assert len(server.tool_ids) == 20  # + cadquery.check_interference (DFA)
+        # + cadquery.check_interference (DFA), geometry.build_from_estimate (FORGE-928)
+        assert len(server.tool_ids) == 21
 
     def test_tool_ids_correct(self):
         server = CadqueryServer()
@@ -61,6 +62,7 @@ class TestCadqueryServer:
             "cadquery.export_usd_assembly",
             "cadquery.generate_ros2_launch",
             "cadquery.execute_script",
+            "geometry.build_from_estimate",
             "cadquery.create_assembly",
             "cadquery.generate_enclosure",
             "cadquery.validate_physics_stability",
@@ -345,7 +347,7 @@ class TestJsonRpcIntegration:
         assert response["jsonrpc"] == "2.0"
         assert response["id"] == "1"
         tools = response["result"]["tools"]
-        assert len(tools) == 20
+        assert len(tools) == 21
 
     async def test_tool_list_filter_by_capability(self):
         server = CadqueryServer()
@@ -380,7 +382,7 @@ class TestJsonRpcIntegration:
         result = response["result"]
         assert result["adapter_id"] == "cadquery"
         assert result["status"] == "healthy"
-        assert result["tools_available"] == 20
+        assert result["tools_available"] == 21
 
     async def test_unknown_method(self):
         server = CadqueryServer()

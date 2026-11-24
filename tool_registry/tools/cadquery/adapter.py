@@ -13,6 +13,31 @@ from tool_registry.tools.cadquery.config import CadqueryConfig
 logger = structlog.get_logger()
 
 
+def _step_inline_on_request(
+    result: dict[str, Any], arguments: dict[str, Any], *, path_key: str
+) -> dict[str, Any]:
+    """The STEP's base64 only when the caller asks for it (FORGE-930, R10).
+
+    A STEP inline is a large response (a board assembly runs to megabytes) for a
+    client that only needs to commit it: ``twin.commit_geometry`` reads the same
+    file by its path from the shared adapter workspace. ``include_step_base64``
+    keeps the old behaviour for a caller that does need the bytes.
+    """
+    if arguments.get("include_step_base64") is True or "step_base64" not in result:
+        return result
+    out = {k: v for k, v in result.items() if k != "step_base64"}
+    path = out.get(path_key)
+    out["step_inline"] = (
+        f"not inline: pass {path_key} ({path}) to twin.commit_geometry as file_path, or "
+        "call again with include_step_base64 true for the bytes"
+    )
+    return out
+
+
+#: A built part further than this from its asked size on any side is not saved (R6).
+_SIZE_TOLERANCE_MM = 0.02
+
+
 class CadqueryServer(McpToolServer):
     """CadQuery tool adapter for CAD operations via MCP.
 
@@ -218,9 +243,10 @@ class CadqueryServer(McpToolServer):
                     "Export CAD model to STEP/STL/OBJ/BREP/AMF/SVG format. Output is "
                     "written to the adapter's local filesystem only — it is NOT "
                     "persisted or visible in the project/Twin until "
-                    "twin.commit_geometry is called. The response includes "
-                    "step_base64 (when output_format is STEP) — pass that directly "
-                    "as twin.commit_geometry's step_base64 argument to persist it."
+                    "twin.commit_geometry is called: pass the response's output_file to "
+                    "twin.commit_geometry as file_path (it reads the file from the shared "
+                    "workspace). The STEP is returned inline as step_base64 only when "
+                    "include_step_base64 is true."
                 ),
                 capability="cad_export",
                 input_schema={
@@ -239,6 +265,11 @@ class CadqueryServer(McpToolServer):
                             "type": "string",
                             "description": "Optional output file path",
                         },
+                        "include_step_base64": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Also return the STEP inline as step_base64.",
+                        },
                     },
                     "required": ["input_file", "output_format"],
                 },
@@ -252,7 +283,7 @@ class CadqueryServer(McpToolServer):
                             "type": "string",
                             "description": (
                                 "Base64 STEP bytes, present when output_format is "
-                                "STEP -- pass to twin.commit_geometry's step_base64."
+                                "STEP and include_step_base64 is true."
                             ),
                         },
                     },
@@ -917,6 +948,85 @@ class CadqueryServer(McpToolServer):
 
         self.register_tool(
             manifest=ToolManifest(
+                tool_id="geometry.build_from_estimate",
+                adapter_id="cadquery",
+                name="Build A Part From Estimated Sizes",
+                description=(
+                    "Build a part's 3D model from a pre-tested package template and the sizes "
+                    "scale.resolve gave (FORGE-928): template BOX, CHIP (two-terminal chip), "
+                    "NOLEAD (QFN/DFN: pins.top/bottom/left/right pads per edge, dims pitch, "
+                    "pad_length, pad_width, exposed_pad), GULL2 (SOIC/SOT: pins.per_side or "
+                    "left/right, dims pitch, span tip to tip, standoff, lead_width), GULL4 "
+                    "(QFP: span_x, span_y), BGA (pins.rows, cols, dims pitch, ball_diameter) "
+                    "CYLINDER (diameter, height) or BOARD (a module PCB: dims thickness, "
+                    "corner_radius, holes [{x, y, diameter}]; pins.headers [{x, y, count, "
+                    "rows, pitch, axis x|y, height, name}], positions in mm from the board's "
+                    "lower-left corner, first pin; returns its subparts in parts), "
+                    "SHIELDED_MODULE or SPEAKER: dims.subparts must say, for every expected "
+                    "subpart (module: board, can, antenna, pads; speaker: frame, magnet, cone, "
+                    "gasket, terminals), its sizes or visible: false; a subpart not mentioned is "
+                    "refused, never invented. "
+                    "dims are millimetres: length (x), width "
+                    "(y), height (z, above the seating plane). A pin_count that disagrees "
+                    "with the pads per edge fails the build. The built part is measured over "
+                    "every solid and must match the template's size within 0.02 mm, or it is "
+                    "not saved. Returns cad_file (commit it with twin.commit_geometry's "
+                    "file_path), the measured size, the script, and geometry for the "
+                    "library entry with its fidelity (photo_estimate unless you say "
+                    "otherwise). The STEP is inline only with include_step_base64."
+                ),
+                capability="cad_scripting",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "template": {
+                            "enum": [
+                                "BOX",
+                                "CHIP",
+                                "NOLEAD",
+                                "GULL2",
+                                "GULL4",
+                                "BGA",
+                                "CYLINDER",
+                                "BOARD",
+                                "SHIELDED_MODULE",
+                                "SPEAKER",
+                            ]
+                        },
+                        "dims": {"type": "object"},
+                        "pins": {"type": "object"},
+                        "pin_count": {"type": "integer"},
+                        "name": {"type": "string"},
+                        "fidelity": {
+                            "enum": ["datasheet_built", "photo_estimate", "outline"],
+                            "default": "photo_estimate",
+                        },
+                        "include_step_base64": {"type": "boolean", "default": False},
+                        "assembly": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "A part with several solids (BOARD) is also "
+                            "written as a STEP assembly with one named child per subpart.",
+                        },
+                    },
+                    "required": ["template", "dims"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "cad_file": {"type": "string"},
+                        "size_mm": {"type": "array"},
+                        "size_check": {"type": "object"},
+                        "geometry": {"type": "object"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=2048, max_cpu_seconds=120),
+            ),
+            handler=self.build_from_estimate,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
                 tool_id="cadquery.execute_script",
                 adapter_id="cadquery",
                 name="Execute Script",
@@ -925,10 +1035,12 @@ class CadqueryServer(McpToolServer):
                     "private folder, no network, no access to other files, resource limits). "
                     "The script must assign "
                     "its final result to a variable named 'result' (a CadQuery Workplane). "
-                    "The response includes step_base64 (when the export is STEP format) -- "
-                    "pass that directly as twin.commit_geometry's step_base64 argument to "
-                    "commit this result. There is no session/obj_id concept here (unlike "
-                    "freecad.*): step_base64 is the only path to commit CadQuery output."
+                    "To commit the result, pass the response's cad_file to "
+                    "twin.commit_geometry as file_path (it reads the file from the shared "
+                    "workspace). There is no session/obj_id concept here (unlike freecad.*). "
+                    "The STEP is returned inline as step_base64 only when "
+                    "include_step_base64 is true; the bounding box, volume and area cover "
+                    "every solid the script returns."
                 ),
                 capability="cad_scripting",
                 input_schema={
@@ -937,6 +1049,11 @@ class CadqueryServer(McpToolServer):
                         "script": {
                             "type": "string",
                             "description": "CadQuery Python script to execute",
+                        },
+                        "include_step_base64": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Also return the STEP inline as step_base64.",
                         },
                         "output_path": {
                             "type": "string",
@@ -963,7 +1080,7 @@ class CadqueryServer(McpToolServer):
                             "type": "string",
                             "description": (
                                 "Base64 STEP bytes, present when the export is STEP "
-                                "format -- pass to twin.commit_geometry's step_base64."
+                                "format and include_step_base64 is true."
                             ),
                         },
                         "volume_mm3": {"type": "number"},
@@ -1729,7 +1846,8 @@ class CadqueryServer(McpToolServer):
             work_dir=self.config.work_dir,
             timeout=self.config.max_operation_time,
         )
-        return ops.export_geometry(input_file, output_format, output_path)
+        result = ops.export_geometry(input_file, output_format, output_path)
+        return _step_inline_on_request(result, arguments, path_key="output_file")
 
     async def export_urdf(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Export a single-link URDF for a STEP file."""
@@ -1915,6 +2033,142 @@ class CadqueryServer(McpToolServer):
             include_rviz=bool(arguments.get("include_rviz", True)),
         )
 
+    async def build_from_estimate(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Build a part from a package template and check its size (FORGE-928, R6)."""
+        import asyncio
+        import os
+        import re
+
+        from tool_registry.tools.cadquery.operations import (
+            CadqueryOperations,
+            script_isolation_mode,
+        )
+        from tool_registry.tools.cadquery.package_templates import (
+            TemplateError,
+            build,
+            part_fidelity,
+        )
+
+        pin_count = arguments.get("pin_count")
+        if pin_count is not None and (
+            isinstance(pin_count, bool) or not isinstance(pin_count, int)
+        ):
+            raise ValueError("pin_count must be a whole number")
+        try:
+            built = build(
+                str(arguments.get("template") or ""),
+                arguments.get("dims") or {},
+                arguments.get("pins") or {},
+                pin_count,
+            )
+        except TemplateError as exc:
+            raise ValueError(f"geometry.build_from_estimate: {exc}") from exc
+        name = re.sub(r"[^a-z0-9]+", "-", str(arguments.get("name") or "part").lower()).strip("-")
+        stem = name or "part"
+        if not stem.endswith("estimate"):
+            stem += "-estimate"
+        # Files are never overwritten, so each build gets its own suffix: a
+        # rebuild of the same part with corrected sizes is a new file.
+        from uuid import uuid4
+
+        stem += f"-{uuid4().hex[:8]}"
+        output_path = str(arguments.get("output_path") or f"{stem}.step")
+        isolation = script_isolation_mode()
+        ops = CadqueryOperations(
+            work_dir=self.config.work_dir,
+            timeout=self.config.max_operation_time,
+            max_script_lines=self.config.max_script_lines,
+            sandbox_enabled=self.config.sandbox_enabled,
+            script_isolation=isolation,
+            script_runner=self.script_runner() if isolation == "process" else None,
+        )
+        fidelity = str(arguments.get("fidelity") or "photo_estimate")
+        result = await asyncio.to_thread(ops.execute_script, built.script, output_path, None)
+        box = result.get("bounding_box") or {}
+        made = (
+            float(box.get("max_x", 0)) - float(box.get("min_x", 0)),
+            float(box.get("max_y", 0)) - float(box.get("min_y", 0)),
+            float(box.get("max_z", 0)) - float(box.get("min_z", 0)),
+        )
+        off = [round(abs(m - e), 4) for m, e in zip(made, built.bbox, strict=True)]
+        if max(off) > _SIZE_TOLERANCE_MM:
+            cad_file = result.get("cad_file")
+            if cad_file and os.path.exists(cad_file):
+                os.remove(cad_file)
+            logger.warning(
+                "build_from_estimate_size_mismatch", template=arguments.get("template"), off=off
+            )
+            raise ValueError(
+                "geometry.build_from_estimate: the built part is "
+                f"{made[0]:.3f} x {made[1]:.3f} x {made[2]:.3f} mm, not the "
+                f"{built.bbox[0]} x {built.bbox[1]} x {built.bbox[2]} mm asked for (off by up "
+                f"to {max(off)} mm, over {_SIZE_TOLERANCE_MM} mm), so it was not saved"
+            )
+        out: dict[str, Any] = {
+            "cad_file": result.get("cad_file"),
+            "template": str(arguments.get("template")).upper(),
+            "size_mm": [round(v, 4) for v in made],
+            "size_check": {"asked_mm": list(built.bbox), "off_mm": off, "passed": True},
+            "pins": built.pins,
+            "notes": built.notes,
+            "parts": [],
+            "volume_mm3": result.get("volume_mm3"),
+            "geometry": {
+                "generator": "package_template",
+                "params": {
+                    "template": str(arguments.get("template")).upper(),
+                    "dims": arguments.get("dims") or {},
+                    "pins": arguments.get("pins") or {},
+                },
+                "fidelity": fidelity,
+            },
+            "script": built.script,
+        }
+        if built.parts:
+            # R14.5: every node carries a fidelity (the one asked for unless the
+            # node says otherwise); the part's is the worst mechanical one.
+            def stamp(node: dict[str, Any]) -> dict[str, Any]:
+                return {
+                    **node,
+                    "fidelity": node.get("fidelity") or fidelity,
+                    "children": [stamp(c) for c in node.get("children") or []],
+                }
+
+            out["parts"] = [stamp(n) for n in built.parts]
+            out["geometry"]["fidelity"] = part_fidelity(out["parts"][0])
+        if len(built.solids) > 1 and arguments.get("assembly", True):
+            # R14.7: a STEP assembly with one named child per solid subpart,
+            # checked for overlaps by create_assembly's interference check.
+            files = []
+            for solid in built.solids:
+                piece = await asyncio.to_thread(
+                    ops.execute_script, solid["script"], f"{stem}-{solid['name']}.step", None
+                )
+                files.append(
+                    {
+                        "name": solid["name"],
+                        "file": piece["cad_file"],
+                        "location": solid["location"],
+                    }
+                )
+            assy = await asyncio.to_thread(
+                ops.create_assembly, files, None, f"{stem}-assembly.step"
+            )
+            if not assy.get("interference_check_passed", True):
+                raise ValueError(
+                    f"geometry.build_from_estimate: subparts overlap: {assy.get('interferences')}"
+                )
+            out["merged_cad_file"] = out["cad_file"]
+            out["cad_file"] = assy["assembly_file"]
+            out["assembly"] = {
+                "children": [s["name"] for s in built.solids],
+                "interference_check_passed": True,
+            }
+        if "step_base64" in result:
+            out["step_base64"] = result["step_base64"]
+        logger.info("build_from_estimate", template=out["template"], size=out["size_mm"])
+        return _step_inline_on_request(out, arguments, path_key="cad_file")
+
     async def execute_script(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Run a CadQuery script in the OS-isolated runner."""
         import asyncio
@@ -1951,7 +2205,8 @@ class CadqueryServer(McpToolServer):
             # A caller may shorten the limit, never lengthen it past the adapter's own.
             timeout = min(float(timeout), float(self.config.max_operation_time))
         # The runner blocks while it supervises the child; keep the event loop free.
-        return await asyncio.to_thread(ops.execute_script, script, output_path, timeout)
+        result = await asyncio.to_thread(ops.execute_script, script, output_path, timeout)
+        return _step_inline_on_request(result, arguments, path_key="cad_file")
 
     async def create_assembly(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Create multi-part assembly from STEP files with constraints."""
