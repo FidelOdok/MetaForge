@@ -35,6 +35,7 @@ from tool_registry.tools.web.safety import (
     UnsafeUrlError,
     assert_public_host,
     content_type_allowed,
+    html_links,
     html_to_text,
     is_pdf,
     validate_url,
@@ -343,8 +344,10 @@ def _to_page(response: httpx.Response, url: str, *, max_bytes: int, max_pages: i
         raw = raw[:max_bytes]
 
     body = raw.decode(response.encoding or "utf-8", errors="replace")
+    links: list[dict[str, str]] = []
     if "html" in content_type.lower():
         title, text = html_to_text(body)
+        links = html_links(body, url)
     else:
         title, text = "", body
 
@@ -362,4 +365,5 @@ def _to_page(response: httpx.Response, url: str, *, max_bytes: int, max_pages: i
         content_type=content_type,
         truncated=truncated,
         fetched_bytes=fetched,
+        links=links,
     )

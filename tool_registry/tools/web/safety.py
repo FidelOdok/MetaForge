@@ -25,9 +25,10 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import re
 import socket
 from html.parser import HTMLParser
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urljoin, urlsplit
 
 import structlog
 
@@ -233,6 +234,85 @@ def html_to_text(html: str) -> tuple[str, str]:
     except Exception as exc:  # noqa: BLE001 - never fail a fetch on bad markup
         logger.warning("web_fetch_html_parse_degraded", error=str(exc))
     return " ".join(parser.title.split()), parser.text()
+
+
+#: Links returned with a page; a big site's navigation would otherwise flood the turn.
+MAX_LINKS = 80
+
+#: What makes a link worth listing first: what a datasheet hunt follows. Whole
+#: words, so "Specialized Connectors" is not taken for a specification.
+_DOC_LINK = re.compile(r"\b(datasheet|data sheet|manual|pdf)\b|\.pdf\b", re.IGNORECASE)
+
+
+class _LinkExtractor(HTMLParser):
+    """Collect ``<a href>`` targets with their visible text."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.links: list[tuple[str, str]] = []
+        self._href: str | None = None
+        self._text: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "a":
+            self._href = dict(attrs).get("href")
+            self._text = []
+        elif tag in ("iframe", "embed", "object"):
+            # A document shown inside the page (LCSC's datasheet viewer is an iframe
+            # around pdf.js): the document itself, not a link to follow.
+            found = dict(attrs)
+            src = found.get("src") or found.get("data")
+            if src:
+                self.links.append((_viewer_target(src), "Embedded document"))
+
+    def handle_data(self, data: str) -> None:
+        if self._href is not None:
+            self._text.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "a" and self._href is not None:
+            self.links.append((self._href, " ".join("".join(self._text).split())))
+            self._href = None
+
+
+def _viewer_target(src: str) -> str:
+    """The document a pdf.js style viewer shows (``viewer.html?file=<url>``), else ``src``."""
+    query = parse_qs(urlsplit(src).query)
+    target = (query.get("file") or [""])[0]
+    return target if target.startswith(("http://", "https://", "/")) else src
+
+
+def html_links(html: str, base_url: str, *, limit: int = MAX_LINKS) -> list[dict[str, str]]:
+    """The page's http(s) links as ``[{text, url}]``, absolute, de-duplicated.
+
+    Links that look like documents (a PDF, "Datasheet") come first, so a page
+    whose datasheet sits behind a link (LCSC, a maker's product page) can be
+    followed. Each url is still only a candidate: web.fetch checks it like any
+    other address before reading it.
+    """
+    parser = _LinkExtractor()
+    try:
+        parser.feed(html)
+        parser.close()
+    except Exception as exc:  # noqa: BLE001 - never fail a fetch on bad markup
+        logger.warning("web_fetch_links_parse_degraded", error=str(exc))
+    seen: set[str] = set()
+    out: list[dict[str, str]] = []
+    for href, text in parser.links:
+        href = (href or "").strip()
+        if not href or href.startswith(("#", "javascript:", "mailto:", "tel:")):
+            continue
+        url = urljoin(base_url, href).split("#", 1)[0]
+        if not url.startswith(("http://", "https://")) or url in seen:
+            continue
+        seen.add(url)
+        out.append({"text": text[:120], "url": url[:500]})
+
+    def is_doc(link: dict[str, str]) -> bool:
+        return bool(_DOC_LINK.search(f"{link['text']} {link['url']}"))
+
+    out.sort(key=lambda link: not is_doc(link))  # stable: page order within each group
+    return out[:limit]
 
 
 def wrap_untrusted(text: str, *, url: str) -> str:

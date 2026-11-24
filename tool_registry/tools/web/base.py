@@ -39,6 +39,8 @@ class PageContent(BaseModel):
     # the whole document (the same loud-truncation discipline as MET-568).
     truncated: bool = False
     fetched_bytes: int = 0
+    # The page's links (HTML only), documents first: ``[{text, url}]``.
+    links: list[dict[str, str]] = Field(default_factory=list)
 
 
 class WebSearchProvider(ABC):
