@@ -544,6 +544,8 @@ class UnifiedMcpServer:
         # tool_id → adapter (built once at construction; tool sets are
         # static after each adapter's ``__init__``).
         self._tool_index: dict[str, McpToolServer] = {}
+        #: Compiled output-schema validators, one per tool, built on first use.
+        self._output_validators: dict[str, Any] = {}
         for adapter in self._adapters:
             for tool_id in adapter.tool_ids:
                 if tool_id in self._tool_index:
@@ -2286,6 +2288,7 @@ class UnifiedMcpServer:
             raise
         elapsed = time.monotonic() - t0
         self._record_call(tool_id, "ok", elapsed)
+        self._check_output_schema(tool_id, result)
         if self._capture is not None:
             await self._capture.on_tool_call(
                 tool_id,
@@ -2313,6 +2316,41 @@ class UnifiedMcpServer:
             span.set_attribute("mcp.error_class", error_class(exc))
         except Exception:  # noqa: BLE001 — tracing must not fail the call
             pass
+
+    def _check_output_schema(self, tool_id: str, result: Any) -> None:
+        """Log and count a result that its tool's output_schema does not describe (R10).
+
+        ``tools/list`` does not publish ``outputSchema`` yet, and a schema
+        nobody validates against drifts from the code without anyone noticing.
+        A client that does validate rejects a non-conforming result, so the
+        schemas have to be shown true on real traffic before they are
+        published. This only observes: it never changes or fails the call.
+        """
+        try:
+            adapter = self._tool_index.get(tool_id)
+            registration = getattr(adapter, "_tools", {}).get(tool_id) if adapter else None
+            schema = getattr(getattr(registration, "manifest", None), "output_schema", None)
+            if not schema or not isinstance(result, dict) or "data" not in result:
+                return
+            validator = self._output_validators.get(tool_id)
+            if validator is None:
+                from jsonschema import Draft202012Validator
+
+                validator = self._output_validators[tool_id] = Draft202012Validator(schema)
+            error = next(iter(validator.iter_errors(result["data"])), None)
+            if error is None:
+                return
+            where = "/".join(str(p) for p in error.absolute_path) or "(top level)"
+            logger.warning(
+                "mcp_output_schema_mismatch",
+                tool_id=tool_id,
+                path=where,
+                problem=error.message[:300],
+            )
+            if self._metrics is not None:
+                self._metrics.record_mcp_output_schema_mismatch(tool_id)
+        except Exception as check_exc:  # noqa: BLE001 -- an observer never fails a call
+            logger.debug("mcp_output_schema_check_failed", tool_id=tool_id, error=str(check_exc))
 
     def _record_call(
         self, tool_id: str, status: str, duration: float, exc: BaseException | None = None

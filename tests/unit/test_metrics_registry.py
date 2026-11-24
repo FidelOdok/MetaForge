@@ -101,7 +101,7 @@ class TestMetricsRegistryGroupedAccess:
         # + 3 CadQuery isolated script runner runs, durations and limit stops.
         # + 1 MCP project-scope decisions (account-confined MCP calls).
         # + 1 MCP approval prompts kept open past their call.
-        assert len(all_metrics) == 173
+        assert len(all_metrics) == 174  # + metaforge_mcp_output_schema_mismatch_total
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4
