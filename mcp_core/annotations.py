@@ -136,6 +136,7 @@ READ_ONLY: frozenset[str] = frozenset(
         "knowledge.search",
         "memory.list_insights",
         "memory.retrieve_similar_experience",
+        "image.fetch",
         "web.extract",
         "web.fetch",
         "web.search",
@@ -152,6 +153,8 @@ READ_ONLY: frozenset[str] = frozenset(
         "slant3d.list_filaments",
         # FORGE-544: arithmetic over the arguments; reads and writes nothing.
         "power.check_budget",
+        # FORGE-926: arithmetic over a photo reading; reads and writes nothing.
+        "scale.resolve",
         # FORGE-681: the same, for battery runtime.
         "power.runtime",
         # FORGE-628: renders and a staged .blend are returned inline and the
@@ -814,6 +817,7 @@ OPEN_WORLD: frozenset[str] = frozenset(
         "nexar.get_pricing",
         "nexar.get_availability",
         "knowledge.ingest",
+        "image.fetch",
         "web.extract",
         "web.fetch",
         "web.search",
