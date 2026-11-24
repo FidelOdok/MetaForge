@@ -1014,6 +1014,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # FORGE-630: twin.render_work_product -- the model converted to GLB and
     # rendered by blender.render over the same lazy-bridge seam.
     from api_gateway.projects.routes import unlink_work_product_from_all_projects
+    from api_gateway.twin.component_photo import make_component_photo_recorder
     from api_gateway.twin.concept_image import make_concept_image_recorder
     from api_gateway.twin.concept_mesh import make_concept_mesh_recorder
     from api_gateway.twin.concept_parts import make_concept_parts_service
@@ -1386,6 +1387,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # provider is resolved per call, so an unconfigured one is a clear
         # error on that call and never a startup failure.
         concept_image_renderer=make_concept_image_recorder(twin, project_backend),
+        component_photo_recorder=make_component_photo_recorder(twin, project_backend),
         # FORGE-772: a vision model checks a stored concept image against the
         # selected assembly; advisory, "unchecked" when no model can.
         concept_image_critic=make_concept_image_critic(twin, project_backend),

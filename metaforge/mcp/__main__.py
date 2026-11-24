@@ -2436,6 +2436,14 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
 
     _try("concept_image_renderer", _concept_image)
 
+    # FORGE-924: twin.record_component_photo, photos kept as evidence.
+    def _component_photo() -> Any:
+        from api_gateway.twin.component_photo import make_component_photo_recorder
+
+        return make_component_photo_recorder(twin, project_backend)
+
+    _try("component_photo_recorder", _component_photo)
+
     # FORGE-772: twin.critique_concept_image. Registered whether or not a
     # vision model is configured; without one the verdict is "unchecked".
     def _concept_image_critic() -> Any:

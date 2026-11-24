@@ -288,6 +288,10 @@ BOOKKEEPING: frozenset[str] = frozenset(
         # records nothing in the twin. Holding each placement for approval
         # would make the view a series of prompts instead of a build.
         "twin.place_part",
+        # FORGE-924 (R2): a component photo kept as evidence. It adds a record
+        # beside the part, changes no design state and can never support a
+        # claim; holding every photo made a photo-built model a run of prompts.
+        "twin.record_component_photo",
     }
 )
 

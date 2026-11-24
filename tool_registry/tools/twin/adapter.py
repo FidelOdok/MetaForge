@@ -465,6 +465,7 @@ class TwinServer(McpToolServer):
         blob_stager: Any = None,
         design_sketch_recorder: Any = None,
         concept_image_renderer: Any = None,
+        component_photo_recorder: Any = None,
         concept_image_critic: Any = None,
         concept_mesh_generator: Any = None,
         concept_parts_service: Any = None,
@@ -611,6 +612,9 @@ class TwinServer(McpToolServer):
         # recorder) that has an image model draw a concept from its block
         # layout and a visual brief, and commits it as an illustrative render.
         self._concept_image_renderer = concept_image_renderer
+        # FORGE-924: an injected async ``record(...)`` (make_component_photo_recorder)
+        # that keeps a component photo as evidence.
+        self._component_photo_recorder = component_photo_recorder
         # FORGE-772: an injected async ``critique(node_id, ...)`` (make_concept_
         # image_critic) that has a vision model check a stored concept image
         # against the selected assembly. Advisory; the image stays illustrative.
@@ -891,6 +895,8 @@ class TwinServer(McpToolServer):
             self._register_render_concept_sketch()
         if concept_image_renderer is not None:
             self._register_render_concept_image()
+        if component_photo_recorder is not None:
+            self._register_record_component_photo()
         if concept_image_critic is not None:
             self._register_critique_concept_image()
         if concept_mesh_generator is not None:
@@ -4056,6 +4062,98 @@ class TwinServer(McpToolServer):
     # ------------------------------------------------------------------
     # twin.render_concept_image (FORGE-761)
     # ------------------------------------------------------------------
+
+    def _register_record_component_photo(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.record_component_photo",
+                adapter_id="twin",
+                name="Record Component Photo",
+                description=(
+                    "Keep a component photo in the project as evidence (FORGE-924): the "
+                    "image_ref an image.fetch call returned, with the view it shows (top, "
+                    "side, angled, bottom or unclear) and the component (a library entry or "
+                    "order code). The record keeps the exact bytes, origin (the source url, "
+                    "or who uploaded it), sha256, size in pixels and a licence notice; a "
+                    "distributor's or maker's photo is copyrighted, kept as evidence only "
+                    "and never redistributed, and the default notice says so. It saves "
+                    "without an approval: it adds a record and changes no design state. A "
+                    "photo shows what a part looks like, never what the design meets: it "
+                    "cannot support a requirement claim. The same photo recorded twice in "
+                    "a project is the same record (reused: true)."
+                ),
+                capability="twin_evidence",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {"type": "string"},
+                        "image_ref": {"type": "string", "description": "image:<sha256>"},
+                        "view": {"enum": ["top", "side", "angled", "bottom", "unclear"]},
+                        "component": {"type": "string"},
+                        "origin": {
+                            "type": "string",
+                            "description": (
+                                "Where the photo came from; defaults to the url image.fetch "
+                                "read it from."
+                            ),
+                        },
+                        "licence_notice": {"type": "string"},
+                        "notes": {"type": "string"},
+                    },
+                    "required": ["project_id", "image_ref", "view"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "image_ref": {"type": "string"},
+                        "view": {"type": "string"},
+                        "licence_notice": {"type": "string"},
+                        "reused": {"type": "boolean"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=30),
+            ),
+            handler=self.record_component_photo,
+        )
+
+    async def record_component_photo(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from tool_registry.tools.web.image_fetch import ImageFetchError, ImageStore
+
+        tool = "twin.record_component_photo"
+        project_id = self._project_arg(tool, arguments)
+        image_ref = str(arguments.get("image_ref") or "").strip()
+        store = ImageStore()
+        try:
+            data, mime = store.read(image_ref)
+        except ImageFetchError as exc:
+            raise ValueError(f"{tool}: {exc}") from exc
+        from io import BytesIO
+
+        from PIL import Image
+
+        with Image.open(BytesIO(data)) as image:
+            width, height = image.size
+        fetched = store.entry_for(image_ref)
+        origin = str(arguments.get("origin") or fetched.get("source_url") or "").strip()
+        try:
+            result: dict[str, Any] = await self._component_photo_recorder(
+                project_id=project_id,
+                data=data,
+                mime=mime,
+                width_px=width,
+                height_px=height,
+                view=str(arguments.get("view") or ""),
+                origin=origin,
+                component=str(arguments.get("component") or ""),
+                licence_notice=str(arguments.get("licence_notice") or ""),
+                retrieved_at=str(fetched.get("retrieved_at") or ""),
+                notes=str(arguments.get("notes") or ""),
+            )
+        except ValueError as exc:
+            raise ValueError(f"{tool}: {exc}") from exc
+        return result
 
     def _register_render_concept_image(self) -> None:
         self.register_tool(

@@ -440,6 +440,7 @@ async def bootstrap_tool_registry(
     harness_estimate_getter: Any = None,
     item_history_reader: Any = None,
     concept_image_renderer: Any = None,
+    component_photo_recorder: Any = None,
     concept_image_critic: Any = None,
     concept_mesh_generator: Any = None,
     concept_parts_service: Any = None,
@@ -968,6 +969,7 @@ async def bootstrap_tool_registry(
                     harness_estimate_getter=harness_estimate_getter,
                     item_history_reader=item_history_reader,
                     concept_image_renderer=concept_image_renderer,
+                    component_photo_recorder=component_photo_recorder,
                     concept_image_critic=concept_image_critic,
                     concept_mesh_generator=concept_mesh_generator,
                     concept_parts_service=concept_parts_service,
@@ -1326,7 +1328,11 @@ async def bootstrap_tool_registry(
                 provider = select_search_provider()
                 # FORGE-899: component.find borrows the same provider.
                 _web_search_provider = provider
-                server = WebMcpServer(provider=provider, extractor=select_extractor())
+                server = WebMcpServer(
+                    provider=provider,
+                    extractor=select_extractor(),
+                    distributors=_available_distributor_adapters,
+                )
                 await registry.register_adapter(server)
                 registered.append("web")
                 logger.info(

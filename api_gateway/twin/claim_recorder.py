@@ -34,7 +34,7 @@ tracer = get_tracer("api_gateway.twin.claim_recorder")
 
 
 #: Work product types that only ever show intent (FORGE-759).
-ILLUSTRATIVE_TYPES = frozenset({"design_sketch", "render", "image"})
+ILLUSTRATIVE_TYPES = frozenset({"design_sketch", "render", "image", "component_photo"})
 
 
 def _type_name(wp: Any) -> str:
