@@ -53,3 +53,25 @@ async def project_estimate_gaps(twin: Any, project_id: UUID) -> list[str]:
         span.set_attribute("estimate_gaps", len(gaps))
         logger.info("library_estimate_gaps", project_id=str(project_id), gaps=len(gaps))
         return gaps
+
+
+def gaps_by_work_product(node_ids: list[str]) -> dict[str, str]:
+    """Work product id -> gap, for library components whose model is that work product.
+
+    A part's geometry links to its library entry through the entry's
+    ``geometry.step_work_product_id``. Raises when the library cannot be read.
+    """
+    from api_gateway.library.catalog_routes import get_catalog
+    from twin_core.library.catalog import estimate_gap
+
+    wanted = set(node_ids)
+    out: dict[str, str] = {}
+    with tracer.start_as_current_span("library.estimate_gaps_by_work_product") as span:
+        for entry in get_catalog().list("component"):
+            wp = str((getattr(entry, "geometry", None) or {}).get("step_work_product_id") or "")
+            if wp in wanted:
+                gap = estimate_gap(entry)
+                if gap:
+                    out[wp] = gap
+        span.set_attribute("estimate_gaps", len(out))
+    return out

@@ -874,6 +874,7 @@ class AssemblyFitService:
                 span.record_exception(exc)
                 _metric("record_assembly_check", "failed")
                 raise AssemblyFitError(f"{FIT_TOOL} failed: {exc}", 502) from exc
+            report.checks.append(self._estimates_check(parts))
 
             pins = await resolve_record_pins(
                 self._twin, depends_on=list(dict.fromkeys(refs)), project_id=str(pid)
@@ -933,6 +934,21 @@ class AssemblyFitService:
                 "checklist_item": item_view,
                 **pinned.as_result(),
             }
+
+    @staticmethod
+    def _estimates_check(layout_parts: list[dict[str, Any]]) -> Any:
+        """R8: parts whose library entry holds estimates no person accepted."""
+        from api_gateway.library.estimate_gaps import gaps_by_work_product
+        from twin_core.dfa.checks import check_estimates
+
+        refs = {str(p["node_id"]): str(p["item_ref"]) for p in layout_parts if p.get("node_id")}
+        try:
+            by_node: dict[str, str] | None = gaps_by_work_product(list(refs))
+        except Exception as exc:  # noqa: BLE001 - unread is not assessed, never a pass
+            logger.warning("assembly_fit_estimates_unread", error=str(exc))
+            by_node = None
+        gaps = None if by_node is None else {refs[n]: why for n, why in by_node.items()}
+        return check_estimates(list(refs.values()), gaps)
 
     async def _checklist_item(self, pid: UUID, item_id: str) -> dict[str, Any] | None:
         from twin_core.dfm.release_checklist import manufacturing_checklist
