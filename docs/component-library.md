@@ -123,7 +123,7 @@ person is never an argument: the call is always held for a person, and whoever a
 the approval is recorded as `decided_by` (an agent acting under delegation is recorded
 with the person it acted for). `library.update_component` cannot change the review.
 Changing an estimate's value, or the estimated geometry, proposes it again; other edits
-keep the decision. The release checklist's `estimates_accepted` item lists every library
+keep the decision. When the gateway runs with `METAFORGE_APPROVALS=off`, the confirmation is approved automatically like every other held call, and the record says so (`approved_by` is the approvals-off marker, not a person). The release checklist's `estimates_accepted` item lists every library
 part the BOM uses whose estimates are proposed or rejected, and fails until each is
 accepted or replaced; it counts for prototype readiness too, because the fit,
 interference and DFM items cannot stand on unaccepted sizes. Over HTTP the same decision is
