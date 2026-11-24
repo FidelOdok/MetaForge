@@ -2061,6 +2061,11 @@ class CadqueryServer(McpToolServer):
         stem = name or "part"
         if not stem.endswith("estimate"):
             stem += "-estimate"
+        # Files are never overwritten, so each build gets its own suffix: a
+        # rebuild of the same part with corrected sizes is a new file.
+        from uuid import uuid4
+
+        stem += f"-{uuid4().hex[:8]}"
         output_path = str(arguments.get("output_path") or f"{stem}.step")
         isolation = script_isolation_mode()
         ops = CadqueryOperations(

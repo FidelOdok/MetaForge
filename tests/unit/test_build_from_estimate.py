@@ -7,6 +7,7 @@ exactly (one solid each, the 48-lead QFP in under 4 s).
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import pytest
@@ -124,7 +125,8 @@ async def test_a_part_that_matches_is_returned_by_path(server: Any) -> None:
             "name": "R 0603",
         }
     )
-    assert out["cad_file"].endswith("r-0603-estimate.step") and out["size_check"]["passed"]
+    assert re.search(r"/r-0603-estimate-[0-9a-f]{8}\.step$", out["cad_file"])
+    assert out["size_check"]["passed"]
     assert out["geometry"]["fidelity"] == "photo_estimate" and "step_base64" not in out
 
 
@@ -201,8 +203,8 @@ async def test_a_board_is_also_a_named_assembly_with_its_fidelity(server: Any) -
             "pins": {"headers": [{"x": 2.54, "y": 1.27, "count": 9}]},
         }
     )
-    assert out["cad_file"].endswith("breakout-estimate-assembly.step")
-    assert out["merged_cad_file"].endswith("breakout-estimate.step")
+    assert re.search(r"/breakout-estimate-[0-9a-f]{8}-assembly\.step$", out["cad_file"])
+    assert re.search(r"/breakout-estimate-[0-9a-f]{8}\.step$", out["merged_cad_file"])
     assert [p["name"] for p in _Ops.assemblies[0]] == ["board", "J1"]
     assert out["assembly"]["children"] == ["board", "J1"]
     assert out["parts"][0]["children"][2]["fidelity"] == "photo_estimate"
