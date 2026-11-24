@@ -248,6 +248,7 @@ TOOL_RULES: dict[str, ToolRule] = {
         "library.process_limits",
         "library.search",
         "component.find",
+        "component.find_similar",
         "library.standard_part",
         "library.resolve_component_model",
     ),
