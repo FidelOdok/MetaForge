@@ -455,6 +455,8 @@ ADDITIVE: frozenset[str] = frozenset(
         # FORGE-761: adds an illustrative render node linked to its layout
         # sketch; the sketch is never touched.
         "twin.render_concept_image",
+        # FORGE-924: adds a component photo record; nothing existing is touched.
+        "twin.record_component_photo",
         # FORGE-772: stores a vision model's advisory check of a concept image
         # on it, in a new revision; nothing a person decided is touched.
         "twin.critique_concept_image",

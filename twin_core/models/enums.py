@@ -118,6 +118,9 @@ class WorkProductType(StrEnum):
     # not linked to anything yet for a brand-new design (nothing built to
     # link to). `metadata.approved`/`metadata.approved_at` track the gate.
     DESIGN_SKETCH = "design_sketch"
+    # FORGE-924: a photo of a component kept as evidence of its appearance and size
+    # (origin, checksum, licence notice, view). Illustrative: never supports a claim.
+    COMPONENT_PHOTO = "component_photo"
     # Lifecycle-stage additions (follow-up to MET-747's CAD-lifecycle mapping):
     # a hazard/risk log (hazard, cause, effect, severity x likelihood ->
     # risk score, mitigation) produced by the compliance domain's

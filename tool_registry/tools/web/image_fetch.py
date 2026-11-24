@@ -187,6 +187,13 @@ class ImageStore:
         tmp_index.write_text(json.dumps(index, indent=1, sort_keys=True))
         tmp_index.replace(self._index_path())
 
+    def entry_for(self, image_ref: str) -> dict[str, Any]:
+        """What the index knows of a stored image (source url, retrieval time), or {}."""
+        for entry in self._index().values():
+            if isinstance(entry, dict) and entry.get("image_ref") == image_ref:
+                return dict(entry)
+        return {}
+
     def read(self, image_ref: str) -> tuple[bytes, str]:
         """``(bytes, mime)`` for an ``image:<sha256>`` ref; raises :class:`ImageFetchError`."""
         sha = image_ref.removeprefix("image:")
