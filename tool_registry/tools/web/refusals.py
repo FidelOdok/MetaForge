@@ -53,7 +53,9 @@ def _alternatives(host: str) -> str:
 
 def _datasheet_sources() -> str:
     return (
-        "For a datasheet value: try a distributor API (digikey.get_product, "
+        "For a datasheet value: try web.extract on the same URL first when it is "
+        "offered (a third-party reader that gets past most of these sites; say the value "
+        "was read via Tavily Extract), then a distributor API (digikey.get_product, "
         "mouser.get_product) for the parameters and a datasheet link on another host, "
         "knowledge.search for a datasheet already ingested, or web.search for another "
         "copy of the same document. If none works, ask the person to download the PDF "
