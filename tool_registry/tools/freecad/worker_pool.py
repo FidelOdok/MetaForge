@@ -83,10 +83,35 @@ class FreecadWorkerCrashedError(RuntimeError):
     existed to lose.
     """
 
-    def __init__(self, session_id: str | None, tool: str) -> None:
+    def __init__(
+        self,
+        session_id: str | None,
+        tool: str,
+        *,
+        one_shot: bool = False,
+        timed_out_after: int | None = None,
+    ) -> None:
         self.session_id = session_id
         self.tool = tool
-        if session_id is None:
+        self.timed_out_after = timed_out_after
+        if timed_out_after is not None:
+            lost = (
+                "its worker was stopped"
+                if session_id is None
+                else f"session {session_id!r} was lost and must be reopened"
+            )
+            message = (
+                f"{tool!r} ran longer than the {timed_out_after} s limit, so {lost}; "
+                "nothing else was affected. A very large file may need a higher "
+                "FREECAD_MAX_OPERATION_TIME (cadquery reads big STEP files faster)."
+            )
+        elif one_shot:
+            message = (
+                f"FreeCAD crashed running {tool!r}; only that call's own worker was lost "
+                "and other calls are unaffected. This is a native-code failure, not a "
+                "scripting error, and it has been logged."
+            )
+        elif session_id is None:
             message = (
                 f"FreeCAD crashed while starting a new session (during {tool!r}) "
                 "-- no session was created. This is a native-code failure, not a "
@@ -147,6 +172,8 @@ class FreecadWorkerPool:
         ]
         self._workers: dict[str, _Worker] = {}
         self._registry_lock = asyncio.Lock()  # guards self._workers mutations only
+        # One-shot workers for stateless calls, capped like the session workers.
+        self._one_shot = asyncio.Semaphore(max(1, config.max_workers))
 
     # ---- lifecycle ------------------------------------------------------
 
@@ -206,6 +233,38 @@ class FreecadWorkerPool:
                         self._workers.pop(session_id, None)
                     raise
 
+    async def run_once(self, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Run one stateless call (``freecad.<tool>``) in its own short-lived worker.
+
+        A stateless operation (reading a 78 MB STEP, meshing, a boolean) ran on
+        the adapter server's own event loop. FreeCAD holds the GIL through most
+        of its native work, so for its whole length the server answered
+        nothing, its health check included: Docker marked the adapter
+        unhealthy and the sidecar called FreeCAD unreachable. In a worker the
+        server stays responsive, a native crash takes only that worker, and
+        ``max_operation_time`` ends a stuck one.
+        """
+        async with self._one_shot:
+            with tracer.start_as_current_span(f"freecad.worker_pool.run_once.{tool}"):
+                transport = StdioTransport(
+                    command=self._worker_command,
+                    env=_worker_env(self._config),
+                    ready_signal=READY_SIGNAL,
+                    ready_timeout=self._worker_ready_timeout,
+                    limit=self._config.worker_stdio_limit_bytes,
+                )
+                await transport.connect()
+                started = self._clock()
+                try:
+                    return await self._send(transport, tool, arguments, one_shot=True)
+                finally:
+                    await transport.disconnect()
+                    logger.info(
+                        "freecad_one_shot_done",
+                        tool=tool,
+                        seconds=round(self._clock() - started, 2),
+                    )
+
     async def close_session(self, session_id: str) -> bool:
         """Close a session's worker. Returns False if unknown."""
         async with self._registry_lock:
@@ -228,6 +287,7 @@ class FreecadWorkerPool:
         arguments: dict[str, Any],
         *,
         session_id: str | None = None,
+        one_shot: bool = False,
     ) -> dict[str, Any]:
         """Send one ``freecad.<tool>`` call, unwrap the result, or raise.
 
@@ -259,7 +319,12 @@ class FreecadWorkerPool:
                 timeout_s=self._config.max_operation_time,
                 stderr=stderr.decode("utf-8", errors="replace")[-_STDERR_LOG_TAIL:],
             )
-            raise FreecadWorkerCrashedError(session_id, tool_id) from exc
+            raise FreecadWorkerCrashedError(
+                session_id,
+                tool_id,
+                one_shot=one_shot,
+                timed_out_after=self._config.max_operation_time,
+            ) from exc
         except (RuntimeError, ConnectionResetError, BrokenPipeError) as exc:
             stderr = await transport.read_stderr()
             logger.error(
@@ -268,7 +333,7 @@ class FreecadWorkerPool:
                 tool=tool_id,
                 stderr=stderr.decode("utf-8", errors="replace")[-_STDERR_LOG_TAIL:],
             )
-            raise FreecadWorkerCrashedError(session_id, tool_id) from exc
+            raise FreecadWorkerCrashedError(session_id, tool_id, one_shot=one_shot) from exc
 
         response = deserialize_response(raw)
         if isinstance(response, JsonRpcErrorResponse):

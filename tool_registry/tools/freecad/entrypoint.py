@@ -60,6 +60,8 @@ async def main() -> None:
         config_kwargs["max_sessions"] = int(max_sessions)
     if (max_workers := os.environ.get("FREECAD_MAX_WORKERS")) is not None:
         config_kwargs["max_workers"] = int(max_workers)
+    if (op_time := os.environ.get("FREECAD_MAX_OPERATION_TIME")) is not None:
+        config_kwargs["max_operation_time"] = int(op_time)
     if (stdio_limit := os.environ.get("FREECAD_WORKER_STDIO_LIMIT_BYTES")) is not None:
         config_kwargs["worker_stdio_limit_bytes"] = int(stdio_limit)
     config = FreecadConfig(**config_kwargs)
