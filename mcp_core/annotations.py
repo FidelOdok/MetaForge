@@ -155,6 +155,8 @@ READ_ONLY: frozenset[str] = frozenset(
         "power.check_budget",
         # FORGE-926: arithmetic over a photo reading; reads and writes nothing.
         "scale.resolve",
+        # FORGE-925: measures a stored image; writes nothing.
+        "photo.measure",
         # FORGE-681: the same, for battery runtime.
         "power.runtime",
         # FORGE-628: renders and a staged .blend are returned inline and the
