@@ -1402,7 +1402,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # Deterministic and free; no provider.
         structured_mesh_renderer=make_structured_mesh_recorder(twin, project_backend),
         # C3D slice 4: heuristic DFM findings per component.
-        dfm_service=make_dfm_service(twin),
+        dfm_service=_with_estimate_gaps(make_dfm_service(twin)),
         # FORGE-794: concept sketch proposals from text, references or a
         # sketch, as jobs on their target. Held for approval like any paid
         # image tool; the provider is resolved per call.
@@ -2310,6 +2310,15 @@ def _resolve_cors_origins(explicit: list[str] | None, auth_settings: AuthSetting
             "dashboard origin(s), e.g. 'https://app.metaforge.uk'."
         )
     return origins
+
+
+def _with_estimate_gaps(service: Any) -> Any:
+    """Register the release checklist's library estimate gap source (R8), then pass through."""
+    from api_gateway.library.estimate_gaps import project_estimate_gaps
+    from twin_core.dfm.release_checklist import set_estimate_gap_source
+
+    set_estimate_gap_source(project_estimate_gaps)
+    return service
 
 
 def create_app(

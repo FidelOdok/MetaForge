@@ -48,6 +48,7 @@ percentage, never a completion it cannot back (section 16.2 item 7).
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 from uuid import UUID
@@ -65,6 +66,7 @@ ItemStatus = Literal["pass", "fail", "not_applicable"]
 #: Items a prototype needs; production needs every item.
 PROTOTYPE_ITEMS: tuple[str, ...] = (
     "components_exact",
+    "estimates_accepted",
     "dfm",
     "step_round_trip",
     "eda_checks",
@@ -73,6 +75,7 @@ PROTOTYPE_ITEMS: tuple[str, ...] = (
 )
 ITEM_ORDER: tuple[str, ...] = (
     "components_exact",
+    "estimates_accepted",
     "dfm",
     "verification",
     "approvals",
@@ -85,6 +88,7 @@ ITEM_ORDER: tuple[str, ...] = (
 )
 ITEM_LABELS: dict[str, str] = {
     "components_exact": "Every required component has a validated exact model",
+    "estimates_accepted": "Every library part's estimated sizes accepted by a person",
     "dfm": "Manufacturing analysis passed, or its issues accepted by a person",
     "verification": "Physical and supplier verification recorded and approved",
     "approvals": "Manufacturing release approved",
@@ -98,6 +102,7 @@ ITEM_LABELS: dict[str, str] = {
 #: The release gate's own release approval check covers ``approvals``.
 GATE_ITEMS: tuple[str, ...] = (
     "components_exact",
+    "estimates_accepted",
     "dfm",
     "verification",
     "step_round_trip",
@@ -109,6 +114,59 @@ GATE_ITEMS: tuple[str, ...] = (
 )
 
 APPROVED_AUTHORITIES = frozenset({"approved", "baselined"})
+
+#: ``async (twin, project_id) -> [gap, ...]``: why each library part the project uses
+#: cannot yet back a check (R8). The library is the gateway's, which the twin cannot
+#: import, so the gateway and the MCP sidecar register one at start-up.
+EstimateGapSource = Callable[[Any, UUID], Awaitable[list[str]]]
+_estimate_gap_source: EstimateGapSource | None = None
+
+
+def set_estimate_gap_source(source: EstimateGapSource | None) -> None:
+    """Register (or clear) where the checklist reads library estimate gaps from."""
+    global _estimate_gap_source
+    _estimate_gap_source = source
+
+
+async def estimates_item(twin: Any, pid: UUID) -> ChecklistItem:
+    """``estimates_accepted``: a part built on unaccepted estimates is a gap, not a pass (R8)."""
+    label = ITEM_LABELS["estimates_accepted"]
+    if _estimate_gap_source is None:
+        return ChecklistItem(
+            id="estimates_accepted",
+            label=label,
+            status="not_applicable",
+            detail="the component library is not connected here, so estimates were not read",
+        )
+    try:
+        gaps = await _estimate_gap_source(twin, pid)
+    except Exception as exc:  # noqa: BLE001 -- unread is a gap, never a pass
+        logger.warning("release_checklist_estimates_unread", error=str(exc))
+        return ChecklistItem(
+            id="estimates_accepted",
+            label=label,
+            status="fail",
+            detail="the component library could not be read",
+            blockers=[f"the component library could not be read: {exc}"],
+            next_steps=["Check the component library is reachable, then read the checklist again"],
+        )
+    if not gaps:
+        return ChecklistItem(
+            id="estimates_accepted",
+            label=label,
+            status="pass",
+            detail="no library part the design uses rests on unaccepted estimates",
+        )
+    return ChecklistItem(
+        id="estimates_accepted",
+        label=label,
+        status="fail",
+        detail=f"{len(gaps)} library part(s) rest on estimates a person has not accepted",
+        blockers=list(gaps),
+        next_steps=[
+            f"Have a person accept or replace the estimates on {g.split(':', 1)[0]}" for g in gaps
+        ],
+    )
 
 
 @dataclass
@@ -592,6 +650,7 @@ async def manufacturing_checklist(
         from twin_core.dfm.release_fit import fit_items
 
         items.extend(await fit_items(twin, pid))
+        items.insert(1, await estimates_item(twin, pid))
         refs = sorted({f"{r.item_key}@{r.head_revision}" for r in readiness_})
         out = ManufacturingChecklist(project_id=str(pid), items=items, revision_refs=refs)
         span.set_attribute("checklist.applies", True)

@@ -2538,6 +2538,7 @@ browsable; the same content reuses the current report.
 | Item | Resolved when |
 |------|---------------|
 | `components_exact` | Every required component is at least `Exact` (per-component maturity) |
+| `estimates_accepted` | No library part the BOM uses rests on estimates a person has not accepted (`twin.confirm_estimate`); an unreadable library fails, and where no library is connected the item says so as `not_applicable` |
 | `dfm` | Every required component made by a process with exact checks has a current exact set that passed, or whose every open finding a person accepted (`keep_design` with who and when). Pending, incomplete or stale analysis is open. An assembly (made of its parts) and a board's 3D export (made by the board house) have no analysis of their own and are not counted |
 | `verification` | Every verification item is `satisfied` |
 | `approvals` | An approved `release_approval` is on record. One a delegated agent approved (`twin.approve_release`) reads "approved by agent X on behalf of Y" in the detail |
@@ -2551,7 +2552,7 @@ browsable; the same content reuses the current report.
 It applies only when a component is made by a process whose profile has
 exact checks (or has an exact set); otherwise there is no checklist and the
 release gate keeps its earlier checks. Create may say **Ready for
-prototype** when `components_exact`, `dfm`, `step_round_trip`, `eda_checks`,
+prototype** when `components_exact`, `estimates_accepted`, `dfm`, `step_round_trip`, `eda_checks`,
 `assembly_dfa` and `outputs_current` are resolved (or do not apply), and
 **Ready for production** only when every item is; otherwise the open items
 are its next steps. The checklist is part of G8 (every item except

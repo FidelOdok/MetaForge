@@ -2492,6 +2492,11 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
             seed_machine_library(get_machine_library())
         except Exception as exc:  # noqa: BLE001 - a seed failure must not stop the sidecar
             logger.warning("mcp_machine_seed_failed", error=str(exc))
+        # R8: the release checklist reads library estimate gaps from here.
+        from api_gateway.library.estimate_gaps import project_estimate_gaps
+        from twin_core.dfm.release_checklist import set_estimate_gap_source
+
+        set_estimate_gap_source(project_estimate_gaps)
         return make_dfm_service(twin)
 
     _try("dfm_service", _dfm_service)
