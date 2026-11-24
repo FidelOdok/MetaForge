@@ -38,6 +38,7 @@ import structlog
 from observability.tracing import get_tracer
 from tool_registry.mcp_server.handlers import ResourceLimits, ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
+from tool_registry.tools.components.similar import distributor_size, sourced_size, why_similar
 from tool_registry.tools.distributors.base import DistributorAdapter, LifecycleStatus
 
 logger = structlog.get_logger(__name__)
@@ -75,6 +76,50 @@ class ComponentFinderServer(McpToolServer):
         self._register_tools()
 
     def _register_tools(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="component.find_similar",
+                adapter_id="component_finder",
+                name="Find Similar Components",
+                description=(
+                    "Find parts like the one you are sizing whose sizes have a real source, "
+                    "to set a photo's scale (scale.resolve's similar_part) when nothing in "
+                    "the photo or its listing gives a size. Give what you know: family, "
+                    "package (QFN-56, SOIC-8), pin_count, series (STEMMA QT) or form_factor "
+                    "(Feather), and need in words. The library is searched first, then the "
+                    "distributors (a distributor part counts only when its parameters state "
+                    "a size). Only candidates whose length and width have a source "
+                    "(datasheet, standard, measurement, supplier, the person; never an "
+                    "estimate) are returned, each with why it counts as similar and its "
+                    "sizes' sources. Record an estimate built from one with method "
+                    "similar_part and its estimated_from_similar as source_ref, so a later "
+                    "correction to that part can find it. Reads only."
+                ),
+                capability="component_search",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "need": {"type": "string"},
+                        "family": {"type": "string"},
+                        "package": {"type": "string"},
+                        "pin_count": {"type": "integer"},
+                        "series": {"type": "string"},
+                        "form_factor": {"type": "string"},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5},
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "candidates": {"type": "array", "items": {"type": "object"}},
+                        "searched": {"type": "object"},
+                    },
+                },
+                phase=1,
+                resource_limits=_LIMITS,
+            ),
+            handler=self.handle_find_similar,
+        )
         self.register_tool(
             manifest=ToolManifest(
                 tool_id="component.find",
@@ -303,6 +348,128 @@ class ComponentFinderServer(McpToolServer):
                 }
             )
         return out, f"{len(out)} found"
+
+    async def handle_find_similar(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Similar parts with sourced sizes, the library first (FORGE-927, R5)."""
+        traits = {
+            k: str(arguments.get(k) or "").strip()
+            for k in ("family", "package", "series", "form_factor")
+        }
+        pins = arguments.get("pin_count")
+        pin_count = int(pins) if isinstance(pins, int) and not isinstance(pins, bool) else None
+        need = str(arguments.get("need") or "").strip()
+        query = " ".join(
+            v for v in (traits["package"], traits["series"], traits["form_factor"], need) if v
+        )
+        if not query and not traits["family"]:
+            raise ValueError(
+                "component.find_similar: give at least one of package, series, form_factor, "
+                "family or need"
+            )
+        limit = min(max(int(arguments.get("limit") or 5), 1), 20)
+        with tracer.start_as_current_span("component.find_similar") as span:
+            candidates: list[dict[str, Any]] = []
+            searched: dict[str, Any] = {"library": 0, "distributors": {}}
+            for hit in await self._library_hits(query or traits["family"], None, 20):
+                searched["library"] += 1
+                entry = await self._library_entry(str(hit.get("name") or ""))
+                if entry is None:
+                    continue
+                size = sourced_size(entry.get("specs") or {})
+                reasons = why_similar(
+                    entry,
+                    family=traits["family"],
+                    package=traits["package"],
+                    pin_count=pin_count,
+                    series=traits["series"],
+                    form_factor=traits["form_factor"],
+                )
+                if size is None or not reasons:
+                    continue
+                candidates.append(
+                    {
+                        "source": "library",
+                        "ref": entry.get("name"),
+                        "title": entry.get("title"),
+                        "mpn": entry.get("mpn") or "",
+                        **size,
+                        "why": reasons,
+                        "estimated_from_similar": f"library:{entry.get('name')}",
+                    }
+                )
+            if len(candidates) < limit and query:
+                candidates.extend(
+                    await self._similar_from_distributors(query, traits, searched, limit)
+                )
+            candidates.sort(key=lambda c: (c["source"] != "library", -len(c["why"])))
+            span.set_attribute("similar.candidates", len(candidates))
+            logger.info(
+                "component_find_similar",
+                query=query[:80],
+                candidates=len(candidates),
+                library_searched=searched["library"],
+            )
+            return {"candidates": candidates[:limit], "searched": searched}
+
+    async def _library_entry(self, name: str) -> dict[str, Any] | None:
+        if not name or self._library is None:
+            return None
+        try:
+            entry = await self._library.get_entry("component", name)
+        except Exception as exc:  # noqa: BLE001 - one unreadable entry is skipped
+            logger.debug("component_find_similar_entry_failed", name=name, error=str(exc))
+            return None
+        found = entry.get("entry") if isinstance(entry.get("entry"), dict) else entry
+        return dict(found) if isinstance(found, dict) else None
+
+    async def _similar_from_distributors(
+        self, query: str, traits: dict[str, str], searched: dict[str, Any], limit: int
+    ) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for adapter in self._adapters:
+            try:
+                parts = await asyncio.wait_for(
+                    adapter.search_parts(query, limit=3), _PER_ADAPTER_TIMEOUT_S
+                )
+            except Exception as exc:  # noqa: BLE001 - one distributor must not stop the rest
+                searched["distributors"][adapter.name] = f"failed: {exc}"[:200]
+                continue
+            searched["distributors"][adapter.name] = len(parts)
+            for part in parts[:3]:
+                try:
+                    detail = await asyncio.wait_for(
+                        adapter.get_part_details(part.mpn), _PER_ADAPTER_TIMEOUT_S
+                    )
+                except Exception:  # noqa: BLE001 - no detail, no size
+                    continue
+                size = distributor_size(getattr(detail, "specs", None) or {})
+                if size is None:
+                    continue
+                url = getattr(detail, "product_url", None) or ""
+                reasons = why_similar(
+                    {"name": part.mpn, "title": part.description, "mpn": part.mpn},
+                    package=traits["package"],
+                    series=traits["series"],
+                    form_factor=traits["form_factor"],
+                )
+                out.append(
+                    {
+                        "source": "distributor",
+                        "ref": f"{adapter.name}:{part.mpn}",
+                        "title": part.description,
+                        "mpn": part.mpn,
+                        **size,
+                        "sources": {
+                            "length": f"supplier: {adapter.name} parameters {url}".strip(),
+                            "width": f"supplier: {adapter.name} parameters {url}".strip(),
+                        },
+                        "why": reasons or ["matched the search"],
+                        "estimated_from_similar": f"{adapter.name}:{part.mpn}",
+                    }
+                )
+                if len(out) >= limit:
+                    return out
+        return out
 
     async def handle_find(self, arguments: dict[str, Any]) -> dict[str, Any]:
         need = str(arguments.get("need") or "").strip()
