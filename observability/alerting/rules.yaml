@@ -649,6 +649,19 @@ groups:
             approval_refused is a person, tool_not_found is a client calling
             something this build does not have.
 
+      - alert: McpOutputSchemaMismatch
+        expr: sum by (tool_id) (increase(metaforge_mcp_output_schema_mismatch_total[1h])) > 0
+        for: 5m
+        labels:
+          severity: info
+        annotations:
+          summary: "{{ $labels.tool_id }} returns results its output schema does not describe"
+          description: >-
+            The tool's declared output_schema and what its code returns have
+            drifted. Nothing failed (the check never blocks a call), but the
+            schema cannot be published as outputSchema until they agree: the
+            log event mcp_output_schema_mismatch names the first difference.
+
       - alert: McpApprovalsTimingOut
         expr: rate(metaforge_mcp_error_total{error_class="approval_refused"}[15m]) > 0
         for: 15m

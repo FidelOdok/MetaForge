@@ -302,7 +302,7 @@ class TestAllMetricsCombined:
         # + 6 CAD design loop runs, iterations, renders, verdicts, calls and spend.
         # + 3 CadQuery isolated script runner runs, durations and limit stops.
         # + 1 MCP project-scope decisions (account-confined MCP calls).
-        assert len(MetricsRegistry.all_metrics()) == 173
+        assert len(MetricsRegistry.all_metrics()) == 174  # + output-schema mismatch
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (

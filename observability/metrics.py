@@ -787,6 +787,12 @@ class MetricsRegistry:
         ),
         labels=["tool", "status"],
     )
+    MCP_OUTPUT_SCHEMA_MISMATCH_TOTAL = MetricDefinition(
+        name="metaforge_mcp_output_schema_mismatch_total",
+        type="counter",
+        description="Tool results that do not match the tool's declared output schema",
+        labels=["tool_id"],
+    )
     MCP_ERROR_TOTAL = MetricDefinition(
         name="metaforge_mcp_error_total",
         type="counter",
@@ -1851,6 +1857,7 @@ class MetricsRegistry:
             cls.MCP_TOOL_CALL_TOTAL,
             cls.MCP_TOOL_CALL_DURATION,
             cls.MCP_ERROR_TOTAL,
+            cls.MCP_OUTPUT_SCHEMA_MISMATCH_TOTAL,
             cls.MCP_ADAPTER_PROBE_TOTAL,
             cls.MCP_STANDING_PROMPT_TOTAL,
             cls.MCP_CODE_VERSION_CHECK_TOTAL,
@@ -2668,6 +2675,12 @@ class MetricsCollector:
                 1,
                 attributes={"tool_id": tool_id, "error_class": error_class, "client": client},
             )
+
+    def record_mcp_output_schema_mismatch(self, tool_id: str) -> None:
+        """One tool result that does not match its declared output schema."""
+        counter = self._instruments.get(MetricsRegistry.MCP_OUTPUT_SCHEMA_MISMATCH_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"tool_id": tool_id})
 
     def record_mcp_adapter_probe(self, adapter_id: str, reachable: bool) -> None:
         """Record the outcome of one adapter health probe."""

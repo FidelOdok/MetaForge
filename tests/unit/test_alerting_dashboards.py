@@ -148,7 +148,7 @@ class TestAlertingRules:
         # + 1 MCP project scope unavailable (McpProjectScopeUnavailable, FORGE-859).
         # + 1 MCP approval prompt answers not recorded (McpApprovalPromptAnswerNotRecorded).
         # + 1 component thread reads or adoptions failing (ComponentThreadFailing, FORGE-903).
-        assert len(rules) == 98
+        assert len(rules) == 99  # + McpOutputSchemaMismatch
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""

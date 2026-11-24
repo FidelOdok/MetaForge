@@ -338,6 +338,13 @@ gets them:
   `isError: true`, as the spec recommends for a tool failure. The reason is
   the result text, which is what a model reads, and the code and details
   are in `_meta["com.metaforge/error"]` (`code`, `legacyCode`, `data`).
+- `tools/list` does not publish `outputSchema` yet. Each tool's declared
+  `output_schema` is checked against its real results instead: a result
+  the schema does not describe is logged (`mcp_output_schema_mismatch`, with
+  the first difference) and counted
+  (`metaforge_mcp_output_schema_mismatch_total`), never blocked or changed.
+  A unit test keeps every declared schema valid JSON Schema with an object
+  at the top. Once the counter stays at zero, the schemas can be published.
 - Any other method's code moves out of the reserved range by 1000
   (`-32001` becomes `-31001`), with the original in `error.data.legacyCode`.
 - Resource not found is still `-32602`.
