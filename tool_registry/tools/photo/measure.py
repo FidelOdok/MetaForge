@@ -137,9 +137,150 @@ def _extent(values: np.ndarray[Any, Any]) -> tuple[float, float]:
     return start + float(full[0]), start + float(full[-1]) + 1.0
 
 
+def _shift_all(mask: np.ndarray[Any, Any], keep: bool) -> np.ndarray[Any, Any]:
+    """One 3 x 3 erosion (``keep`` False) or dilation (``keep`` True) step."""
+    padded = np.pad(mask, 1, constant_values=keep is False and False)
+    out = mask.copy()
+    h, w = mask.shape
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            window = padded[1 + dy : 1 + dy + h, 1 + dx : 1 + dx + w]
+            out = (out | window) if keep else (out & window)
+    return out
+
+
+def _component(mask: np.ndarray[Any, Any], seed: tuple[int, int]) -> np.ndarray[Any, Any]:
+    """The 4-connected piece of ``mask`` holding ``seed`` (or the largest, if it is off)."""
+    h, w = mask.shape
+    labels = np.zeros((h, w), dtype=np.int32)
+    sizes: list[int] = [0]
+    for start in zip(*np.nonzero(mask), strict=True):
+        if labels[start]:
+            continue
+        label = len(sizes)
+        labels[start] = label
+        stack = [start]
+        count = 0
+        while stack:
+            y, x = stack.pop()
+            count += 1
+            for ny, nx in ((y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)):
+                if 0 <= ny < h and 0 <= nx < w and mask[ny, nx] and not labels[ny, nx]:
+                    labels[ny, nx] = label
+                    stack.append((ny, nx))
+        sizes.append(count)
+    if len(sizes) == 1:
+        return mask
+    chosen = int(labels[seed]) or int(np.argmax(sizes))
+    return np.asarray(labels == chosen)
+
+
+def part_mask(crop: np.ndarray[Any, Any]) -> tuple[np.ndarray[Any, Any], float]:
+    """The part alone: foreground, opened to drop thin lines (grid paper, traces), the
+    piece at the box's centre, then grown back to its true edges within the foreground."""
+    mask, separation = foreground(crop)
+    radius = max(2, round(min(crop.shape) * 0.01))
+    opened = mask
+    for _ in range(radius):
+        opened = _shift_all(opened, keep=False)
+    if not opened.any():
+        return mask, separation
+    piece = _component(opened, (crop.shape[0] // 2, crop.shape[1] // 2))
+    # Grow back exactly as far as it was eroded: a solid part returns to its own edges,
+    # and a thin line crossing them gains no stub.
+    for _ in range(radius):
+        piece = _shift_all(piece, keep=True) & mask
+    return piece, separation
+
+
+def _hull(points: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
+    """Convex hull, counter-clockwise (Andrew's monotone chain)."""
+    pts = np.unique(points, axis=0)
+    if len(pts) < 3:
+        return pts
+    order = np.lexsort((pts[:, 1], pts[:, 0]))
+    pts = pts[order]
+
+    def half(seq: np.ndarray[Any, Any]) -> list[np.ndarray[Any, Any]]:
+        out: list[np.ndarray[Any, Any]] = []
+        for p in seq:
+            while len(out) >= 2:
+                (ax, ay), (bx, by) = out[-2], out[-1]
+                if (bx - ax) * (p[1] - ay) - (by - ay) * (p[0] - ax) > 0:
+                    break
+                out.pop()
+            out.append(p)
+        return out
+
+    lower, upper = half(pts), half(pts[::-1])
+    return np.array(lower[:-1] + upper[:-1])
+
+
+def min_area_rect(points: np.ndarray[Any, Any]) -> tuple[float, float, float, list[list[float]]]:
+    """``(length, width, angle_deg, corners)`` of the smallest rectangle around ``points``.
+
+    The rectangle's side lies along one of the convex hull's edges (rotating calipers),
+    so it finds a turned square's orientation, which principal axes cannot: a square's
+    spread is the same in every direction. Lengths count each edge pixel whole.
+    """
+    hull = _hull(points)
+    best: tuple[float, float, float, float, float, float, float] | None = None
+    for i in range(len(hull)):
+        edge = hull[(i + 1) % len(hull)] - hull[i]
+        norm = float(np.hypot(edge[0], edge[1]))
+        if norm == 0:
+            continue
+        ux, uy = edge / norm
+        along = hull @ np.array([ux, uy])
+        across = hull @ np.array([-uy, ux])
+        lo_a, hi_a, lo_c, hi_c = along.min(), along.max(), across.min(), across.max()
+        area = (hi_a - lo_a) * (hi_c - lo_c)
+        if best is None or area < best[0]:
+            best = (area, ux, uy, lo_a, hi_a, lo_c, hi_c)
+    assert best is not None
+    _area, ux, uy, lo_a, hi_a, lo_c, hi_c = best
+    size_a, size_c = hi_a - lo_a + 1.0, hi_c - lo_c + 1.0
+    u, v = np.array([ux, uy]), np.array([-uy, ux])
+    if size_c > size_a:  # length is the longer side
+        size_a, size_c, u, v = size_c, size_a, v, -u
+        lo_a, hi_a, lo_c, hi_c = (
+            float(np.min(hull @ u)), float(np.max(hull @ u)),
+            float(np.min(hull @ v)), float(np.max(hull @ v)),
+        )  # fmt: skip
+    corners = [
+        [float(c) for c in a * u + c2 * v]
+        for a, c2 in ((lo_a, lo_c), (hi_a, lo_c), (hi_a, hi_c), (lo_a, hi_c))
+    ]
+    angle = float(np.degrees(np.arctan2(u[1], u[0])))
+    if angle > 90:
+        angle -= 180
+    elif angle <= -90:
+        angle += 180
+    return float(size_a), float(size_c), angle, corners
+
+
+def outline(points: np.ndarray[Any, Any]) -> tuple[float, float, float, list[list[float]]]:
+    """``(length, width, angle_deg, corners)`` of the part's own four-cornered outline.
+
+    In an angled photo a rectangular part is a skewed quadrilateral, which no rectangle
+    fits: its corners are the hull points nearest the smallest enclosing rectangle's
+    corners, and its length and width the mean of each pair of opposite sides. In a top
+    view the quadrilateral is the rectangle.
+    """
+    rect_length, rect_width, angle, rect = min_area_rect(points)
+    hull = _hull(points)
+    if len(hull) < 4:
+        return rect_length, rect_width, angle, rect
+    quad = [hull[int(np.argmin(np.hypot(*(hull - np.array(c)).T)))] for c in rect]
+    sides = [float(np.hypot(*(quad[(i + 1) % 4] - quad[i]))) + 1.0 for i in range(4)]
+    first, second = (sides[0] + sides[2]) / 2, (sides[1] + sides[3]) / 2
+    length, width = max(first, second), min(first, second)
+    return length, width, angle, [[float(x), float(y)] for x, y in quad]
+
+
 def measure_body(grey: np.ndarray[Any, Any], region: dict[str, Any], notes: list[str]) -> Body:
     x0, y0, x1, y1 = _box(region, grey.shape)
-    mask, separation = foreground(grey[y0:y1, x0:x1])
+    mask, separation = part_mask(grey[y0:y1, x0:x1])
     share = float(mask.mean())
     if not 0.05 <= share <= 0.97:
         raise MeasureError(
@@ -148,28 +289,11 @@ def measure_body(grey: np.ndarray[Any, Any], region: dict[str, Any], notes: list
         )
     ys, xs = np.nonzero(mask)
     pts = np.column_stack([xs + x0 + 0.5, ys + y0 + 0.5])
-    centre = pts.mean(axis=0)
-    cov = np.cov((pts - centre).T)
-    values, vectors = np.linalg.eigh(cov)
-    major, minor = vectors[:, 1], vectors[:, 0]
-    along = (pts - centre) @ major
-    across = (pts - centre) @ minor
-    lo_a, hi_a = _extent(along)
-    lo_c, hi_c = _extent(across)
-    length, width = float(hi_a - lo_a), float(hi_c - lo_c)
-    angle = float(np.degrees(np.arctan2(major[1], major[0])))
-    if angle > 90:
-        angle -= 180
-    elif angle <= -90:
-        angle += 180
-    corners = [
-        list(centre + a * major + c * minor)
-        for a, c in ((lo_a, lo_c), (hi_a, lo_c), (hi_a, hi_c), (lo_a, hi_c))
-    ]
+    length, width, angle, corners = outline(pts)
     confidence = 0.5 + 0.45 * separation
     confidence *= _agreement(length, region.get("reader_length_px"), "body length", notes)
     confidence *= _agreement(width, region.get("reader_width_px"), "body width", notes)
-    return Body(length, width, angle, [[float(x), float(y)] for x, y in corners], confidence)
+    return Body(length, width, angle, corners, confidence)
 
 
 def _blob(

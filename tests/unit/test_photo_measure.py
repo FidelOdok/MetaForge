@@ -59,6 +59,27 @@ def test_the_body_is_measured_along_its_own_axes(angle: float) -> None:
     assert out["notes"] == []
 
 
+def test_a_turned_square_is_found_turned() -> None:
+    """A square's spread is the same in every direction, so its turn comes from its edges
+    (the RP2040 on LCSC's grid paper read as its upright bounding box before)."""
+    image, draw = _canvas()
+    draw.polygon(_rect(200, 150, 140, 140, 30.0), fill=30)
+    (body,) = measure(_grey(image), [{"kind": "body", "box": [100, 50, 200, 200]}])["regions"]
+    assert body["length_px"] == pytest.approx(140, abs=2.5)
+    assert body["width_px"] == pytest.approx(140, abs=2.5)
+    assert abs(body["angle_deg"]) in (pytest.approx(30, abs=1.5), pytest.approx(60, abs=1.5))
+
+
+def test_thin_lines_touching_the_part_are_not_part_of_it() -> None:
+    image, draw = _canvas()
+    for x in range(0, 400, 20):  # grid paper
+        draw.line([(x, 0), (x, 299)], fill=90, width=1)
+    draw.rectangle([120, 100, 279, 199], fill=30)  # 160 x 100
+    (body,) = measure(_grey(image), [{"kind": "body", "box": [90, 80, 220, 140]}])["regions"]
+    assert body["length_px"] == pytest.approx(160, abs=1.5)
+    assert body["width_px"] == pytest.approx(100, abs=1.5)
+
+
 def test_a_reader_who_disagrees_lowers_confidence_and_is_noted() -> None:
     image, draw = _canvas()
     draw.rectangle([100, 100, 299, 199], fill=30)
