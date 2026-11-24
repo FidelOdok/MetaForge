@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import hashlib
 import inspect
 import json
 import os
@@ -511,6 +512,9 @@ class UnifiedMcpServer:
         self._client_info: dict[str, Any] | None = None
         self._client_protocol: str | None = None
         self._client_capabilities: dict[str, Any] = {}
+        # FORGE-930: the digest of the tool set every call result carries.
+        self._tool_set_digest: str | None = None
+        self._tool_set_task: asyncio.Task[None] | None = None
         self._negotiated_protocol = self._DEFAULT_PROTOCOL_VERSION
         self._start_time = datetime.now(UTC)
         # Held only so the process shutdown path can call close_all() and
@@ -1980,7 +1984,7 @@ class UnifiedMcpServer:
         # Whatever the client cannot see, it should at least be able to ask
         # about. `_meta` is the spec's own extension point and clients that
         # do not read it are no worse off than before.
-        meta: dict[str, Any] = {}
+        meta: dict[str, Any] = {"metaforge/toolSet": self._remember_tool_set(legacy)}
         if unavailable := legacy.get("unavailable_adapters"):
             meta["unavailableAdapters"] = unavailable
         if allowed is not None:
@@ -2153,28 +2157,42 @@ class UnifiedMcpServer:
         # text, which a model would have to read as tokens.
         result, images = split_image_content(result)
         content: list[dict[str, Any]] = [{"type": "text", "text": json.dumps(result)}, *images]
+        # FORGE-930 (R10): notices are the server's, not the tool's. Each goes into
+        # `_meta["metaforge/notices"]` as {kind, text}; the text blocks below stay for a
+        # client whose model reads only content, unless the client declared it reads
+        # the structured list (capabilities.experimental["metaforge/notices"]).
+        notices: list[dict[str, Any]] = []
+        quiet = self._reads_structured_notices()
         if held is not None:
             # A second block rather than text merged into the first: the first
             # is the tool's own output and belongs to its schema. But `_meta`
             # alone was not enough -- a model reads content, and information
             # that is technically present and never looked at is how this
             # stayed invisible in the first place.
-            content.append({"type": "text", "text": held.as_sentence()})
+            notices.append({"kind": "held", "text": held.as_sentence()})
         # FORGE-780: a held call of this session that has since been approved.
         decided = await self._approval_decided_notice()
         if decided is not None:
-            content.append({"type": "text", "text": decided})
+            notices.append({"kind": "approval_decided", "text": decided})
         # FORGE-783: this session's background jobs that have finished since.
         jobs = self._job_notice(str(tool_name))
         if jobs is not None:
-            content.append({"type": "text", "text": jobs[0]})
+            notices.append({"kind": "jobs_finished", "text": jobs[0]})
             meta["finishedJobs"] = jobs[1]
         # FORGE-724: approvals the person has not heard of, said once.
         notice = await self._approval_notice(str(tool_name))
         if notice is not None:
-            content.append({"type": "text", "text": notice[0]})
+            notices.append({"kind": "approvals_waiting", "text": notice[0]})
             meta["pendingApprovals"] = notice[1]
-        return {
+        if self._tool_set_digest:
+            meta["metaforge/toolSet"] = self._tool_set_digest
+        else:
+            self._start_tool_set_digest()
+        if notices:
+            meta["metaforge/notices"] = notices
+            if not quiet:
+                content.extend({"type": "text", "text": n["text"]} for n in notices)
+        out: dict[str, Any] = {
             "content": content,
             "isError": False,
             # The reference lives in `_meta` rather than inside the text
@@ -2184,6 +2202,59 @@ class UnifiedMcpServer:
             # reason (FORGE-371).
             "_meta": meta,
         }
+        if isinstance(result, dict):
+            # FORGE-930 (R10): the tool's own output as structured content (MCP
+            # 2025-06-18), so a client parses this rather than text that other
+            # blocks may be joined to.
+            out["structuredContent"] = result
+        return out
+
+    def _remember_tool_set(self, legacy: dict[str, Any]) -> str:
+        """A digest of every tool this server has (ids and input schemas), for call results.
+
+        FORGE-930 (R10): a client lists tools once and keeps the list, so a tool added
+        by a deploy (web.extract) stayed invisible to it. Every call result now carries
+        the digest of the current set; a client whose cached list has another digest
+        lists again. It is taken over all tools, before a profile filters them, so
+        every connection of one server sees the same digest.
+        """
+        rows = [
+            (
+                str(t.get("tool_id") or t.get("name") or ""),
+                t.get("input_schema") or t.get("inputSchema") or {},
+            )
+            for t in legacy.get("tools", [])
+        ]
+        canonical = json.dumps(sorted(rows, key=lambda r: r[0]), sort_keys=True, default=str)
+        digest = hashlib.sha256(canonical.encode()).hexdigest()[:16]
+        self._tool_set_digest = digest
+        return digest
+
+    def _start_tool_set_digest(self) -> None:
+        """Work the digest out once in the background, so calls carry it from then on."""
+        if self._tool_set_task is not None:
+            return
+
+        async def work() -> None:
+            try:
+                self._remember_tool_set(await self._tool_list({}))
+            except Exception as exc:  # noqa: BLE001 - a digest must never fail a call
+                logger.debug("tool_set_digest_unavailable", error=str(exc))
+
+        self._tool_set_task = asyncio.create_task(work())
+
+    def _reads_structured_notices(self) -> bool:
+        """Whether the client said it reads notices from ``_meta`` (no text blocks then).
+
+        A 2026-07-28 request carries its client's capabilities itself; an older
+        session's are the ones its ``initialize`` gave.
+        """
+        from mcp_core.protocol_versions import current_modern_request
+
+        modern = current_modern_request()
+        caps = modern.client_capabilities if modern is not None else self._client_capabilities
+        experimental = (caps or {}).get("experimental")
+        return isinstance(experimental, dict) and bool(experimental.get("metaforge/notices"))
 
     # ------------------------------------------------------------------
     # Method handlers — legacy MetaForge dialect

@@ -644,6 +644,28 @@ started it. Each state change is a `tool_job_state` log event and a count of
 is generic: another slow tool adopts it by returning
 `JobRunner.reply(...)` from `JobRunner.start(...)`.
 
+### Result structure: structured content, notices and the tool set
+
+A `tools/call` result carries the tool's own output twice: as JSON text in its first
+content block, and as `structuredContent` (MCP 2025-06-18), which a client should parse
+in preference to text, since a client may join every text block into one.
+
+What the server adds to a result is a notice, never part of the tool's output. Each one
+is in `_meta["metaforge/notices"]` as `{kind, text}`, where `kind` is `held` (this call
+was held for approval), `approval_decided` (a held call of this session was decided),
+`jobs_finished` (with `_meta.finishedJobs`) or `approvals_waiting` (with
+`_meta.pendingApprovals`). By default each notice is also a further text block, for a
+client whose model reads only content. A client that reads the structured list declares
+`capabilities.experimental["metaforge/notices"]: true` at `initialize` (or in a
+2026-07-28 request's client capabilities) and then gets no notice text blocks: the
+first block is the tool's JSON alone.
+
+Every `tools/list` and every call result carries `_meta["metaforge/toolSet"]`, a
+16-character digest of every tool the server has (ids and input schemas), taken before
+a profile filters the list. A client that cached its tool list compares the digest and
+lists again when it differs, so a tool a deploy added is not missed. A server that has
+not listed yet works the digest out in the background on its first call.
+
 ### 4.4 `tool/error` — Error Response
 
 > **On the MCP dialect (`tools/call`), a tool that ran and refused is not an
