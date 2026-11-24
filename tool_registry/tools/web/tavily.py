@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from typing import Any
 
 import httpx
 import structlog
+from pydantic import BaseModel
 
 from observability.tracing import get_tracer
 from tool_registry.tools.distributors.rate_limiter import TokenBucketRateLimiter
@@ -194,3 +196,104 @@ def select_search_provider() -> WebSearchProvider | None:
 
         return BraveSearchProvider()
     return None
+
+
+# ---------------------------------------------------------------------------
+# Tavily Extract: a fallback reader for pages web.fetch cannot open
+# ---------------------------------------------------------------------------
+
+_EXTRACT_URL = "https://api.tavily.com/extract"
+
+#: How long an extracted text is kept, so reading further into it is not billed again.
+_EXTRACT_TTL_S = 900.0
+_EXTRACT_CACHE_MAX = 32
+
+
+class ExtractedPage(BaseModel):
+    """One page's text as Tavily Extract returned it."""
+
+    url: str
+    text: str
+    depth: str
+
+
+class TavilyExtractor:
+    """Reads a page's text through Tavily Extract (``POST /extract``).
+
+    Tavily fetches the page from its own side, so it reads sites that refuse or
+    never answer MetaForge's own fetcher (st.com, mouser.com, analog.com), PDFs
+    included. The text is a third party's reading of the page: the caller labels
+    it so, and checks revision and part number as for any copy.
+    """
+
+    def __init__(
+        self,
+        client: httpx.AsyncClient | None = None,
+        api_key: str | None = None,
+    ) -> None:
+        self._client = client or httpx.AsyncClient(timeout=60.0)
+        self._owns_client = client is None
+        self._api_key = api_key or os.environ.get("TAVILY_API_KEY", "")
+        self._rate_limiter = TokenBucketRateLimiter(rate=_RATE_PER_SECOND, burst=2)
+        self._cache: dict[tuple[str, str], tuple[float, ExtractedPage]] = {}
+
+    async def extract(self, url: str, *, depth: str = "basic") -> ExtractedPage:
+        """The page's text, or raise :class:`WebSearchError` when it could not be read."""
+        key = (url, depth)
+        now = time.monotonic()
+        hit = self._cache.get(key)
+        if hit is not None and now - hit[0] < _EXTRACT_TTL_S:
+            return hit[1]
+        with tracer.start_as_current_span("web.tavily.extract") as span:
+            span.set_attribute("web.extract_depth", depth)
+            if not self._api_key:
+                raise WebSearchError("web.extract is not configured (TAVILY_API_KEY is unset)")
+            await self._rate_limiter.acquire()
+            try:
+                resp = await self._client.post(
+                    _EXTRACT_URL,
+                    json={"urls": [url], "extract_depth": depth, "format": "text"},
+                    headers={
+                        "Authorization": f"Bearer {self._api_key}",
+                        "Content-Type": "application/json",
+                        "User-Agent": _USER_AGENT,
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001 - transport failure
+                span.record_exception(exc)
+                raise WebSearchError(f"Tavily Extract could not be reached: {exc}") from exc
+            if resp.status_code in (401, 403):
+                raise WebSearchError(f"Tavily refused the key (HTTP {resp.status_code})")
+            if resp.status_code == 432:
+                raise WebSearchError("Tavily plan limit reached (HTTP 432)")
+            if resp.status_code == 429:
+                raise WebSearchError("rate limited by Tavily (HTTP 429); try again shortly")
+            try:
+                resp.raise_for_status()
+                payload = dict(resp.json())
+            except Exception as exc:  # noqa: BLE001 - 4xx/5xx or bad JSON
+                span.record_exception(exc)
+                raise WebSearchError(f"Tavily Extract failed: {exc}") from exc
+            results = [r for r in payload.get("results") or [] if isinstance(r, dict)]
+            text = str((results[0] if results else {}).get("raw_content") or "").strip()
+            if not text:
+                failed = [f for f in payload.get("failed_results") or [] if isinstance(f, dict)]
+                why = str((failed[0] if failed else {}).get("error") or "no text came back")
+                logger.warning("tavily_extract_empty", url=url[:200], reason=why[:200])
+                raise WebSearchError(f"Tavily Extract could not read that page ({why})")
+            page = ExtractedPage(url=str(results[0].get("url") or url), text=text, depth=depth)
+            span.set_attribute("web.extract_chars", len(text))
+            logger.info("tavily_extract", url=url[:200], chars=len(text), depth=depth)
+        if len(self._cache) >= _EXTRACT_CACHE_MAX:
+            self._cache.pop(min(self._cache, key=lambda k: self._cache[k][0]))
+        self._cache[key] = (now, page)
+        return page
+
+    async def close(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
+
+
+def select_extractor() -> TavilyExtractor | None:
+    """Tavily Extract when ``TAVILY_API_KEY`` is set, whichever provider web.search uses."""
+    return TavilyExtractor() if os.environ.get("TAVILY_API_KEY") else None

@@ -1318,12 +1318,15 @@ async def bootstrap_tool_registry(
             # WEB_SEARCH_PROVIDER picks between them; see WebMcpServer).
             try:
                 from tool_registry.tools.web.mcp_adapter import WebMcpServer
-                from tool_registry.tools.web.tavily import select_search_provider
+                from tool_registry.tools.web.tavily import (
+                    select_extractor,
+                    select_search_provider,
+                )
 
                 provider = select_search_provider()
                 # FORGE-899: component.find borrows the same provider.
                 _web_search_provider = provider
-                server = WebMcpServer(provider=provider)
+                server = WebMcpServer(provider=provider, extractor=select_extractor())
                 await registry.register_adapter(server)
                 registered.append("web")
                 logger.info(

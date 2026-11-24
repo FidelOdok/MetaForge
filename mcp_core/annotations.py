@@ -136,6 +136,7 @@ READ_ONLY: frozenset[str] = frozenset(
         "knowledge.search",
         "memory.list_insights",
         "memory.retrieve_similar_experience",
+        "web.extract",
         "web.fetch",
         "web.search",
         # Status of a Meshy job: a GET against Meshy, nothing spent or written.
@@ -813,6 +814,7 @@ OPEN_WORLD: frozenset[str] = frozenset(
         "nexar.get_pricing",
         "nexar.get_availability",
         "knowledge.ingest",
+        "web.extract",
         "web.fetch",
         "web.search",
         # FORGE-711: the SimReady catalogue and packages live on GitHub and
