@@ -14,7 +14,7 @@ from observability.tracing import get_tracer
 from tool_registry.mcp_server.handlers import ResourceLimits, ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
 from tool_registry.tools.photo.measure import load_grey, measure
-from tool_registry.tools.photo.scale import AXES, ScaleError, resolve
+from tool_registry.tools.photo.scale import AXES, ScaleError, combine_views, resolve
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("tool_registry.tools.photo.adapter")
@@ -58,6 +58,15 @@ class PhotoServer(McpToolServer):
                     "properties": {
                         "image_ref": {"type": "string"},
                         "view": {"enum": ["top", "side", "angled", "bottom", "unclear"]},
+                        "views": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                            "description": "Several photos of one part, each a reading "
+                            "with its own image_ref, view and references. Each is resolved "
+                            "on its own scale, then merged per axis: agreeing views (within "
+                            "2%) are averaged with more confidence; disagreeing ones keep "
+                            "the most confident reading, lower its confidence and say both.",
+                        },
                         "body_px": {
                             "type": "object",
                             "description": (
@@ -291,7 +300,11 @@ class PhotoServer(McpToolServer):
     async def scale_resolve(self, arguments: dict[str, Any]) -> dict[str, Any]:
         with tracer.start_as_current_span("scale.resolve") as span:
             try:
-                result = resolve(arguments)
+                result = (
+                    combine_views(arguments["views"])
+                    if "views" in arguments
+                    else resolve(arguments)
+                )
             except ScaleError as exc:
                 raise ValueError(f"scale.resolve: {exc}") from exc
             span.set_attribute("scale.status", result["status"])

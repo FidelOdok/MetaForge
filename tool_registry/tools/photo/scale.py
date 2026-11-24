@@ -299,6 +299,25 @@ def resolve(request: dict[str, Any]) -> dict[str, Any]:
                 "probably too small (foreshortened); a scale along it or a top view fixes it"
             )
 
+    # A side view shows the height in the same plane as the side it looks along, so
+    # the height may reuse that side's scale, flagged like the width above.
+    height_px = body_px.get("height") if isinstance(body_px.get("height"), dict) else {}
+    if view == "side" and "height" not in out.sizes and _positive(height_px.get("px")):
+        side = next((a for a in PLANE if a in scales), None)
+        if side is not None:
+            value = float(height_px["px"]) / scales[side]
+            reused = Candidate(
+                "photo",
+                value,
+                f"side view: reuses the {side} side's photo scale ({scales[side]:.2f} px/mm)",
+                height_px.get("image_ref") or image_ref,
+                scales[side],
+            )
+            out.sizes["height"] = _entry(reused, 0.45, [])
+            out.sizes["height"]["reused_scale"] = True
+            if "a height" in " ".join(out.needs):
+                out.needs = [n for n in out.needs if not n.startswith("a height")]
+
     # Pin pitches, snapped to a standard pitch only when close.
     for pitch in request.get("pitches_px") or []:
         axis = str(pitch.get("axis") or "")
@@ -337,3 +356,79 @@ def resolve(request: dict[str, Any]) -> dict[str, Any]:
             "similar part"
         )
     return out.as_dict()
+
+
+#: Views agreeing within this fraction on an axis are one reading, averaged.
+VIEW_AGREEMENT = 0.02
+
+
+def combine_views(views: list[dict[str, Any]]) -> dict[str, Any]:
+    """Several photos of one part: each resolved on its own scale, then merged per axis.
+
+    A top photo gives length and width, a side photo the height, and a second view of
+    the same side checks the first. Views that agree within :data:`VIEW_AGREEMENT` are
+    averaged by confidence, and the confidence rises with each agreeing view; views
+    that disagree keep the most confident reading, lower its confidence and say both
+    readings, never averaging a disagreement away.
+    """
+    if not isinstance(views, list) or not views:
+        raise ScaleError("views is a list of readings, one per photo")
+    per_view = []
+    for i, view in enumerate(views):
+        if not isinstance(view, dict):
+            raise ScaleError(f"views[{i}] must be an object")
+        per_view.append(resolve(view))
+    sizes: dict[str, dict[str, Any]] = {}
+    warnings: list[str] = []
+    for i, result in enumerate(per_view):
+        warnings.extend(f"view {i + 1}: {w}" for w in result["warnings"])
+    for axis in ("length", "width", "height"):
+        found = [(i, r["sizes"][axis]) for i, r in enumerate(per_view) if axis in r["sizes"]]
+        if not found:
+            continue
+        values = [float(e["value"]) for _i, e in found]
+        weights = [float(e.get("confidence") or 0.05) for _i, e in found]
+        refs = sorted({str(e.get("image_ref")) for _i, e in found if e.get("image_ref")})
+        mean = sum(v * w for v, w in zip(values, weights, strict=True)) / sum(weights)
+        spread = (max(values) - min(values)) / mean if len(values) > 1 else 0.0
+        best_i, best = max(found, key=lambda pair: float(pair[1].get("confidence") or 0))
+        entry = dict(best)
+        if len(found) == 1:
+            entry["views"] = [best_i + 1]
+        elif spread <= VIEW_AGREEMENT:
+            entry["value"] = round(mean, 3)
+            entry["confidence"] = round(min(0.95, max(weights) + 0.05 * (len(found) - 1)), 2)
+            entry["views"] = [i + 1 for i, _e in found]
+            entry["agreement"] = round(spread, 4)
+        else:
+            entry["confidence"] = round(max(0.05, float(best.get("confidence") or 0) * 0.7), 2)
+            entry["views"] = [best_i + 1]
+            readings = ", ".join(f"{float(e['value']):.2f} mm (view {i + 1})" for i, e in found)
+            warnings.append(
+                f"the views disagree on the {axis} by {spread:.1%}: {readings}; kept view "
+                f"{best_i + 1}, the most confident, at lower confidence"
+            )
+        if refs:
+            entry["image_refs"] = refs
+        sizes[axis] = entry
+    needs = []
+    if "length" not in sizes or "width" not in sizes:
+        missing = "length" if "length" not in sizes else "width"
+        needs.append(f"a {missing}: a printed {missing}, a similar part or a scale along it")
+    if "height" not in sizes:
+        needs.append(
+            "a height: a side photo with a scale, a printed height, a package code or a "
+            "similar part"
+        )
+    return {
+        "status": "resolved" if not needs else ("partial" if sizes else "needs"),
+        "sizes": sizes,
+        "warnings": warnings,
+        "needs": needs,
+        "views": [
+            {"view": i + 1, "status": r["status"], "sizes": sorted(r["sizes"])}
+            for i, r in enumerate(per_view)
+        ],
+        "rejected_quotes": [q for r in per_view for q in r["rejected_quotes"]],
+        "pitches": [p for r in per_view for p in r["pitches"]],
+    }

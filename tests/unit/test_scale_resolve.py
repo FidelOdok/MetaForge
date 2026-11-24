@@ -134,3 +134,55 @@ async def test_the_tool_answers_and_is_registered() -> None:
     assert server.tool_ids == ["scale.resolve", "photo.measure", "photo.rectify"]
     out = await server.scale_resolve(PHOTO)
     assert out["sizes"]["length"]["value"] == pytest.approx(25.4)
+
+
+TOP: dict[str, Any] = {
+    "image_ref": "image:" + "a" * 64,
+    "view": "top",
+    "body_px": {"length": {"px": 400.0}, "width": {"px": 280.0}},
+    "references": [{"kind": "header_2.54", "axis": "length", "span_px": 400.0, "count": 10}],
+}
+SIDE: dict[str, Any] = {
+    "image_ref": "image:" + "b" * 64,
+    "view": "side",
+    # A different photo, a different scale: the same 25.4 mm header over 300 px.
+    "body_px": {"length": {"px": 300.0}, "height": {"px": 37.8}},
+    "references": [{"kind": "header_2.54", "axis": "length", "span_px": 300.0, "count": 10}],
+}
+
+
+def test_a_side_view_sizes_the_height_with_its_own_scale() -> None:
+    out = resolve(SIDE)
+    height = out["sizes"]["height"]
+    assert height["value"] == pytest.approx(3.2, abs=0.01) and height["reused_scale"]
+    assert not any(n.startswith("a height") for n in out["needs"])
+
+
+def test_a_top_and_a_side_photo_resolve_the_whole_part() -> None:
+    from tool_registry.tools.photo.scale import combine_views
+
+    out = combine_views([TOP, SIDE])
+    assert out["status"] == "resolved" and out["needs"] == []
+    length = out["sizes"]["length"]
+    # Both views agree on the length: averaged, and more confident than either alone.
+    assert length["value"] == pytest.approx(25.4) and length["views"] == [1, 2]
+    assert length["confidence"] > resolve(TOP)["sizes"]["length"]["confidence"]
+    assert len(length["image_refs"]) == 2
+    assert out["sizes"]["width"]["views"] == [1] and out["sizes"]["height"]["views"] == [2]
+
+
+def test_views_that_disagree_are_not_averaged() -> None:
+    from tool_registry.tools.photo.scale import combine_views
+
+    off = {**SIDE, "references": [{**SIDE["references"][0], "span_px": 280.0}]}
+    out = combine_views([TOP, off])
+    assert out["sizes"]["length"]["value"] == pytest.approx(25.4)
+    assert out["sizes"]["length"]["views"] == [1]
+    assert "disagree on the length by 6.9%" in out["warnings"][-1]
+
+
+def test_views_must_be_a_list_of_readings() -> None:
+    from tool_registry.tools.photo.scale import combine_views
+
+    with pytest.raises(ScaleError, match="one per photo"):
+        combine_views([])
