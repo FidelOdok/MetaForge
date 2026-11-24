@@ -1,0 +1,57 @@
+{
+  "_about": "Objects of known size that set a photo's scale (FORGE-926, R4). Each has a source; a value nobody can cite stays out. Add an object here with its source, or pass one per call as scale_objects.",
+  "objects": [
+    {
+      "kind": "header_2.54",
+      "title": "0.1 in pin header, pin pitch",
+      "measure": "pitch",
+      "size_mm": 2.54,
+      "source_kind": "standard",
+      "source_ref": "0.100 in (2.54 mm) pitch pin header, e.g. Samtec TSW series (0.100 in pitch)"
+    },
+    {
+      "kind": "jst_ph",
+      "title": "JST PH connector, pin pitch",
+      "measure": "pitch",
+      "size_mm": 2.0,
+      "source_kind": "manufacturer_spec",
+      "source_ref": "JST PH series catalogue: 2.0 mm pitch"
+    },
+    {
+      "kind": "jst_xh",
+      "title": "JST XH connector, pin pitch",
+      "measure": "pitch",
+      "size_mm": 2.5,
+      "source_kind": "manufacturer_spec",
+      "source_ref": "JST XH series catalogue: 2.5 mm pitch"
+    },
+    {
+      "kind": "jst_sh",
+      "title": "JST SH connector (Qwiic, STEMMA QT), pin pitch",
+      "measure": "pitch",
+      "size_mm": 1.0,
+      "source_kind": "manufacturer_spec",
+      "source_ref": "JST SH series catalogue: 1.0 mm pitch"
+    },
+    {
+      "kind": "jst_gh",
+      "title": "JST GH connector, pin pitch",
+      "measure": "pitch",
+      "size_mm": 1.25,
+      "source_kind": "manufacturer_spec",
+      "source_ref": "JST GH series catalogue: 1.25 mm pitch"
+    },
+    {
+      "kind": "jst_zh",
+      "title": "JST ZH connector, pin pitch",
+      "measure": "pitch",
+      "size_mm": 1.5,
+      "source_kind": "manufacturer_spec",
+      "source_ref": "JST ZH series catalogue: 1.5 mm pitch"
+    }
+  ],
+  "standard_pitches_mm": {
+    "values": [0.4, 0.5, 0.65, 0.8, 1.0, 1.25, 1.27, 1.5, 2.0, 2.5, 2.54],
+    "source_ref": "JEDEC lead pitches (0.4, 0.5, 0.65, 0.8, 1.27 mm) and the connector pitches above"
+  }
+}

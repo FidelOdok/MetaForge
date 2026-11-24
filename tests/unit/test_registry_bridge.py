@@ -71,7 +71,8 @@ class TestRegistryMcpBridge:
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
         # +1: web.fetch is registered without a search key (it needs none).
-        assert len(tools) == 129
+        # +1: image.fetch is registered without a key too (FORGE-923).
+        assert len(tools) == 133  # + photo.rectify
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""

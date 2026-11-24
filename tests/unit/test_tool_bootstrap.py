@@ -105,7 +105,7 @@ class TestBootstrapToolRegistry:
         assert isinstance(registry, ToolRegistry)
         adapters = registry.list_adapters()
         # +1: web registers without a search key now (web.fetch needs none).
-        assert len(adapters) == 22
+        assert len(adapters) == 23
         adapter_ids = {a.adapter_id for a in adapters}
         assert adapter_ids == {
             "cadquery",
@@ -116,6 +116,7 @@ class TestBootstrapToolRegistry:
             "omniverse_usd",
             "gazebo",
             "isaac_sim",
+            "photo",
             "power",
             "spice",
             "cost",
@@ -138,7 +139,7 @@ class TestBootstrapToolRegistry:
         registry = ToolRegistry()
         result = await bootstrap_tool_registry(registry=registry)
         assert result is registry
-        assert len(registry.list_adapters()) == 22
+        assert len(registry.list_adapters()) == 23
 
     async def test_bootstrap_specific_adapters(self):
         """Bootstrap only registers specified adapter IDs."""
@@ -270,7 +271,8 @@ class TestBootstrapToolRegistry:
         # + cadquery.dfm_measure (C3D slice 6),
         # + render.model_views (the browser render adapter).
         # +1: web.fetch, registered without a search key.
-        assert len(tools) == 129
+        # +1: image.fetch is registered without a key (FORGE-923).
+        assert len(tools) == 133  # + photo.rectify
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""
